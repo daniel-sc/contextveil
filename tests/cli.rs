@@ -74,9 +74,21 @@ fn invalid_usage_exits_two_without_stdout() {
 #[test]
 fn unimplemented_commands_fail_loudly() {
     // Until their tasks land, the public commands must not imply protection.
-    for command in ["setup", "status", "doctor"] {
+    for command in ["status", "doctor"] {
         let output = secretsieve(&[command]);
         assert_ne!(output.status.code(), Some(0));
         assert!(stderr(&output).contains("not implemented"));
     }
+}
+
+#[test]
+fn setup_refuses_to_run_without_a_terminal() {
+    // `CLI-002`: a non-interactive invocation fails clearly and changes nothing.
+    // The test harness never attaches a TTY, so this is the non-interactive case.
+    let output = secretsieve(&["setup"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stdout(&output).is_empty());
+    let message = stderr(&output);
+    assert!(message.contains("interactive terminal"));
+    assert!(message.contains("No file was changed"));
 }

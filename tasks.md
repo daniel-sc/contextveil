@@ -277,7 +277,7 @@ resolver framework yet.
 - `RED-010` needs no code: no path maps a placeholder back to a source value;
 - `mise run check` passes.
 
-### [ ] T040: Implement Unified Interactive Setup
+### [x] T040: Implement Unified Interactive Setup
 
 **Depends on:** `T020`, `T030`
 
@@ -314,6 +314,49 @@ resolver framework yet.
 
 **Contributes to:** `CLI-001`, `CLI-002`, `CLI-004`, `CFG-003`, `CFG-014`,
 `CFG-015`, `SET-001` through `SET-014`, `TST-003`.
+
+**Evidence:**
+
+- `src/setup/mod.rs` runs the four `SET-001` phases in order after preflight
+  parsing of both files; each configuration phase lists existing entries as
+  selected, offers `[s]kip` as the no-change path, and commits only on explicit
+  confirmation;
+- `src/cli.rs` enforces the `CLI-002` TTY requirement at the process boundary
+  and fails with exit code 2 and no writes when invoked non-interactively, which
+  keeps the workflow itself drivable by a scripted transcript in tests;
+- `src/setup/discovery.rs` implements recursive project discovery and the
+  bounded global probe, excluding `.git` and 29 maintained dependency, vendor,
+  and build directories, never following file or directory symlinks, and never
+  reading FIFOs, devices, or sockets; non-UTF-8 paths are reported safely and
+  skipped (`LIM-022`);
+- `src/setup/vocabulary.rs` implements the exact `SET-006` gating vocabulary with
+  ASCII case folding, token and compact-suffix matching, and advisory-only value
+  signals that rank but never introduce a candidate;
+- `src/setup/preview.rs` implements the `SET-010` masking table over Unicode
+  scalar values, escapes after selection, and derives no fingerprint;
+- `src/setup/collision.rs` counts non-overlapping byte occurrences under the
+  project root using the discovery exclusions, excludes the candidate's own
+  dotenv file, includes binary and ignored files, and reports sanitized relative
+  filenames with counts only;
+- `src/setup/write.rs` renders configuration through the TOML serializer, writes
+  through a temporary file plus rename, creates global files and directories
+  user-only (`CFG-001`), and skips writing when content is unchanged;
+- wildcard enrollment requires an extra confirmation (`SET-009`), an unresolved
+  manual source requires confirmation (`SET-005`), a colliding candidate is
+  visible but unselected (`SET-007`) while remaining enrollable (`SET-008`), and
+  an enrolled malformed source blocks saving until it is repaired or removed
+  (`SET-013`);
+- `tests/setup.rs` covers 23 isolated filesystem cases: first run, idempotent
+  rerun, cancellation and end-of-input with no writes, byte-for-byte
+  preservation of an invalid config, project-root selection, discovery gating,
+  collisions and override, wildcard and unresolved confirmations, preserved and
+  deliberately removed enrollment, malformed-source blocking, non-UTF-8 paths,
+  terminal-escape neutralization, duplicate-key warnings, and a project-phase
+  failure that keeps the committed global phase;
+- `src/setup/integrations.rs` is the phase-three extension point. It reports
+  honestly that no integration installer exists yet; `T050` fills it in with
+  concrete Claude code rather than a plugin framework;
+- `mise run check` passes.
 
 ## Production Integration
 

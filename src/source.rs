@@ -166,6 +166,13 @@ impl Environment {
         self.get(name).and_then(OsStr::to_str)
     }
 
+    /// Every UTF-8 variable name in the snapshot, in unspecified order.
+    ///
+    /// Setup inspects these for name-gated candidates (`SET-002`).
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.variables.keys().filter_map(|name| name.to_str())
+    }
+
     /// The current user's home directory, when known.
     pub fn home(&self) -> Option<PathBuf> {
         self.get_str("HOME")

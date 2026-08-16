@@ -15,6 +15,7 @@ pub mod redact;
 pub mod registry;
 pub mod sanitize;
 pub mod secret;
+pub mod setup;
 pub mod source;
 
 #[cfg(any(test, feature = "testing"))]

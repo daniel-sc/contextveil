@@ -139,7 +139,7 @@ pub fn run(
             let _ = writeln!(out, "secretsieve {}", crate::VERSION);
             Exit::Ok
         }
-        Ok(Command::Setup) => unimplemented_command("setup", err),
+        Ok(Command::Setup) => run_setup(err),
         Ok(Command::Status) => unimplemented_command("status", err),
         Ok(Command::Doctor) => unimplemented_command("doctor", err),
         Ok(Command::Hook(Harness::Claude)) => run_claude_hook(input, out),
@@ -152,6 +152,31 @@ pub fn run(
             Exit::Usage
         }
     }
+}
+
+/// Runs the interactive setup workflow.
+///
+/// `CLI-002`: setup requires an interactive TTY and must fail clearly, without
+/// changing any file, when invoked non-interactively. The check belongs here,
+/// at the process boundary, so the workflow itself stays drivable by tests.
+fn run_setup(err: &mut dyn Write) -> Exit {
+    use std::io::IsTerminal;
+
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        let _ = writeln!(
+            err,
+            "secretsieve: `setup` requires an interactive terminal. No file was changed."
+        );
+        return Exit::Usage;
+    }
+
+    let environment = Environment::from_process();
+    let current_directory =
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mut terminal = crate::setup::ui::Terminal::new(std::io::stdin(), std::io::stdout());
+    let exit = crate::setup::run(&mut terminal, &environment, &current_directory);
+    terminal.finish();
+    exit
 }
 
 /// Runs the hidden Claude `PostToolUse` entry point.
