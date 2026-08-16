@@ -44,7 +44,13 @@ impl Redactor {
         let mut patterns: Vec<Pattern> = Vec::with_capacity(secrets.len());
 
         for secret in secrets {
-            debug_assert!(!secret.value.is_empty(), "empty values are unresolved");
+            // Resolvers classify an empty value as unresolved (`SRC-002`,
+            // `SRC-005`), so this should be unreachable. It is still filtered
+            // here rather than asserted: an empty pattern would match at every
+            // position, and a debug assertion disappears from a release build.
+            if secret.value.is_empty() {
+                continue;
+            }
             if let Some(existing) = patterns
                 .iter_mut()
                 .find(|pattern| pattern.value == secret.value)
@@ -490,6 +496,18 @@ mod tests {
             &canary,
         );
         assert_eq!(intervention.total, 1);
+    }
+
+    #[test]
+    fn an_empty_value_never_becomes_a_pattern() {
+        // An empty pattern would match at every position. Resolvers already
+        // treat empty values as unresolved; this is the release-build backstop.
+        let redactor = Redactor::new(vec![secret("EMPTY", ""), secret("REAL", "abc")]);
+        assert_eq!(redactor.active_count(), 1);
+        assert_eq!(
+            redact(&redactor, "xabcx").0.as_deref(),
+            Some("x<SECRET:REAL>x")
+        );
     }
 
     #[test]

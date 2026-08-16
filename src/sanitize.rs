@@ -75,6 +75,7 @@ fn push_escaped(rendered: &mut String, character: char) {
         character
             if matches!(character as u32,
                 0x80..=0x9f
+                | 0x061c
                 | 0x200e | 0x200f
                 | 0x202a..=0x202e
                 | 0x2066..=0x2069
@@ -123,6 +124,7 @@ mod tests {
         assert_eq!(text("a\u{202e}b"), "a\\u{202e}b");
         assert_eq!(text("a\u{2066}b"), "a\\u{2066}b");
         assert_eq!(text("a\u{200f}b"), "a\\u{200f}b");
+        assert_eq!(text("a\u{61c}b"), "a\\u{061c}b");
         assert_eq!(text("a\u{2028}b"), "a\\u{2028}b");
         assert_eq!(text("a\u{2029}b"), "a\\u{2029}b");
         assert_eq!(text("a\u{85}b"), "a\\u{0085}b");
