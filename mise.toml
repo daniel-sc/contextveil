@@ -42,3 +42,7 @@ run = "bash scripts/fuzz-smoke.sh"
 [tasks.release-check]
 description = "Verify release artifacts, checksums, and installer behavior"
 run = "bash scripts/release-check.sh"
+
+[tasks.bench]
+description = "Report the RUN-005 representative redaction workload"
+run = "cargo bench --bench redaction --locked"

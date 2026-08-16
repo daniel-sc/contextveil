@@ -28,6 +28,10 @@ path = "src/main.rs"
 name = "claude_hook"
 required-features = ["testing"]
 
+[[bench]]
+name = "redaction"
+harness = false
+
 [profile.release]
 strip = "symbols"
 

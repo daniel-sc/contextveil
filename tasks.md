@@ -224,7 +224,7 @@ resolver framework yet.
   with the event `cwd` as fallback (`CFG-005`);
 - `mise run check` passes.
 
-### [ ] T030: Complete Matcher And Structured Redaction
+### [x] T030: Complete Matcher And Structured Redaction
 
 **Depends on:** `T010`; may proceed in parallel with `T020`
 
@@ -248,6 +248,34 @@ resolver framework yet.
 - `mise run check` passes.
 
 **Contributes to:** `RED-001` through `RED-010`, `RUN-005`, `TST-001`.
+
+**Evidence:**
+
+- `src/matcher.rs` scans an ordered registry with leftmost-longest selection
+  over a first-byte index, chooses one replacement per value through the
+  `RED-006` fallback chain, never rescans inserted text (`RED-007`), and reports
+  counts with emit-safe labels only (`RED-008`);
+- every `TST-001` vector has a focused test: empty registry and input, UTF-8
+  without normalization, case sensitivity, substrings, adjacent matches,
+  same-start and different-start overlap, duplicate values with canonical
+  labels, multiline values, both placeholder fallbacks, and no recursive
+  replacement;
+- `src/redact.rs` transforms decoded string values only, preserving object keys,
+  non-string values, and key order, and never joins adjacent leaves (`RED-002`,
+  `RED-005`);
+- `src/secret.rs` derives labels from the key or name only and reduces them to
+  the `REG-004` character set, so escapes and separators cannot reach a
+  placeholder;
+- `tests/matcher_property.rs` compares the production matcher against an
+  independent reference model over 4000 generated cases from a deterministic
+  PRNG, plus survivor, count-consistency, and idempotence properties;
+- `benches/redaction.rs` (run with `mise run bench`) measures one complete event
+  for a 1 MiB payload, 100 resolved values, and 10 dotenv files. Observed on the
+  development machine: p50 3.3 ms, p95 4.5 ms against the `RUN-005` 100 ms
+  target. The benchmark reports and never fails on timing, so CI stays
+  timing-independent;
+- `RED-010` needs no code: no path maps a placeholder back to a source value;
+- `mise run check` passes.
 
 ### [ ] T040: Implement Unified Interactive Setup
 
