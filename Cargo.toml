@@ -24,5 +24,14 @@ path = "src/lib.rs"
 name = "secretsieve"
 path = "src/main.rs"
 
+[[test]]
+name = "claude_hook"
+required-features = ["testing"]
+
 [profile.release]
 strip = "symbols"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+toml = "1.1.4"

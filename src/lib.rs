@@ -5,7 +5,14 @@
 //! source resolution, registry composition, and exact-value redaction. Harness
 //! adapters translate host protocols only; see `architecture.md`.
 
+pub mod adapter;
 pub mod cli;
+pub mod config;
+pub mod matcher;
+pub mod redact;
+pub mod registry;
+pub mod secret;
+pub mod source;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

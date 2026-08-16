@@ -104,7 +104,7 @@ through `TST-007`.
 - `mise install`, `mise run check`, and `mise run build` pass locally; a system C
   linker (`cc`) is the only non-mise prerequisite, as documented in `README.md`.
 
-### [ ] T010: Build The Claude Walking Slice
+### [x] T010: Build The Claude Walking Slice
 
 **Depends on:** `T001`
 
@@ -131,6 +131,39 @@ resolver framework yet.
 
 **Contributes to:** `SEC-001`, `SEC-003` through `SEC-005`, `REG-001`, `RED-001`,
 `RED-004`, `RED-008`, `RUN-006`, `CLA-002`, `TST-004`, `TST-005`.
+
+**Evidence:**
+
+- `src/config.rs` resolves the `CFG-001` global path and strictly parses
+  `version = 1` plus environment entries; `src/source.rs` resolves them from a
+  snapshot of the inherited environment, treating unset, empty, and non-UTF-8
+  values as unresolved (`SRC-001`, `SRC-002`);
+- `src/matcher.rs` implements leftmost-longest case-sensitive byte matching,
+  duplicate canonicalization, the `RED-006` placeholder fallback chain, and
+  count-only intervention metadata; `src/redact.rs` walks decoded JSON and
+  transforms string values only;
+- `src/registry.rs` composes the effective registry all-or-nothing: an invalid
+  or unreadable config disables every redaction, a missing global config warns
+  and keeps working, and unresolved sources stay silent;
+- `src/adapter/claude.rs` parses the native `PostToolUse` envelope from stdin and
+  returns `hookSpecificOutput.updatedToolOutput` with `hookEventName`, plus one
+  safe `systemMessage` and never `additionalContext`;
+- `src/cli.rs` exposes the hidden `hook claude` entry point over stdin/stdout;
+- `tests/claude_hook.rs` drives the built binary end to end for matched, clean,
+  unresolved, malformed, non-UTF-8, and invalid-config input, asserting canary
+  absence from stdout and stderr and exit code zero (`CLI-007`);
+- protocol facts were verified against the shipped Claude Code 2.1.233 binary:
+  `updatedToolOutput` exists and works for all tools, `hookEventName` is
+  required inside `hookSpecificOutput`, built-in tools validate the replacement
+  against their own result schema and revert to the original on mismatch
+  (`LIM-013`), hook `timeout` is expressed in seconds, `""`/`*`/omitted matchers
+  all match every tool, `CLAUDE_PROJECT_DIR` is set for hook processes, and
+  every failure path is fail-open (`LIM-012`). `PostToolUse` fires only for
+  successful tools, which is consistent with `CLA-004`;
+- `mise run check` passes.
+
+**Deferred to later tasks by design:** dotenv sources and project registries
+(`T020`), the settings installer and full fixture coverage (`T050`).
 
 ## Core Completion
 

@@ -5,7 +5,9 @@
 //! stay hidden from ordinary help and are treated as internal interfaces.
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
+
+use crate::source::Environment;
 
 /// Process exit status for every SecretSieve command.
 ///
@@ -119,9 +121,15 @@ at the selected project root.
 
 /// Runs one CLI invocation.
 ///
-/// `args` excludes the program name. Output is written through the supplied
-/// writers so tests can capture both channels without spawning a process.
-pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Exit {
+/// `args` excludes the program name. Hook payloads arrive on `input` and
+/// responses leave on `out` (`INT-003`); both are injected so tests can drive
+/// the surface without spawning a process.
+pub fn run(
+    args: &[OsString],
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Exit {
     match parse(args) {
         Ok(Command::Help) => {
             let _ = write!(out, "{HELP}");
@@ -134,6 +142,7 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Exit 
         Ok(Command::Setup) => unimplemented_command("setup", err),
         Ok(Command::Status) => unimplemented_command("status", err),
         Ok(Command::Doctor) => unimplemented_command("doctor", err),
+        Ok(Command::Hook(Harness::Claude)) => run_claude_hook(input, out),
         Ok(Command::Hook(harness)) => {
             unimplemented_command(&format!("hook {}", harness.as_str()), err)
         }
@@ -143,6 +152,26 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> Exit 
             Exit::Usage
         }
     }
+}
+
+/// Runs the hidden Claude `PostToolUse` entry point.
+///
+/// Stdout carries host protocol output only (`architecture.md`), and a
+/// diagnosed failure still exits zero so the host can present the warning
+/// (`CLI-007`).
+fn run_claude_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {
+    let mut payload = Vec::new();
+    // A read error or non-UTF-8 bytes cannot be a host protocol envelope. Both
+    // become an empty payload, which the adapter diagnoses as a malformed event
+    // without ever echoing what it received (`RUN-006`).
+    let _ = input.read_to_end(&mut payload);
+    let payload = String::from_utf8(payload).unwrap_or_default();
+
+    let response = crate::adapter::claude::handle(&payload, &Environment::from_process());
+    if let Some(stdout) = response.stdout {
+        let _ = writeln!(out, "{stdout}");
+    }
+    response.exit
 }
 
 /// Placeholder for a command whose task has not landed yet.
@@ -213,7 +242,7 @@ mod tests {
     fn invoke(values: &[&str]) -> (Exit, String, String) {
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let exit = run(&args(values), &mut out, &mut err);
+        let exit = run(&args(values), &mut std::io::empty(), &mut out, &mut err);
         (
             exit,
             String::from_utf8(out).expect("stdout is UTF-8"),
