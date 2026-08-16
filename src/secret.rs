@@ -4,13 +4,21 @@
 //! only, never from a path, and reduced to a conservative character set before
 //! it can reach a placeholder or a terminal.
 
-/// Identity of one enrolled source, used for diagnostics and deduplication.
+use std::path::PathBuf;
+
+/// Identity of one enrolled source (`CFG-006`).
 ///
-/// Extended with dotenv variants by `T020`.
+/// The path is already expanded and lexically normalized, without filesystem
+/// canonicalization or symlink resolution, so identity does not depend on
+/// filesystem state.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceId {
     /// An environment variable inherited by the hook process.
     Env { name: String },
+    /// One key in a dotenv file.
+    DotenvKey { path: PathBuf, key: String },
+    /// Every current key in a dotenv file.
+    DotenvAll { path: PathBuf },
 }
 
 impl SourceId {
@@ -18,16 +26,40 @@ impl SourceId {
         SourceId::Env { name: name.into() }
     }
 
-    /// The key or name a label derives from. Never a path (`REG-003`).
-    pub fn key(&self) -> &str {
-        match self {
-            SourceId::Env { name } => name,
+    pub fn dotenv_key(path: PathBuf, key: impl Into<String>) -> Self {
+        SourceId::DotenvKey {
+            path,
+            key: key.into(),
         }
     }
 
-    /// Emit-safe label for this source.
-    pub fn label(&self) -> String {
-        safe_label(self.key())
+    pub fn dotenv_all(path: PathBuf) -> Self {
+        SourceId::DotenvAll { path }
+    }
+
+    /// The key or name a label derives from. Never a path (`REG-003`).
+    ///
+    /// A wildcard entry has no key of its own; each value it resolves carries
+    /// the identity of the specific key it came from.
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            SourceId::Env { name } => Some(name),
+            SourceId::DotenvKey { key, .. } => Some(key),
+            SourceId::DotenvAll { .. } => None,
+        }
+    }
+
+    /// The dotenv file this identity refers to, if any.
+    pub fn path(&self) -> Option<&PathBuf> {
+        match self {
+            SourceId::Env { .. } => None,
+            SourceId::DotenvKey { path, .. } | SourceId::DotenvAll { path } => Some(path),
+        }
+    }
+
+    /// Emit-safe label for this source, when it has a key.
+    pub fn label(&self) -> Option<String> {
+        self.key().map(safe_label)
     }
 }
 
@@ -40,8 +72,13 @@ pub struct ResolvedSecret {
 }
 
 impl ResolvedSecret {
+    /// Builds a resolved secret.
+    ///
+    /// Only keyed identities resolve to a value, so the label is always
+    /// derivable; an identity without a key yields an empty label, which the
+    /// matcher then treats as unnamed rather than emitting `<SECRET:>`.
     pub fn new(source: SourceId, value: String) -> Self {
-        let label = source.label();
+        let label = source.label().unwrap_or_default();
         Self {
             value,
             label,
@@ -93,9 +130,32 @@ mod tests {
 
     #[test]
     fn labels_derive_from_the_key_only() {
-        let source = SourceId::env("GITHUB_TOKEN");
-        assert_eq!(source.label(), "GITHUB_TOKEN");
-        assert_eq!(source.key(), "GITHUB_TOKEN");
+        assert_eq!(
+            SourceId::env("GITHUB_TOKEN").label().as_deref(),
+            Some("GITHUB_TOKEN")
+        );
+        assert_eq!(
+            SourceId::dotenv_key(PathBuf::from("/secret/path/.env"), "API_KEY")
+                .label()
+                .as_deref(),
+            Some("API_KEY")
+        );
+        // A wildcard entry has no key, so it has no label.
+        assert_eq!(SourceId::dotenv_all(PathBuf::from("/x/.env")).label(), None);
+    }
+
+    #[test]
+    fn identities_distinguish_the_three_source_kinds() {
+        let path = PathBuf::from("/project/.env");
+        assert_ne!(
+            SourceId::dotenv_key(path.clone(), "A"),
+            SourceId::dotenv_all(path.clone())
+        );
+        assert_ne!(
+            SourceId::dotenv_key(path.clone(), "A"),
+            SourceId::dotenv_key(path, "B")
+        );
+        assert_ne!(SourceId::env("A"), SourceId::env("a"));
     }
 
     #[test]

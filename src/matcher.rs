@@ -54,7 +54,9 @@ impl Redactor {
             }
             patterns.push(Pattern {
                 value: secret.value,
-                label: Some(secret.label),
+                // An identity without a key has no label, so it can only ever
+                // be reported as an unnamed count (`RED-008`).
+                label: (!secret.label.is_empty()).then_some(secret.label),
                 canonical: secret.source,
                 aliases: Vec::new(),
                 replacement: String::new(),
@@ -72,9 +74,13 @@ impl Redactor {
         let decisions: Vec<(String, Option<String>)> = patterns
             .iter()
             .map(|pattern| {
-                let label = pattern.label.as_deref().unwrap_or_default();
-                let named = format!("<SECRET:{label}>");
-                let replacement = if is_emit_safe(&named, &values) {
+                let named = pattern
+                    .label
+                    .as_deref()
+                    .map(|label| format!("<SECRET:{label}>"));
+                let replacement = if let Some(named) =
+                    named.filter(|candidate| is_emit_safe(candidate, &values))
+                {
                     named
                 } else if generic_is_safe {
                     GENERIC_PLACEHOLDER.to_string()

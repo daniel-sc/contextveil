@@ -1,17 +1,20 @@
 //! Configuration file locations, parsing, and validation.
 //!
-//! `CFG-001` fixes the global path, `CFG-006` through `CFG-008` fix the schema,
-//! and `CFG-012` makes parsing strict per file: an invalid or unreadable file
-//! disables the whole effective registry rather than contributing part of it.
+//! `CFG-001` fixes the global path, `CFG-002` the project filename, and
+//! `CFG-006` through `CFG-010` the schema, source identity, and path handling.
+//! Parsing is strict per file, and use of the effective registry is
+//! all-or-nothing (`CFG-012`): an invalid or unreadable file disables every
+//! redaction for the event rather than contributing part of a matcher.
 //!
 //! Diagnostics carry a stable classification and a location, never file text.
 //! Project configuration is attacker-influenced (`LIM-008`), so parser messages
-//! are not echoed. Project files and dotenv sources arrive with `T020`.
+//! are never echoed.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::paths::{self, PathProblem};
 use crate::source::{Environment, SourceRef};
 
 /// The only supported configuration schema version (`CFG-006`).
@@ -46,21 +49,27 @@ pub enum ConfigErrorKind {
     Unreadable,
     /// The file is not valid UTF-8.
     NotUtf8,
-    /// TOML syntax error at a one-based position in the file.
+    /// TOML syntax error, an unknown field, or a wrongly typed field, at a
+    /// one-based position in the file.
     Syntax { line: usize, column: usize },
     /// `version` is absent or is not `1`.
     UnsupportedVersion,
-    /// An entry violates `CFG-006` through `CFG-008`.
+    /// An entry violates `CFG-006` through `CFG-010`.
     InvalidEntry { index: usize, problem: EntryProblem },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryProblem {
     UnknownSourceType,
-    MissingName,
-    EmptyName,
-    /// A field that does not belong to the entry's source type (`CFG-007`).
+    /// A field this source type requires is absent.
+    MissingRequiredField,
+    /// A required field is present but empty.
+    EmptyField,
+    /// A field the source type does not accept, or two mutually exclusive
+    /// fields together (`CFG-007`, `CFG-008`).
     UnexpectedField,
+    /// The path cannot be expanded (`CFG-010`).
+    InvalidPath(PathProblem),
     /// The same source identity appears twice in one file (`CFG-006`).
     DuplicateIdentity,
 }
@@ -72,7 +81,7 @@ impl ConfigErrorKind {
             ConfigErrorKind::Unreadable => "the file could not be read".to_string(),
             ConfigErrorKind::NotUtf8 => "the file is not valid UTF-8".to_string(),
             ConfigErrorKind::Syntax { line, column } => {
-                format!("invalid TOML syntax at line {line}, column {column}")
+                format!("invalid TOML at line {line}, column {column}")
             }
             ConfigErrorKind::UnsupportedVersion => {
                 format!("`version = {SCHEMA_VERSION}` is required")
@@ -86,13 +95,16 @@ impl ConfigErrorKind {
 }
 
 impl EntryProblem {
-    fn reason(&self) -> &'static str {
+    fn reason(&self) -> String {
         match self {
-            EntryProblem::UnknownSourceType => "uses an unknown source type",
-            EntryProblem::MissingName => "is missing a required field",
-            EntryProblem::EmptyName => "has an empty name",
-            EntryProblem::UnexpectedField => "sets a field its source type does not accept",
-            EntryProblem::DuplicateIdentity => "duplicates an earlier source identity",
+            EntryProblem::UnknownSourceType => "uses an unknown source type".to_string(),
+            EntryProblem::MissingRequiredField => "is missing a required field".to_string(),
+            EntryProblem::EmptyField => "has an empty required field".to_string(),
+            EntryProblem::UnexpectedField => {
+                "sets a field its source type does not accept".to_string()
+            }
+            EntryProblem::InvalidPath(problem) => problem.reason().to_string(),
+            EntryProblem::DuplicateIdentity => "duplicates an earlier source identity".to_string(),
         }
     }
 }
@@ -104,19 +116,16 @@ impl EntryProblem {
 pub fn global_config_path(environment: &Environment) -> Option<PathBuf> {
     let base = match environment.get_str("XDG_CONFIG_HOME") {
         Some(value) if !value.is_empty() && Path::new(value).is_absolute() => PathBuf::from(value),
-        _ => {
-            let home = environment.get_str("HOME")?;
-            if home.is_empty() {
-                return None;
-            }
-            PathBuf::from(home).join(".config")
-        }
+        _ => environment.home()?.join(".config"),
     };
     Some(base.join("secretsieve").join("config.toml"))
 }
 
 /// Loads and validates one configuration file.
-pub fn load(path: &Path) -> Load {
+///
+/// Relative source paths resolve against the directory containing `path`
+/// (`CFG-010`).
+pub fn load(path: &Path, home: Option<&Path>) -> Load {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Load::Missing,
@@ -136,7 +145,8 @@ pub fn load(path: &Path) -> Load {
             });
         }
     };
-    match parse(&text) {
+    let base = path.parent().unwrap_or(Path::new("."));
+    match parse(&text, base, home) {
         Ok(config) => Load::Valid(config),
         Err(kind) => Load::Invalid(ConfigError {
             path: path.to_path_buf(),
@@ -158,10 +168,13 @@ struct RawConfig {
 struct RawSecret {
     source: String,
     name: Option<String>,
+    file: Option<String>,
+    key: Option<String>,
+    all: Option<bool>,
 }
 
 /// Parses configuration text strictly (`CFG-006`).
-pub fn parse(text: &str) -> Result<Config, ConfigErrorKind> {
+pub fn parse(text: &str, base: &Path, home: Option<&Path>) -> Result<Config, ConfigErrorKind> {
     let raw: RawConfig = toml::from_str(text).map_err(|error| {
         let (line, column) = error
             .span()
@@ -176,24 +189,14 @@ pub fn parse(text: &str) -> Result<Config, ConfigErrorKind> {
 
     let mut sources: Vec<SourceRef> = Vec::with_capacity(raw.secret.len());
     for (index, entry) in raw.secret.iter().enumerate() {
-        let invalid = |problem| ConfigErrorKind::InvalidEntry { index, problem };
-        let source = match entry.source.as_str() {
-            "env" => {
-                let name = entry
-                    .name
-                    .as_deref()
-                    .ok_or(invalid(EntryProblem::MissingName))?;
-                if name.is_empty() {
-                    return Err(invalid(EntryProblem::EmptyName));
-                }
-                SourceRef::Env {
-                    name: name.to_string(),
-                }
-            }
-            _ => return Err(invalid(EntryProblem::UnknownSourceType)),
-        };
-        if sources.contains(&source) {
-            return Err(invalid(EntryProblem::DuplicateIdentity));
+        let source = parse_entry(entry, base, home)
+            .map_err(|problem| ConfigErrorKind::InvalidEntry { index, problem })?;
+        let identity = source.id();
+        if sources.iter().any(|existing| existing.id() == identity) {
+            return Err(ConfigErrorKind::InvalidEntry {
+                index,
+                problem: EntryProblem::DuplicateIdentity,
+            });
         }
         sources.push(source);
     }
@@ -201,9 +204,74 @@ pub fn parse(text: &str) -> Result<Config, ConfigErrorKind> {
     Ok(Config { sources })
 }
 
+fn parse_entry(
+    entry: &RawSecret,
+    base: &Path,
+    home: Option<&Path>,
+) -> Result<SourceRef, EntryProblem> {
+    match entry.source.as_str() {
+        // `CFG-007`: one non-empty `name` and no dotenv-only fields.
+        "env" => {
+            if entry.file.is_some() || entry.key.is_some() || entry.all.is_some() {
+                return Err(EntryProblem::UnexpectedField);
+            }
+            let name = entry
+                .name
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            if name.is_empty() {
+                return Err(EntryProblem::EmptyField);
+            }
+            Ok(SourceRef::Env {
+                name: name.to_string(),
+            })
+        }
+        // `CFG-008`: one non-empty `file` plus exactly one of `key` or
+        // `all = true`.
+        "dotenv" => {
+            if entry.name.is_some() {
+                return Err(EntryProblem::UnexpectedField);
+            }
+            let file = entry
+                .file
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            if file.is_empty() {
+                return Err(EntryProblem::EmptyField);
+            }
+            let path = paths::expand(file, base, home).map_err(EntryProblem::InvalidPath)?;
+            let wildcard = entry.all.unwrap_or(false);
+            match (&entry.key, wildcard) {
+                (Some(_), true) => Err(EntryProblem::UnexpectedField),
+                (Some(key), false) => {
+                    if key.is_empty() {
+                        return Err(EntryProblem::EmptyField);
+                    }
+                    Ok(SourceRef::DotenvKey {
+                        entered: file.to_string(),
+                        path,
+                        key: key.clone(),
+                    })
+                }
+                (None, true) => Ok(SourceRef::DotenvAll {
+                    entered: file.to_string(),
+                    path,
+                }),
+                (None, false) => Err(EntryProblem::MissingRequiredField),
+            }
+        }
+        _ => Err(EntryProblem::UnknownSourceType),
+    }
+}
+
 /// Converts a byte offset into a one-based line and column.
 fn position_of(text: &str, offset: usize) -> (usize, usize) {
-    let clamped = offset.min(text.len());
+    // The reported span comes from the parser and is only used for slicing, so
+    // it is clamped to a character boundary rather than trusted.
+    let mut clamped = offset.min(text.len());
+    while clamped > 0 && !text.is_char_boundary(clamped) {
+        clamped -= 1;
+    }
     let prefix = &text[..clamped];
     let line = prefix.matches('\n').count() + 1;
     let column = prefix
@@ -217,107 +285,241 @@ fn position_of(text: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::*;
 
-    fn env_source(name: &str) -> SourceRef {
-        SourceRef::Env {
-            name: name.to_string(),
+    const BASE: &str = "/project";
+    const HOME: &str = "/home/user";
+
+    fn parse_text(text: &str) -> Result<Config, ConfigErrorKind> {
+        parse(text, Path::new(BASE), Some(Path::new(HOME)))
+    }
+
+    fn entry_problem(text: &str) -> EntryProblem {
+        match parse_text(text) {
+            Err(ConfigErrorKind::InvalidEntry { problem, .. }) => problem,
+            other => panic!("expected an invalid entry, got {other:?}"),
         }
     }
 
     #[test]
-    fn a_minimal_global_config_parses() {
-        let config = parse(
+    fn the_documented_schema_parses() {
+        let config = parse_text(
             r#"
 version = 1
 
 [[secret]]
 source = "env"
 name = "GITHUB_TOKEN"
+
+[[secret]]
+source = "dotenv"
+file = ".env.local"
+key = "STRIPE_API_KEY"
+
+[[secret]]
+source = "dotenv"
+file = "~/shared/project.env"
+all = true
 "#,
         )
         .expect("valid config");
-        assert_eq!(config.sources, vec![env_source("GITHUB_TOKEN")]);
+
+        assert_eq!(
+            config.sources,
+            vec![
+                SourceRef::Env {
+                    name: "GITHUB_TOKEN".to_string()
+                },
+                SourceRef::DotenvKey {
+                    entered: ".env.local".to_string(),
+                    path: PathBuf::from("/project/.env.local"),
+                    key: "STRIPE_API_KEY".to_string(),
+                },
+                SourceRef::DotenvAll {
+                    entered: "~/shared/project.env".to_string(),
+                    path: PathBuf::from("/home/user/shared/project.env"),
+                },
+            ]
+        );
     }
 
     #[test]
     fn an_empty_registry_is_valid() {
-        assert_eq!(parse("version = 1\n"), Ok(Config { sources: vec![] }));
+        assert_eq!(parse_text("version = 1\n"), Ok(Config { sources: vec![] }));
     }
 
     #[test]
     fn the_version_is_required_and_pinned() {
         assert_eq!(
-            parse("[[secret]]\nsource = \"env\"\nname = \"A\"\n"),
+            parse_text("[[secret]]\nsource = \"env\"\nname = \"A\"\n"),
             Err(ConfigErrorKind::UnsupportedVersion)
         );
         assert_eq!(
-            parse("version = 2\n"),
+            parse_text("version = 2\n"),
             Err(ConfigErrorKind::UnsupportedVersion)
+        );
+        assert_eq!(
+            parse_text("version = \"1\"\n"),
+            Err(ConfigErrorKind::Syntax {
+                line: 1,
+                column: 11
+            })
         );
     }
 
     #[test]
     fn unknown_fields_invalidate_the_file() {
         assert!(matches!(
-            parse("version = 1\nunexpected = true\n"),
+            parse_text("version = 1\nunexpected = true\n"),
             Err(ConfigErrorKind::Syntax { .. })
         ));
         assert!(matches!(
-            parse("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\nextra = 1\n"),
+            parse_text("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\nextra = 1\n"),
             Err(ConfigErrorKind::Syntax { .. })
         ));
     }
 
     #[test]
-    fn environment_entries_require_a_non_empty_name() {
+    fn environment_entries_reject_dotenv_fields() {
         assert_eq!(
-            parse("version = 1\n\n[[secret]]\nsource = \"env\"\n"),
-            Err(ConfigErrorKind::InvalidEntry {
-                index: 0,
-                problem: EntryProblem::MissingName
-            })
+            entry_problem(
+                "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\nfile = \".env\"\n"
+            ),
+            EntryProblem::UnexpectedField
         );
         assert_eq!(
-            parse("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"\"\n"),
-            Err(ConfigErrorKind::InvalidEntry {
-                index: 0,
-                problem: EntryProblem::EmptyName
-            })
+            entry_problem("version = 1\n\n[[secret]]\nsource = \"env\"\n"),
+            EntryProblem::MissingRequiredField
+        );
+        assert_eq!(
+            entry_problem("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"\"\n"),
+            EntryProblem::EmptyField
+        );
+    }
+
+    #[test]
+    fn dotenv_entries_require_exactly_one_of_key_or_all() {
+        assert_eq!(
+            entry_problem(
+                "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nkey = \"A\"\nall = true\n"
+            ),
+            EntryProblem::UnexpectedField
+        );
+        assert_eq!(
+            entry_problem("version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\n"),
+            EntryProblem::MissingRequiredField
+        );
+        assert_eq!(
+            entry_problem(
+                "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nkey = \"\"\n"
+            ),
+            EntryProblem::EmptyField
+        );
+        assert_eq!(
+            entry_problem("version = 1\n\n[[secret]]\nsource = \"dotenv\"\nkey = \"A\"\n"),
+            EntryProblem::MissingRequiredField
+        );
+        assert_eq!(
+            entry_problem(
+                "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nname = \"A\"\nkey = \"B\"\n"
+            ),
+            EntryProblem::UnexpectedField
         );
     }
 
     #[test]
     fn unknown_source_types_invalidate_the_file() {
         assert_eq!(
-            parse("version = 1\n\n[[secret]]\nsource = \"keychain\"\nname = \"A\"\n"),
-            Err(ConfigErrorKind::InvalidEntry {
-                index: 0,
-                problem: EntryProblem::UnknownSourceType
-            })
+            entry_problem("version = 1\n\n[[secret]]\nsource = \"keychain\"\nname = \"A\"\n"),
+            EntryProblem::UnknownSourceType
         );
     }
 
     #[test]
-    fn duplicate_identities_in_one_file_are_rejected() {
-        let text = "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\n";
-        assert_eq!(
-            parse(text),
-            Err(ConfigErrorKind::InvalidEntry {
-                index: 1,
-                problem: EntryProblem::DuplicateIdentity
-            })
-        );
+    fn identity_is_computed_after_expansion_and_normalization() {
+        // `CFG-006`: these two entries name the same file through different
+        // spellings and are therefore duplicates.
+        let text = "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nkey = \"A\"\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"./sub/../.env\"\nkey = \"A\"\n";
+        assert_eq!(entry_problem(text), EntryProblem::DuplicateIdentity);
     }
 
     #[test]
-    fn names_are_case_sensitive_so_case_variants_are_distinct() {
-        let text = "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\n\n[[secret]]\nsource = \"env\"\nname = \"a\"\n";
-        let config = parse(text).expect("valid config");
+    fn a_keyed_entry_and_a_wildcard_entry_for_one_file_may_coexist() {
+        let config = parse_text(
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nkey = \"A\"\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n",
+        )
+        .expect("valid config");
         assert_eq!(config.sources.len(), 2);
     }
 
     #[test]
-    fn syntax_errors_report_a_position_and_no_file_text() {
-        let error = parse("version = 1\nthis is not toml\n").expect_err("invalid");
+    fn duplicate_identities_in_one_file_are_rejected() {
+        assert_eq!(
+            entry_problem(
+                "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\n"
+            ),
+            EntryProblem::DuplicateIdentity
+        );
+        assert_eq!(
+            entry_problem(
+                "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n"
+            ),
+            EntryProblem::DuplicateIdentity
+        );
+    }
+
+    #[test]
+    fn names_and_keys_are_case_sensitive_so_variants_are_distinct() {
+        let config = parse_text(
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"A\"\n\n[[secret]]\nsource = \"env\"\nname = \"a\"\n",
+        )
+        .expect("valid config");
+        assert_eq!(config.sources.len(), 2);
+    }
+
+    #[test]
+    fn paths_are_stored_as_entered() {
+        // `CFG-010`: the entered spelling is preserved for rewriting the file.
+        let config = parse_text(
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"~/shared/.env\"\nkey = \"A\"\n",
+        )
+        .expect("valid config");
+        match &config.sources[0] {
+            SourceRef::DotenvKey { entered, path, .. } => {
+                assert_eq!(entered, "~/shared/.env");
+                assert_eq!(path, &PathBuf::from("/home/user/shared/.env"));
+            }
+            other => panic!("expected a dotenv key entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tilde_path_without_a_home_is_an_invalid_entry() {
+        let error = parse(
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"~/x/.env\"\nkey = \"A\"\n",
+            Path::new(BASE),
+            None,
+        );
+        assert_eq!(
+            error,
+            Err(ConfigErrorKind::InvalidEntry {
+                index: 0,
+                problem: EntryProblem::InvalidPath(PathProblem::NoHome)
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_may_reference_external_paths_and_environment_names() {
+        // `CFG-009` and `LIM-008`: allowed by design, and reviewed by the user.
+        let config = parse_text(
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"/etc/app/.env\"\nall = true\n\n[[secret]]\nsource = \"env\"\nname = \"HOME_TOKEN\"\n",
+        )
+        .expect("valid config");
+        assert_eq!(config.sources.len(), 2);
+    }
+
+    #[test]
+    fn diagnostics_never_quote_file_content() {
+        let error = parse_text("version = 1\nthis is not toml\n").expect_err("invalid");
         match error {
             ConfigErrorKind::Syntax { line, .. } => assert_eq!(line, 2),
             other => panic!("expected a syntax error, got {other:?}"),
@@ -352,6 +554,31 @@ name = "GITHUB_TOKEN"
     #[test]
     fn a_missing_file_is_not_an_error() {
         let path = std::env::temp_dir().join("secretsieve-missing-config-does-not-exist.toml");
-        assert_eq!(load(&path), Load::Missing);
+        assert_eq!(load(&path, None), Load::Missing);
+    }
+
+    #[test]
+    fn relative_paths_resolve_against_the_config_file_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "secretsieve-config-{}-{}",
+            std::process::id(),
+            crate::testing::Canary::generate("CONFIG").token()
+        ));
+        std::fs::create_dir_all(root.join("nested")).expect("fixture directories");
+        let config_path = root.join("nested").join(".secretsieve.toml");
+        std::fs::write(
+            &config_path,
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nkey = \"A\"\n",
+        )
+        .expect("write config");
+
+        match load(&config_path, None) {
+            Load::Valid(config) => assert_eq!(
+                config.sources[0].file(),
+                Some(root.join("nested").join(".env").as_path())
+            ),
+            other => panic!("expected a valid config, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

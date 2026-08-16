@@ -12,6 +12,8 @@
 //! place, and the process still exits zero so the host can present the warning
 //! (`CLI-007`).
 
+use std::path::PathBuf;
+
 use serde_json::{Map, Value, json};
 
 use crate::cli::Exit;
@@ -29,6 +31,9 @@ use crate::source::Environment;
 /// for every tool (see `LIM-013` for the exposure that a rejection causes).
 mod protocol {
     pub const EVENT_NAME: &str = "hook_event_name";
+    pub const CWD: &str = "cwd";
+    /// Environment variable holding Claude's project directory.
+    pub const PROJECT_DIR_VARIABLE: &str = "CLAUDE_PROJECT_DIR";
     pub const EVENT_POST_TOOL_USE: &str = "PostToolUse";
     pub const TOOL_RESPONSE: &str = "tool_response";
     pub const HOOK_SPECIFIC_OUTPUT: &str = "hookSpecificOutput";
@@ -73,7 +78,8 @@ pub fn handle(payload: &str, environment: &Environment) -> Response {
         Err(problem) => return warn(problem.message()),
     };
 
-    let registry = match registry::build(environment) {
+    let project_root = project_root(&event, environment);
+    let registry = match registry::build(environment, project_root.as_deref()) {
         RegistryOutcome::Ready(registry) => registry,
         // `RUN-001`: no partial redaction. The original content is passed
         // through by simply not returning a replacement.
@@ -133,6 +139,23 @@ fn finish(updated: Option<Value>, messages: Vec<String>) -> Response {
     Response::json(Value::Object(response))
 }
 
+/// Selects the project root for this event (`CFG-005`).
+///
+/// Claude sets `CLAUDE_PROJECT_DIR` on every hook process, which is its stable
+/// project directory; the event's `cwd` is the documented fallback. Only an
+/// absolute path is accepted, because a relative root would select a project
+/// registry from wherever the host happened to spawn the hook.
+fn project_root(event: &Event, environment: &Environment) -> Option<PathBuf> {
+    [
+        environment.get_str(protocol::PROJECT_DIR_VARIABLE),
+        event.cwd.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(PathBuf::from)
+    .find(|candidate| candidate.is_absolute())
+}
+
 /// Emits a secret-safe warning without mutating host content.
 fn warn(message: &str) -> Response {
     Response::json(json!({ protocol::SYSTEM_MESSAGE: message }))
@@ -141,6 +164,9 @@ fn warn(message: &str) -> Response {
 /// The covered fields of one `PostToolUse` envelope.
 struct Event {
     tool_response: Option<Value>,
+    /// The event's working directory, used only when the host does not provide
+    /// its stable project directory (`CFG-005`).
+    cwd: Option<String>,
 }
 
 /// Why an envelope could not be used.
@@ -177,6 +203,10 @@ fn parse_event(payload: &str) -> Result<Event, Problem> {
 
     Ok(Event {
         tool_response: object.get(protocol::TOOL_RESPONSE).cloned(),
+        cwd: object
+            .get(protocol::CWD)
+            .and_then(Value::as_str)
+            .map(str::to_string),
     })
 }
 
@@ -391,6 +421,36 @@ mod tests {
         })
         .to_string();
         assert_eq!(handle(&payload, &environment), Response::silent());
+    }
+
+    #[test]
+    fn the_project_registry_is_selected_from_the_host_project_directory() {
+        // `CFG-005`: Claude's stable project directory wins over event `cwd`.
+        let canary = Canary::generate("PROJECT_TOKEN");
+        let fixture = Fixture::new();
+        fixture.enroll("UNUSED");
+        let project = fixture.root.join("project");
+        std::fs::create_dir_all(&project).expect("project directory");
+        std::fs::write(
+            project.join(".secretsieve.toml"),
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"PROJECT_TOKEN\"\n",
+        )
+        .expect("write project config");
+
+        let environment = fixture.environment(&[
+            ("PROJECT_TOKEN", canary.value()),
+            ("CLAUDE_PROJECT_DIR", &project.to_string_lossy()),
+        ]);
+        let payload = event(json!({"stdout": canary.value()}));
+        let response = handle(&payload, &environment);
+
+        let stdout = response.stdout.expect("an intervention produces output");
+        assert_canary_absent("claude stdout", stdout.as_bytes(), &canary);
+        let value: Value = serde_json::from_str(&stdout).expect("valid JSON response");
+        assert_eq!(
+            value["hookSpecificOutput"]["updatedToolOutput"]["stdout"],
+            json!("<SECRET:PROJECT_TOKEN>")
+        );
     }
 
     #[test]

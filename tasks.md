@@ -167,7 +167,7 @@ resolver framework yet.
 
 ## Core Completion
 
-### [ ] T020: Implement Config, Registry, And Sources
+### [x] T020: Implement Config, Registry, And Sources
 
 **Depends on:** `T010`
 
@@ -194,6 +194,35 @@ resolver framework yet.
 
 **Contributes to:** `CFG-001` through `CFG-013`, `SRC-001` through `SRC-010`,
 `REG-001` through `REG-004`, `TST-002`, relevant `TST-003` cases.
+
+**Evidence:**
+
+- `src/dotenv.rs` implements the `SRC-003` grammar exactly, with tests for BOM,
+  CRLF, `export` token handling, key syntax, unquoted comment rules, single and
+  double quoting including multiline values and the five decoded escapes,
+  trailing content after a quote, and last-key-wins duplicate reporting
+  (`SRC-004`); it performs no interpolation or substitution;
+- `src/paths.rs` implements `CFG-010` expansion (`~/` only, relative against the
+  config file's directory, no environment/glob/shell expansion), `CFG-006`
+  lexical identity normalization without symlink resolution, `CFG-003` setup
+  root selection, and `CFG-004` runtime project selection;
+- `src/config.rs` parses the full V1 schema strictly for both scopes, enforces
+  `CFG-006` through `CFG-010` per entry, rejects duplicate identities within one
+  file, and reports only a classification plus a position;
+- `src/source.rs` resolves environment and dotenv sources, separates unresolved
+  (`SRC-002`, `SRC-005`, `SRC-007`) from malfunction (`SRC-006`), and reads each
+  dotenv file at most once per event without caching across processes
+  (`SRC-009`);
+- `src/registry.rs` composes project-then-global entries additively (`CFG-011`),
+  returns a malfunction instead of a partial matcher for any invalid config or
+  source (`CFG-012`, `LIM-009`), warns on a missing global config (`CFG-013`),
+  and canonicalizes equal values to the first project entry (`REG-002`);
+- `src/sanitize.rs` implements `SEC-006` one-logical-line rendering, including
+  `\xNN` for non-UTF-8 path bytes; its consumers are the terminal commands in
+  `T040` and `T060`, so runtime diagnostics deliberately carry no paths at all;
+- `src/adapter/claude.rs` selects the project root from `CLAUDE_PROJECT_DIR`
+  with the event `cwd` as fallback (`CFG-005`);
+- `mise run check` passes.
 
 ### [ ] T030: Complete Matcher And Structured Redaction
 

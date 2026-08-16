@@ -1,56 +1,132 @@
 //! Source references and their resolution.
 //!
-//! `SRC-001` and `SRC-002` govern environment resolution: case-sensitive names,
-//! and unset, empty, or non-UTF-8 values are unresolved rather than failures.
-//! Dotenv resolution arrives with `T020`.
+//! V1 has two resolver families (`architecture.md`): environment variables
+//! inherited by the hook process and dotenv files parsed without interpolation
+//! or execution. A resolver returns resolved, unresolved, or malfunction; it
+//! never decides whether a value looks secret.
 //!
-//! Values are resolved afresh for every event and never cached across processes
-//! (`SRC-009`).
+//! `SRC-009`: sources are resolved afresh for every event. The dotenv cache here
+//! exists only so one file referenced by several entries is read once per event;
+//! it never survives the process.
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 
+use crate::dotenv::{self, Dotenv, ParseErrorKind};
 use crate::secret::{ResolvedSecret, SourceId};
 
 /// One enrolled source reference from a configuration file.
+///
+/// `entered` preserves the path exactly as written in the file (`CFG-010`);
+/// `path` is its expanded, lexically normalized form used for identity and
+/// reading.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceRef {
-    Env { name: String },
+    Env {
+        name: String,
+    },
+    DotenvKey {
+        entered: String,
+        path: PathBuf,
+        key: String,
+    },
+    DotenvAll {
+        entered: String,
+        path: PathBuf,
+    },
 }
 
 impl SourceRef {
     pub fn id(&self) -> SourceId {
         match self {
             SourceRef::Env { name } => SourceId::env(name.clone()),
+            SourceRef::DotenvKey { path, key, .. } => SourceId::dotenv_key(path.clone(), key),
+            SourceRef::DotenvAll { path, .. } => SourceId::dotenv_all(path.clone()),
+        }
+    }
+
+    /// The dotenv file this reference reads, if any.
+    pub fn file(&self) -> Option<&Path> {
+        match self {
+            SourceRef::Env { .. } => None,
+            SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => Some(path),
         }
     }
 }
 
 /// Why a source has no usable value right now.
 ///
-/// An unresolved source is normal and stays silent during runtime
-/// (`RED-009`); it is not a malfunction (`SRC-005`).
+/// An unresolved source is normal, stays silent during runtime (`RED-009`), and
+/// is never a malfunction (`SRC-005`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unresolved {
-    /// The environment variable is not set.
+    /// The environment variable is unset or the dotenv file does not exist.
     Absent,
+    /// The dotenv file exists but does not assign the key.
+    KeyAbsent,
     /// The value exists but is empty.
     Empty,
-    /// The value is not valid UTF-8 and must not enter the matcher.
+    /// An environment value is not valid UTF-8 (`SRC-002`).
     NonUtf8,
+}
+
+impl Unresolved {
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Unresolved::Absent => "is not present",
+            Unresolved::KeyAbsent => "is not assigned in its file",
+            Unresolved::Empty => "is empty",
+            Unresolved::NonUtf8 => "is not valid UTF-8",
+        }
+    }
+}
+
+/// A source error that disables the entire effective registry (`SRC-006`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceMalfunction {
+    /// Permission denial or a non-`NotFound` I/O failure.
+    Unreadable,
+    /// The file is not valid UTF-8.
+    NotUtf8,
+    /// The file does not match the dotenv grammar.
+    Malformed { line: usize, kind: ParseErrorKind },
+}
+
+impl SourceMalfunction {
+    /// Secret-safe reason. It never quotes file content (`SEC-004`).
+    pub fn reason(&self) -> String {
+        match self {
+            SourceMalfunction::Unreadable => "could not be read".to_string(),
+            SourceMalfunction::NotUtf8 => "is not valid UTF-8".to_string(),
+            SourceMalfunction::Malformed { line, kind } => {
+                format!("has a malformed assignment: line {line} {}", kind.reason())
+            }
+        }
+    }
 }
 
 /// Result of resolving one source reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
-    Resolved(ResolvedSecret),
-    Unresolved { source: SourceId, why: Unresolved },
+    /// Zero or more current values. A wildcard entry can yield many, and an
+    /// entry whose keys are all empty yields none.
+    Resolved(Vec<ResolvedSecret>),
+    Unresolved {
+        source: SourceId,
+        why: Unresolved,
+    },
+    Malfunction {
+        source: SourceId,
+        path: PathBuf,
+        why: SourceMalfunction,
+    },
 }
 
 /// The environment a run resolves against.
 ///
-/// A snapshot is taken once per process so tests can supply a fixed
-/// environment without mutating process state.
+/// A snapshot is taken once per process so tests can supply a fixed environment
+/// without mutating process state.
 #[derive(Debug, Clone, Default)]
 pub struct Environment {
     variables: HashMap<OsString, OsString>,
@@ -89,31 +165,151 @@ impl Environment {
     pub fn get_str(&self, name: &str) -> Option<&str> {
         self.get(name).and_then(OsStr::to_str)
     }
+
+    /// The current user's home directory, when known.
+    pub fn home(&self) -> Option<PathBuf> {
+        self.get_str("HOME")
+            .filter(|home| !home.is_empty())
+            .map(PathBuf::from)
+    }
 }
 
-/// Resolves one source reference against the current environment.
-pub fn resolve(source: &SourceRef, environment: &Environment) -> Resolution {
-    match source {
-        SourceRef::Env { name } => {
-            let id = SourceId::env(name.clone());
-            match environment.get(name) {
-                None => Resolution::Unresolved {
-                    source: id,
-                    why: Unresolved::Absent,
-                },
-                Some(raw) => match raw.to_str() {
-                    None => Resolution::Unresolved {
+/// State of one dotenv file for the duration of a single event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FileState {
+    Missing,
+    Parsed(Dotenv),
+    Malfunction(SourceMalfunction),
+}
+
+/// Resolves source references, reading each dotenv file at most once per event.
+#[derive(Debug, Clone, Default)]
+pub struct Resolver {
+    files: HashMap<PathBuf, FileState>,
+}
+
+impl Resolver {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Resolves one reference against the environment and filesystem.
+    pub fn resolve(&mut self, reference: &SourceRef, environment: &Environment) -> Resolution {
+        match reference {
+            SourceRef::Env { name } => resolve_environment(name, environment),
+            SourceRef::DotenvKey { path, key, .. } => {
+                let id = SourceId::dotenv_key(path.clone(), key);
+                match self.file(path) {
+                    FileState::Missing => Resolution::Unresolved {
                         source: id,
-                        why: Unresolved::NonUtf8,
+                        why: Unresolved::Absent,
                     },
-                    Some("") => Resolution::Unresolved {
+                    FileState::Malfunction(why) => Resolution::Malfunction {
                         source: id,
-                        why: Unresolved::Empty,
+                        path: path.clone(),
+                        why: *why,
                     },
-                    Some(value) => Resolution::Resolved(ResolvedSecret::new(id, value.to_string())),
-                },
+                    FileState::Parsed(dotenv) => match dotenv.get(key) {
+                        None => Resolution::Unresolved {
+                            source: id,
+                            why: Unresolved::KeyAbsent,
+                        },
+                        Some("") => Resolution::Unresolved {
+                            source: id,
+                            why: Unresolved::Empty,
+                        },
+                        Some(value) => {
+                            Resolution::Resolved(vec![ResolvedSecret::new(id, value.to_string())])
+                        }
+                    },
+                }
+            }
+            SourceRef::DotenvAll { path, .. } => {
+                let id = SourceId::dotenv_all(path.clone());
+                match self.file(path) {
+                    FileState::Missing => Resolution::Unresolved {
+                        source: id,
+                        why: Unresolved::Absent,
+                    },
+                    FileState::Malfunction(why) => Resolution::Malfunction {
+                        source: id,
+                        path: path.clone(),
+                        why: *why,
+                    },
+                    // `SRC-007`: every current non-empty key is enrolled, so keys
+                    // added later need no further setup run.
+                    FileState::Parsed(dotenv) => Resolution::Resolved(
+                        dotenv
+                            .entries()
+                            .filter(|(_, value)| !value.is_empty())
+                            .map(|(key, value)| {
+                                ResolvedSecret::new(
+                                    SourceId::dotenv_key(path.clone(), key),
+                                    value.to_string(),
+                                )
+                            })
+                            .collect(),
+                    ),
+                }
             }
         }
+    }
+
+    /// Keys assigned more than once in an already-read file (`SRC-004`).
+    pub fn duplicate_keys(&self, path: &Path) -> &[String] {
+        match self.files.get(path) {
+            Some(FileState::Parsed(dotenv)) => dotenv.duplicates(),
+            _ => &[],
+        }
+    }
+
+    fn file(&mut self, path: &Path) -> &FileState {
+        if !self.files.contains_key(path) {
+            let state = read_dotenv(path);
+            self.files.insert(path.to_path_buf(), state);
+        }
+        self.files.get(path).expect("the file was just inserted")
+    }
+}
+
+fn read_dotenv(path: &Path) -> FileState {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        // `SRC-005`: an absent file is unresolved, not a malfunction.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return FileState::Missing,
+        Err(_) => return FileState::Malfunction(SourceMalfunction::Unreadable),
+    };
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => return FileState::Malfunction(SourceMalfunction::NotUtf8),
+    };
+    match dotenv::parse(&text) {
+        Ok(parsed) => FileState::Parsed(parsed),
+        Err(error) => FileState::Malfunction(SourceMalfunction::Malformed {
+            line: error.line,
+            kind: error.kind,
+        }),
+    }
+}
+
+fn resolve_environment(name: &str, environment: &Environment) -> Resolution {
+    let id = SourceId::env(name);
+    match environment.get(name) {
+        None => Resolution::Unresolved {
+            source: id,
+            why: Unresolved::Absent,
+        },
+        Some(raw) => match raw.to_str() {
+            None => Resolution::Unresolved {
+                source: id,
+                why: Unresolved::NonUtf8,
+            },
+            Some("") => Resolution::Unresolved {
+                source: id,
+                why: Unresolved::Empty,
+            },
+            Some(value) => Resolution::Resolved(vec![ResolvedSecret::new(id, value.to_string())]),
+        },
     }
 }
 
@@ -122,6 +318,53 @@ mod tests {
     use super::*;
     use crate::testing::Canary;
 
+    struct Fixture {
+        root: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "secretsieve-source-{}-{}",
+                std::process::id(),
+                Canary::generate("SOURCE").token()
+            ));
+            std::fs::create_dir_all(&root).expect("fixture root");
+            Self { root }
+        }
+
+        fn write(&self, name: &str, contents: &str) -> PathBuf {
+            let path = self.root.join(name);
+            std::fs::write(&path, contents).expect("write fixture file");
+            path
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.root.join(name)
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn key_ref(path: &Path, key: &str) -> SourceRef {
+        SourceRef::DotenvKey {
+            entered: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
+            key: key.to_string(),
+        }
+    }
+
+    fn all_ref(path: &Path) -> SourceRef {
+        SourceRef::DotenvAll {
+            entered: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
+        }
+    }
+
     fn env_ref(name: &str) -> SourceRef {
         SourceRef::Env {
             name: name.to_string(),
@@ -129,42 +372,33 @@ mod tests {
     }
 
     #[test]
-    fn a_present_value_resolves_with_a_safe_label() {
+    fn a_present_environment_value_resolves_with_a_safe_label() {
         let canary = Canary::generate("GITHUB_TOKEN");
         let environment = Environment::from_pairs([("GITHUB_TOKEN", canary.value())]);
-        match resolve(&env_ref("GITHUB_TOKEN"), &environment) {
-            Resolution::Resolved(secret) => {
-                assert_eq!(secret.value, canary.value());
-                assert_eq!(secret.label, "GITHUB_TOKEN");
+        let mut resolver = Resolver::new();
+        match resolver.resolve(&env_ref("GITHUB_TOKEN"), &environment) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets.len(), 1);
+                assert_eq!(secrets[0].value, canary.value());
+                assert_eq!(secrets[0].label, "GITHUB_TOKEN");
             }
             other => panic!("expected a resolved secret, got {other:?}"),
         }
     }
 
     #[test]
-    fn names_are_case_sensitive() {
-        let environment = Environment::from_pairs([("TOKEN", "value")]);
+    fn environment_names_are_case_sensitive_and_empty_values_are_unresolved() {
+        let environment = Environment::from_pairs([("TOKEN", "value"), ("EMPTY", "")]);
+        let mut resolver = Resolver::new();
         assert!(matches!(
-            resolve(&env_ref("token"), &environment),
-            Resolution::Unresolved {
-                why: Unresolved::Absent,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn unset_and_empty_values_are_unresolved() {
-        let environment = Environment::from_pairs([("EMPTY", "")]);
-        assert!(matches!(
-            resolve(&env_ref("MISSING"), &environment),
+            resolver.resolve(&env_ref("token"), &environment),
             Resolution::Unresolved {
                 why: Unresolved::Absent,
                 ..
             }
         ));
         assert!(matches!(
-            resolve(&env_ref("EMPTY"), &environment),
+            resolver.resolve(&env_ref("EMPTY"), &environment),
             Resolution::Unresolved {
                 why: Unresolved::Empty,
                 ..
@@ -174,12 +408,13 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn non_utf8_values_are_unresolved_and_never_enter_the_matcher() {
+    fn non_utf8_environment_values_never_enter_the_matcher() {
         use std::os::unix::ffi::OsStringExt;
-        let invalid = OsString::from_vec(vec![b'a', 0xff, b'b']);
+        let invalid = OsString::from_vec(vec![b'a', 0xff]);
         let environment = Environment::from_pairs([(OsString::from("BINARY"), invalid)]);
+        let mut resolver = Resolver::new();
         assert!(matches!(
-            resolve(&env_ref("BINARY"), &environment),
+            resolver.resolve(&env_ref("BINARY"), &environment),
             Resolution::Unresolved {
                 why: Unresolved::NonUtf8,
                 ..
@@ -188,9 +423,158 @@ mod tests {
     }
 
     #[test]
-    fn the_process_snapshot_reads_inherited_variables() {
-        let environment = Environment::from_process();
-        // PATH is present in every supported development and hook environment.
-        assert!(environment.get("PATH").is_some());
+    fn a_dotenv_key_resolves_to_its_current_value() {
+        let canary = Canary::generate("STRIPE_API_KEY");
+        let fixture = Fixture::new();
+        let path = fixture.write(
+            ".env.local",
+            &format!("OTHER=1\nSTRIPE_API_KEY={}\n", canary.value()),
+        );
+        let mut resolver = Resolver::new();
+        match resolver.resolve(&key_ref(&path, "STRIPE_API_KEY"), &Environment::default()) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets[0].value, canary.value());
+                assert_eq!(secrets[0].label, "STRIPE_API_KEY");
+            }
+            other => panic!("expected a resolved secret, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn absent_files_keys_and_empty_values_are_unresolved() {
+        let fixture = Fixture::new();
+        let path = fixture.write(".env", "PRESENT=value\nEMPTY=\n");
+        let mut resolver = Resolver::new();
+        let environment = Environment::default();
+
+        assert!(matches!(
+            resolver.resolve(&key_ref(&fixture.path(".env.missing"), "ANY"), &environment),
+            Resolution::Unresolved {
+                why: Unresolved::Absent,
+                ..
+            }
+        ));
+        assert!(matches!(
+            resolver.resolve(&key_ref(&path, "MISSING"), &environment),
+            Resolution::Unresolved {
+                why: Unresolved::KeyAbsent,
+                ..
+            }
+        ));
+        assert!(matches!(
+            resolver.resolve(&key_ref(&path, "EMPTY"), &environment),
+            Resolution::Unresolved {
+                why: Unresolved::Empty,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_wildcard_entry_resolves_every_current_non_empty_key() {
+        let first = Canary::generate("A_TOKEN");
+        let second = Canary::generate("B_SECRET");
+        let fixture = Fixture::new();
+        let path = fixture.write(
+            ".env",
+            &format!(
+                "A_TOKEN={}\nEMPTY=\nB_SECRET={}\n",
+                first.value(),
+                second.value()
+            ),
+        );
+        let mut resolver = Resolver::new();
+        match resolver.resolve(&all_ref(&path), &Environment::default()) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets.len(), 2);
+                assert_eq!(secrets[0].label, "A_TOKEN");
+                assert_eq!(secrets[1].label, "B_SECRET");
+            }
+            other => panic!("expected resolved secrets, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_and_invalid_utf8_files_are_malfunctions() {
+        let fixture = Fixture::new();
+        let malformed = fixture.write(".env.malformed", "A=1\nthis is not an assignment\n");
+        let invalid = fixture.path(".env.binary");
+        std::fs::write(&invalid, [b'A', b'=', 0xff, b'\n']).expect("write binary fixture");
+
+        let mut resolver = Resolver::new();
+        let environment = Environment::default();
+        assert!(matches!(
+            resolver.resolve(&key_ref(&malformed, "A"), &environment),
+            Resolution::Malfunction {
+                why: SourceMalfunction::Malformed { line: 2, .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            resolver.resolve(&key_ref(&invalid, "A"), &environment),
+            Resolution::Malfunction {
+                why: SourceMalfunction::NotUtf8,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_unreadable_file_is_a_malfunction() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new();
+        let path = fixture.write(".env.locked", "A=1\n");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
+            .expect("remove permissions");
+
+        let mut resolver = Resolver::new();
+        let resolution = resolver.resolve(&key_ref(&path, "A"), &Environment::default());
+        // A privileged test runner can still read the file; skip in that case.
+        if std::fs::read(&path).is_err() {
+            assert!(matches!(
+                resolution,
+                Resolution::Malfunction {
+                    why: SourceMalfunction::Unreadable,
+                    ..
+                }
+            ));
+        }
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    #[test]
+    fn a_file_is_read_once_per_event_and_duplicates_are_recorded() {
+        let fixture = Fixture::new();
+        let path = fixture.write(".env", "A=first\nB=2\nA=second\n");
+        let mut resolver = Resolver::new();
+        let environment = Environment::default();
+
+        assert!(matches!(
+            resolver.resolve(&key_ref(&path, "A"), &environment),
+            Resolution::Resolved(_)
+        ));
+        assert_eq!(resolver.duplicate_keys(&path), ["A"]);
+
+        // Removing the file after the first read must not change this event.
+        std::fs::remove_file(&path).expect("remove fixture file");
+        match resolver.resolve(&key_ref(&path, "A"), &environment) {
+            Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "second"),
+            other => panic!("expected the cached parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dotenv_labels_derive_from_the_key_never_the_path() {
+        let fixture = Fixture::new();
+        let path = fixture.write("secret-directory-name.env", "API_KEY=value\n");
+        let mut resolver = Resolver::new();
+        match resolver.resolve(&key_ref(&path, "API_KEY"), &Environment::default()) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets[0].label, "API_KEY");
+                assert!(!secrets[0].label.contains("secret-directory-name"));
+            }
+            other => panic!("expected a resolved secret, got {other:?}"),
+        }
     }
 }

@@ -8,9 +8,12 @@
 pub mod adapter;
 pub mod cli;
 pub mod config;
+pub mod dotenv;
 pub mod matcher;
+pub mod paths;
 pub mod redact;
 pub mod registry;
+pub mod sanitize;
 pub mod secret;
 pub mod source;
 
