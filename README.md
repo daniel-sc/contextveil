@@ -114,6 +114,21 @@ installer that verifies release checksums. The default install location is
 `~/.local/bin/secretsieve`. Installation does not run setup or alter agent
 configuration automatically.
 
+## Development
+
+[mise](https://mise.jdx.dev) is the only supported entry point. It pins the Rust
+toolchain, so no globally installed Rust utility is required. A system C linker
+(`cc`, from `build-essential` or the Xcode command line tools) must be present
+because Rust links through it.
+
+```bash
+mise install         # install the pinned toolchain
+mise run check       # format check, Clippy with warnings denied, tests
+mise run build       # release binary
+mise run fuzz-smoke  # bounded fuzz smoke run
+mise run release-check
+```
+
 ## More Detail
 
 - [Specification](specification.md): authoritative V1 behavior

@@ -1,0 +1,28 @@
+[package]
+name = "secretsieve"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+description = "Keep enrolled local credentials out of coding-agent model context using deterministic exact-value redaction."
+repository = "https://github.com/secretsieve/secretsieve"
+readme = "README.md"
+keywords = ["secrets", "redaction", "coding-agent", "security"]
+categories = ["command-line-utilities"]
+publish = false
+
+[features]
+# Canary and secret-safe assertion helpers used by integration tests. They are
+# never compiled into a release binary.
+testing = []
+
+[lib]
+name = "secretsieve"
+path = "src/lib.rs"
+
+[[bin]]
+name = "secretsieve"
+path = "src/main.rs"
+
+[profile.release]
+strip = "symbols"

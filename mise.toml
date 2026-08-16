@@ -1,0 +1,44 @@
+min_version = "2025.1.0"
+
+[tools]
+rust = "1.97.1"
+
+[env]
+# Keep builds and tool output inside the repository so tasks behave the same
+# locally and in CI.
+CARGO_TERM_COLOR = "always"
+
+[settings]
+experimental = true
+
+[tasks.format]
+description = "Format all Rust sources"
+run = "cargo fmt --all"
+
+[tasks.format-check]
+description = "Verify formatting without rewriting sources"
+run = "cargo fmt --all -- --check"
+
+[tasks.lint]
+description = "Run Clippy with warnings denied"
+run = "cargo clippy --all-targets --all-features --locked -- -D warnings"
+
+[tasks.test]
+description = "Run the unit, integration, and protocol-fixture tests"
+run = "cargo test --all-features --locked"
+
+[tasks.build]
+description = "Build the release binary"
+run = "cargo build --release --locked"
+
+[tasks.check]
+description = "Routine local quality gate"
+depends = ["format-check", "lint", "test"]
+
+[tasks.fuzz-smoke]
+description = "Bounded fuzz smoke run over untrusted input surfaces"
+run = "bash scripts/fuzz-smoke.sh"
+
+[tasks.release-check]
+description = "Verify release artifacts, checksums, and installer behavior"
+run = "bash scripts/release-check.sh"

@@ -54,7 +54,7 @@ are complete.
 
 **Closes:** planning prerequisite only; no runtime requirement is implemented.
 
-### [ ] T001: Bootstrap Rust And Mise
+### [x] T001: Bootstrap Rust And Mise
 
 **Depends on:** `T000`
 
@@ -80,6 +80,29 @@ are complete.
 
 **Contributes to:** `SUP-001`, `CLI-001` through `CLI-003`, `REL-006`, `TST-005`
 through `TST-007`.
+
+**Evidence:**
+
+- one package (`Cargo.toml`) with `src/lib.rs` and `src/main.rs`, Rust pinned to
+  1.97.1 by `rust-toolchain.toml` and `mise.toml`, and a committed `Cargo.lock`;
+- `mise.toml` provides `format`, `format-check`, `lint`, `test`, `check`,
+  `build`, `fuzz-smoke`, and `release-check`; `check` composes format, lint, and
+  test; `lint` denies warnings and every cargo task uses `--locked`;
+- `src/cli.rs` implements `--help`, `--version`, the three public commands, and
+  the hidden `hook <harness>` entry points; `CLI-001` is covered by a test that
+  rejects `init`/install-style commands, and usage errors never echo argv;
+- `src/testing.rs` provides generated canaries plus absence/presence assertions
+  whose failure messages withhold the value;
+- `tests/cli.rs` exercises the built binary for help, version, hidden entry
+  points, usage exit code 2, and loud unimplemented commands;
+- `.github/workflows/ci.yml` runs `mise run check` and `mise run build` on Linux
+  and macOS runners without duplicating the task command lines; the fuzz and
+  release workflows land with `T100` and `T110`, when their tasks stop failing;
+- `scripts/fuzz-smoke.sh` and `scripts/release-check.sh` fail with an explicit
+  "not implemented yet" message naming the task that implements them;
+- `LICENSE-MIT`, `LICENSE-APACHE`, and `SECURITY.md` satisfy `REL-006`;
+- `mise install`, `mise run check`, and `mise run build` pass locally; a system C
+  linker (`cc`) is the only non-mise prerequisite, as documented in `README.md`.
 
 ### [ ] T010: Build The Claude Walking Slice
 

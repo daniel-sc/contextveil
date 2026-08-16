@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # `SUP-001`: Linux and macOS. The macOS runner is arm64 and the Linux
+        # runner is x86_64, so routine CI exercises both architectures.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@v2
+        with:
+          version: 2026.8.6
+          experimental: true
+
+      - name: Cache cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ matrix.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ matrix.os }}-
+
+      # Routine CI runs the mise tasks themselves; it must not duplicate the
+      # command lines they hide (`AGENTS.md`, `architecture.md`).
+      - run: mise run check
+
+      - run: mise run build
