@@ -891,6 +891,17 @@ other part of this task is done and listed below.
   `DEV-002` (Copilot prompt coverage rests on an inferred host rule) are the only
   open implementation deviations, both recorded with impact, workaround, and
   verification;
+- **Independent reviews.** Two read-only reviews were run against the shipped
+  code. The first covered the core and found that an empty value could reach the
+  matcher in a release build and that `U+061C` escaped `SEC-006` sanitization;
+  both were fixed under `T020`. The second covered the adapters, installers,
+  plugin, and release tooling, and found that the Copilot and OpenCode installers
+  treated a hand-edited managed file as merely stale, so an edit would have been
+  reverted and the file deleted on removal; both now preserve it, matching the
+  shared JSON hooks installer. A self-review of `install.sh` in the same pass
+  found that a hostile release archive could ship its binary member as a symlink
+  or carry extra paths, so extraction is now limited to that one member and
+  refuses anything that is not a regular file;
 - `mise run check`, `mise run fuzz-smoke`, and `mise run release-check` pass on
   this target.
 
