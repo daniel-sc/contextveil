@@ -15,17 +15,46 @@ const TEMPLATE = resolve(import.meta.dir, "../../assets/opencode/plugin.ts");
 const BINARY = resolve(
   process.env.SECRETSIEVE_TEST_BINARY ?? "target/debug/secretsieve",
 );
+const MISSING_BINARY = "/nonexistent/secretsieve";
 
 let workspace: string;
+let invalidProtocolStub: string;
+let failingStub: string;
 
-/** Writes a plugin instance pointing at `binary` and returns its hooks. */
-async function loadPlugin(binary: string, client: any) {
+/** Every binary path the fixtures substitute into the template, to its instance. */
+const instances = new Map<string, string>();
+
+/**
+ * Writes one plugin instance per binary path, substituting it exactly as
+ * `integration::opencode::render` does.
+ *
+ * Bun's resolver caches a directory's entries the first time it resolves inside
+ * it, so a file written afterwards can stay invisible to `import`
+ * (`oven-sh/bun#20013`, observed on macOS). Every instance is therefore written
+ * before the first import rather than one per call.
+ */
+async function writeInstances(binaries: string[]) {
   const source = await Bun.file(TEMPLATE).text();
-  const instance = join(workspace, `plugin-${crypto.randomUUID()}.ts`);
-  writeFileSync(
-    instance,
-    source.replace('"__SECRETSIEVE_BINARY__"', JSON.stringify(binary)),
-  );
+  for (const [index, binary] of binaries.entries()) {
+    const instance = join(workspace, `plugin-${index}.ts`);
+    writeFileSync(
+      instance,
+      source.replace('"__SECRETSIEVE_BINARY__"', JSON.stringify(binary)),
+    );
+    instances.set(binary, instance);
+  }
+}
+
+/** Loads the instance pointing at `binary` and returns its hooks. */
+async function loadPlugin(binary: string, client: any) {
+  const instance = instances.get(binary);
+  if (!instance) {
+    throw new Error(
+      `no plugin instance was written for ${binary}; add it to writeInstances`,
+    );
+  }
+  // The template holds no mutable state, so re-driving a cached instance with a
+  // fresh client is equivalent to loading it again.
   const module = await import(instance);
   const plugin = Object.values(module).find(
     (value) => typeof value === "function",
@@ -78,8 +107,16 @@ function enrollInvalid() {
 
 const CANARY = `SSCANARY-PLUGIN-${crypto.randomUUID()}`;
 
-beforeAll(() => {
+beforeAll(async () => {
   workspace = mkdtempSync(join(tmpdir(), "secretsieve-plugin-"));
+  invalidProtocolStub = join(workspace, "invalid-protocol.sh");
+  failingStub = join(workspace, "failing.sh");
+  await writeInstances([
+    BINARY,
+    MISSING_BINARY,
+    invalidProtocolStub,
+    failingStub,
+  ]);
 });
 
 afterAll(() => {
@@ -145,7 +182,7 @@ test("explicitly unsupported paths are left alone without spawning", async () =>
   enroll("PLUGIN_TOKEN", CANARY);
   // A missing binary would throw if the plugin tried to run it, so these cases
   // also prove no subprocess is started.
-  const hooks = await loadPlugin("/nonexistent/secretsieve", recordingClient());
+  const hooks = await loadPlugin(MISSING_BINARY, recordingClient());
 
   const parts = [{ type: "file", filename: "a.txt" }];
   await hooks["chat.message"]({ sessionID: "s1" }, { message: {}, parts });
@@ -163,7 +200,7 @@ test("explicitly unsupported paths are left alone without spawning", async () =>
 
 test("a subprocess failure aborts the covered operation", async () => {
   enroll("PLUGIN_TOKEN", CANARY);
-  const hooks = await loadPlugin("/nonexistent/secretsieve", recordingClient());
+  const hooks = await loadPlugin(MISSING_BINARY, recordingClient());
   const parts = [{ type: "text", text: CANARY }];
 
   // `RUN-003`: the plugin throws rather than passing content through.
@@ -175,9 +212,10 @@ test("a subprocess failure aborts the covered operation", async () => {
 
 test("invalid protocol output aborts the covered operation", async () => {
   enroll("PLUGIN_TOKEN", CANARY);
-  const stub = join(workspace, "invalid-protocol.sh");
-  writeFileSync(stub, "#!/bin/sh\necho 'not json'\n", { mode: 0o755 });
-  const hooks = await loadPlugin(stub, recordingClient());
+  writeFileSync(invalidProtocolStub, "#!/bin/sh\necho 'not json'\n", {
+    mode: 0o755,
+  });
+  const hooks = await loadPlugin(invalidProtocolStub, recordingClient());
 
   expect(
     hooks["tool.execute.after"](
@@ -189,9 +227,8 @@ test("invalid protocol output aborts the covered operation", async () => {
 
 test("a nonzero exit status aborts the covered operation", async () => {
   enroll("PLUGIN_TOKEN", CANARY);
-  const stub = join(workspace, "failing.sh");
-  writeFileSync(stub, "#!/bin/sh\nexit 3\n", { mode: 0o755 });
-  const hooks = await loadPlugin(stub, recordingClient());
+  writeFileSync(failingStub, "#!/bin/sh\nexit 3\n", { mode: 0o755 });
+  const hooks = await loadPlugin(failingStub, recordingClient());
 
   expect(
     hooks["tool.execute.after"](
