@@ -8,11 +8,14 @@
 use std::path::Path;
 
 /// Documents that make public claims about what SecretSieve does.
-const PUBLIC_DOCUMENTS: [&str; 4] = [
+const PUBLIC_DOCUMENTS: [&str; 5] = [
     "README.md",
     "vision.md",
     "docs/release-notes-template.md",
     "SECURITY.md",
+    // Release evidence states what a qualification run proved; it must not
+    // overclaim either (`REL-008`).
+    "docs/qualification.md",
 ];
 
 fn read(relative: &str) -> String {

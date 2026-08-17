@@ -44,7 +44,7 @@ run `secretsieve doctor` after upgrading a coding agent.
 
 | Host | Verified against |
 | --- | --- |
-| Claude Code | 2.1.233, by inspecting the shipped binary's own hook protocol strings |
+| Claude Code | 2.1.233, by inspecting the shipped binary's own hook protocol strings, and by the live intervention-and-resume qualification recorded in `docs/qualification.md` (`REL-008`) |
 | OpenAI Codex CLI | `openai/codex` source at commit `c6058cca`, `codex-rs/hooks` and `codex-rs/config` |
 | GitHub Copilot CLI | 1.0.80, against the published hooks reference |
 | OpenCode | 1.18.18, by inspecting the installed plugin API types and runtime call sites |

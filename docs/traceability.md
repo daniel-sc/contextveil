@@ -206,7 +206,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | DIA-002 | Registry and integration health are independent facets; zero active values shown as `INACTIVE` | src/diagnose.rs (registry/integration facets kept separate) | tests/diagnose.rs::a_partially_unresolved_registry_is_healthy, ::a_fully_inactive_registry_is_a_health_failure | covered |
 | DIA-003 | Doctor additionally checks permissions, source errors, aliases, collisions, ownership, disabled hooks, conflicts, executables, timeouts, synthetic protocol behavior | src/diagnose.rs (`inspect` and permission/timeout/synthetic-check helpers, ~line 502, 720) | tests/diagnose.rs::malformed_configuration_fails_doctor_but_not_status, ::status_recognizes_a_hook_that_points_at_the_running_binary, ::an_uninstalled_integration_reports_no_timeout | covered |
 | DIA-004 | Collision findings are warnings only; never change enrollment or doctor exit status | src/diagnose.rs (collision findings marked advisory) | tests/diagnose.rs (collision test asserting exit status is unaffected, ~line 916) | covered |
-| DIA-005 | Optional paid/networked Claude live canary, disabled by default, requires confirmation, uses a random non-credential value | src/diagnose.rs (`LiveCanary` enum, `run_live_canary`); src/cli.rs (`run_doctor` gating) | tests/diagnose.rs::doctor_is_not_offered_the_live_canary_without_a_terminal; the actual network call itself is only exercised by a human (see limitations.md DEV-001) | manual |
+| DIA-005 | Optional paid/networked Claude live canary, disabled by default, requires confirmation, uses a random non-credential value, and passes only on a present placeholder | src/diagnose.rs (`LiveCanary` enum, `run_live_canary`); src/cli.rs (`run_doctor` gating); src/integration/claude.rs (`classify_canary`) | tests/diagnose.rs::doctor_is_not_offered_the_live_canary_without_a_terminal; src/integration/claude.rs::tests (reply classification: placeholder, inconclusive, disclosure, bytes, empty value); only the network request itself is exercised by a human (see limitations.md DEV-001) | manual |
 | DIA-006 | Codex, Copilot, OpenCode have offline synthetic verification only; passing it does not remove the experimental label | src/diagnose.rs (`verify_offline` call, ~line 611-628) | src/integration/{codex,copilot,opencode}.rs offline-verification tests; tests/diagnose.rs (experimental label persists after a passing check) | covered |
 | DIA-007 | A previous successful verification is never a permanent certificate | src/integration/state.rs (`Managed` stores only command + approved conflicts, no pass/fail history); src/diagnose.rs (re-derives every check on every run) | covered-by-design — no field anywhere persists a "verified" or "last passed" state, so a stale pass cannot be represented; doctor re-runs synthetic checks from scratch on every invocation | covered-by-design |
 | DIA-008 | Doctor returns one for any diagnosed protection-preventing condition, two only for usage/internal failures | src/diagnose.rs (exit-code derivation) | tests/diagnose.rs::a_fully_inactive_registry_is_a_health_failure, ::a_missing_integration_is_a_health_failure, ::an_unapproved_conflict_is_a_health_failure, ::an_inspection_that_cannot_complete_exits_two | covered |
@@ -222,7 +222,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | REL-005 | Hooks and plugins never download/install/update the Rust binary | src/integration/mod.rs (doc comment: "no installer, hook, or plugin downloads or updates the binary. The only component that fetches anything is `install.sh`") | covered-by-design — no networking dependency exists in the hook/adapter code paths (Cargo.toml has no HTTP client); install.sh is the sole fetcher | covered-by-design |
 | REL-006 | MIT OR Apache-2.0 license plus a public security-reporting policy | Cargo.toml (`license = "MIT OR Apache-2.0"`); LICENSE-MIT, LICENSE-APACHE | SECURITY.md (reporting instructions, response expectations) | covered |
 | REL-007 | Every V1 release reads earlier V1 config/managed state without requiring setup to run first | scripts/release-check.sh (installs an older release, writes a V1 config, upgrades, reads the config with the new binary) | scripts/release-check.sh (upgrade case, ~line 118-151: "an existing V1 configuration still runtime-readable afterwards") | covered |
-| REL-008 | Release qualification includes a manual live Claude test proving redaction survives session resume | Not automatable by design; gated at release time per tasks.md T120 | limitations.md DEV-001 records this as the manual gate; no automated test exists or should exist (`TST-008`) | manual |
+| REL-008 | Release qualification includes a manual live Claude test proving redaction survives session resume | Not automatable by design; run per release and recorded in docs/qualification.md | Run and passed 2026-08-17 against Claude Code 2.1.233 by an automated session: placeholder survived `claude -r`, value absent from the reply and the stored transcript. Human sign-off on that run is still outstanding (tasks.md T120). No automated test exists or should exist (`TST-008`); limitations.md DEV-001 records the automation gap | manual |
 
 ## 18. Testing And Acceptance (`TST-*`)
 
@@ -250,12 +250,17 @@ worth a maintainer's attention, are listed below.
 
 - **RUN-005** — the p95-latency benchmark is an engineering target, not a
   pass/fail gate; a human must run `mise run bench` and read the result.
-- **DIA-005** — the gating/confirmation/random-value logic around the Claude
-  live canary is tested, but the live network call itself is exercised only
-  when a human runs `secretsieve doctor` and opts in (`limitations.md` DEV-001).
-- **REL-008** — release qualification requires a manual live Claude test
-  proving redaction survives session resume; this is deliberately outside
-  automated CI (`TST-008`) and is recorded as a release gate in `tasks.md` T120.
+- **DIA-005** — the gating, confirmation, random-value, and reply-classification
+  logic around the Claude live canary is tested, but the live network request
+  itself is made only when a human runs `secretsieve doctor` and opts in
+  (`limitations.md` DEV-001).
+- **REL-008** — release qualification requires a manual live Claude test proving
+  redaction survives session resume. It is deliberately outside automated CI
+  (`TST-008`). It was run and passed on 2026-08-17 against Claude Code 2.1.233,
+  but by an automated session rather than by a human at the terminal, so a
+  release manager must still repeat or confirm it. `docs/qualification.md`
+  records the procedure, the host's own transcript records, the result, and the
+  scope of what one run proves, and must be rerun for each release.
 
 **Covered-by-design (nothing to implement; satisfied by an absence):**
 

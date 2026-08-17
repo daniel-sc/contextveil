@@ -597,7 +597,12 @@ enrollment or doctor exit status.
 **DIA-005** Doctor MUST offer an optional paid/networked Claude live canary only.
 It MUST be disabled by default, require confirmation, use a conspicuous random
 non-credential value through a temporary source configuration, and describe the
-single path it tested.
+single path it tested. It MUST treat the reply as passing only when the expected
+placeholder is present and the generated value is absent. A reply containing the
+generated value MUST be a health failure whether or not the placeholder is also
+present. A reply containing neither MUST be reported as having proven nothing:
+visible and never a pass, but not a health failure, because it diagnoses no
+condition that prevents protection (`DIA-008`).
 
 **DIA-006** Codex, Copilot, and OpenCode MUST have offline synthetic verification
 only in V1. Passing verification MUST NOT remove their experimental label.

@@ -400,9 +400,10 @@ assert it is safely reported, not parsed or persisted.
 Contract: `DIA-005`, `TST-008`, `REL-008`
 
 **Observed behavior:** `secretsieve doctor` offers the optional Claude live
-canary, and the code path that runs it is shipped, but no automated test
-executes it. Every other doctor check, including the offline synthetic protocol
-check, is covered by tests.
+canary, and the code path that runs it is shipped, but no automated test starts
+the request. How its reply is classified is a pure function covered by unit
+tests; only the paid, networked request itself is uncovered. Every other doctor
+check, including the offline synthetic protocol check, is covered by tests.
 
 **Reason:** The canary starts a paid, networked Claude Code request and needs
 host credentials. `TST-008` forbids gating routine CI on paid or networked tests,
@@ -418,7 +419,11 @@ reported as a failure.
 before relying on it, and treat `REL-008` as the gate for release.
 
 **Verification:** The manual live qualification in `REL-008` exercises this path
-against the tested host version, and its result is recorded as release evidence.
+against the tested host version, and its result is recorded as release evidence
+in `docs/qualification.md`. The run of 2026-08-17 against Claude Code 2.1.233
+passed and found that the canary's own pass condition was too weak; that is
+recorded in the same file, along with the fact that the run was performed by an
+automated session and still needs human sign-off.
 
 ### DEV-002: Copilot Prompt Coverage Rests On An Inferred Host Rule
 

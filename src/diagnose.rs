@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::Exit;
 use crate::config::{self, Load};
+use crate::integration::claude::CanaryOutcome;
 use crate::integration::hooks_json::Installed;
 use crate::integration::{self as integration, Detection, HARNESSES, Inspection, Tier, state};
 use crate::matcher::Redactor;
@@ -645,12 +646,35 @@ impl Snapshot {
              that reads a generated non-credential value through the installed hook."
         );
         match integration::claude::live_canary(home) {
-            Ok(()) => Finding::ok(
-                "the live canary value was absent from Claude's reply; this tested one successful \
-                 Bash PostToolUse result only",
-            ),
+            Ok(outcome) => live_canary_finding(outcome),
             Err(reason) => Finding::failure(format!("the live canary failed: {reason}")),
         }
+    }
+}
+
+/// Severity of one live-canary outcome (`DIA-005`, `DIA-008`).
+///
+/// Kept out of `run_live_canary` so the mapping that drives doctor's exit code
+/// is covered without a paid, networked request (`TST-008`, `DEV-001`).
+///
+/// An inconclusive reply is a warning rather than a failure on purpose: it is not
+/// a diagnosed condition that prevents protection, which is what `DIA-008`
+/// reserves exit one for, and the failure summary states that protection is not
+/// effective right now, which would be untrue when the hook may be healthy and
+/// the offline synthetic check passed. It is still never reported as a pass.
+fn live_canary_finding(outcome: CanaryOutcome) -> Finding {
+    match outcome {
+        CanaryOutcome::Redacted => Finding::ok(
+            "the live canary placeholder reached Claude's reply and the generated value did not; \
+             this tested one successful Bash PostToolUse result only",
+        ),
+        CanaryOutcome::Inconclusive => Finding::warning(
+            "the live canary proved nothing: Claude's reply carried neither the generated value \
+             nor its placeholder, so the covered path was not exercised",
+        ),
+        CanaryOutcome::Disclosed => Finding::failure(
+            "the generated value reached Claude's reply, so the covered path did not redact it",
+        ),
     }
 }
 
@@ -744,6 +768,61 @@ fn permission_finding(path: &Path, label: &str) -> Option<Finding> {
 mod tests {
     use super::*;
     use crate::testing::Canary;
+
+    /// The mapping that decides doctor's exit code for the paid canary. A
+    /// disclosure must stay a failure and an inconclusive reply must never be
+    /// reported as a pass (`DIA-005`, `DIA-008`).
+    #[test]
+    fn a_live_canary_outcome_maps_to_the_intended_severity() {
+        assert_eq!(
+            live_canary_finding(CanaryOutcome::Redacted).level,
+            Level::Ok
+        );
+        assert_eq!(
+            live_canary_finding(CanaryOutcome::Inconclusive).level,
+            Level::Warning
+        );
+        assert_eq!(
+            live_canary_finding(CanaryOutcome::Disclosed).level,
+            Level::Failure
+        );
+    }
+
+    /// Only a disclosure may make doctor exit non-zero, and only a redaction may
+    /// leave the report free of a qualifying line.
+    #[test]
+    fn only_a_disclosed_live_canary_is_a_health_failure() {
+        for outcome in [CanaryOutcome::Redacted, CanaryOutcome::Inconclusive] {
+            assert_ne!(
+                live_canary_finding(outcome).level,
+                Level::Failure,
+                "{outcome:?} does not diagnose a condition that prevents protection"
+            );
+        }
+        assert_ne!(
+            live_canary_finding(CanaryOutcome::Inconclusive).level,
+            Level::Ok,
+            "a reply that proved nothing must not read as a pass"
+        );
+    }
+
+    /// No live-canary line may carry a value, source content, or a fingerprint
+    /// (`SEC-004`).
+    #[test]
+    fn no_live_canary_line_quotes_what_it_saw() {
+        for outcome in [
+            CanaryOutcome::Redacted,
+            CanaryOutcome::Inconclusive,
+            CanaryOutcome::Disclosed,
+        ] {
+            let text = live_canary_finding(outcome).text;
+            assert!(
+                !text.contains("SSCANARY")
+                    && !text.contains(crate::integration::SYNTHETIC_VARIABLE),
+                "{outcome:?} quoted the value it inspected: {text}"
+            );
+        }
+    }
 
     struct Fixture {
         root: PathBuf,

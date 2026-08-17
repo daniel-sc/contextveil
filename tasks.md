@@ -844,19 +844,33 @@ through `TST-007`.
 **Blocked on:** three items that cannot be completed from this environment. Every
 other part of this task is done and listed below.
 
-1. **The manual live Claude qualification (`REL-008`).** It starts a paid,
-   networked Claude Code session and must prove that a redacted tool result is
-   still sanitized after `claude --resume`. `secretsieve doctor` offers the live
-   canary for the intervention half; the resume half needs a human. Until it is
-   run, resume coverage must not be claimed, which is why no document claims it.
-2. **Automated gates on the other three release targets.** Only
+1. **Automated gates on the other three release targets.** Only
    `x86_64-unknown-linux-gnu` can be built and exercised here. The release
    workflow builds and packages all four, but that requires CI runners.
-3. **Publishing.** Tagging, pushing, and creating the GitHub Release are outside
+2. **Publishing.** Tagging, pushing, and creating the GitHub Release are outside
    what may be done here, and the repository has no remote release yet.
+3. **Human sign-off on the live qualification.** The `REL-008` run below was
+   performed and passed, but by an automated session rather than by a human at
+   the terminal. `REL-008` is a manual gate so that a human judges the result, so
+   a release manager must repeat or confirm it before the release ships.
+   `docs/qualification.md` records it as a reproducible test report with the
+   host's own transcript records attached, not as a signed-off gate.
 
 **Evidence for the completed parts:**
 
+- **The live Claude qualification (`REL-008`) was run and passed** on 2026-08-17
+  against Claude Code 2.1.233 by an automated session, which is why human
+  sign-off is still listed as a blocker above, in an isolated home so no real
+  harness configuration or enrolled source took part. An enrolled generated value was
+  replaced by its placeholder in the model's reply, the same session was resumed
+  with `claude -r`, and the reply was still the placeholder; the value appeared
+  nowhere under that home, including the stored transcript. The host persists the
+  replaced result, which is why resume has no original to recover.
+  `docs/qualification.md` is the record, including the scope of what one run
+  proves. The run also found that the canary treated "value absent" as a pass,
+  so a reply that never ran the command would have counted as proof; the pass
+  condition now requires the placeholder, matching every offline synthetic check
+  (`DIA-005`), and the classification has unit tests;
 - **Traceability audit.** `docs/traceability.md` has one row for each of the 124
   requirement IDs in `specification.md`, naming its implementation and the test or
   check that would fail on regression. No row is a gap: 116 are covered by a test,

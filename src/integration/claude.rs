@@ -212,18 +212,53 @@ pub(crate) fn run_hook(
     Some(output.stdout)
 }
 
+/// What a live-canary reply shows about the covered path (`DIA-005`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanaryOutcome {
+    /// The placeholder arrived and the generated value did not: it redacted.
+    Redacted,
+    /// Neither arrived, so the reply proves nothing about the covered path.
+    Inconclusive,
+    /// The generated value arrived: the covered path did not redact it.
+    Disclosed,
+}
+
+/// Classifies a live-canary reply.
+///
+/// Absence of the generated value alone is not proof: a reply that declines the
+/// request, or never runs the command, contains no value either. Requiring the
+/// placeholder as well matches every offline synthetic check, which all demand
+/// `SYNTHETIC_PLACEHOLDER` rather than mere absence, and keeps a request that
+/// tested nothing from reading as a pass (`DIA-005`).
+///
+/// This is separated from the request so it is covered by tests without a paid,
+/// networked call (`TST-008`, `DEV-001`).
+pub fn classify_canary(reply: &[u8], canary: &str) -> CanaryOutcome {
+    let contains = |needle: &str| {
+        let needle = needle.as_bytes();
+        !needle.is_empty() && reply.windows(needle.len()).any(|window| window == needle)
+    };
+    if contains(canary) {
+        CanaryOutcome::Disclosed
+    } else if contains(SYNTHETIC_PLACEHOLDER) {
+        CanaryOutcome::Redacted
+    } else {
+        CanaryOutcome::Inconclusive
+    }
+}
+
 /// Runs the optional paid, networked Claude canary (`DIA-005`).
 ///
 /// It enrolls a conspicuous random non-credential value through a temporary
 /// source configuration, asks Claude Code once to print that value with a
-/// narrowly allowed `Bash` tool, and requires the value to be absent from
-/// Claude's reply. It therefore tests exactly one path: a successful `Bash`
-/// `PostToolUse` result flowing through the installed hook.
+/// narrowly allowed `Bash` tool, and classifies the reply. It therefore tests
+/// exactly one path: a successful `Bash` `PostToolUse` result flowing through
+/// the installed hook.
 ///
 /// This is the only network-capable workflow besides installation (`SEC-003`),
-/// it is never enabled by default, and it has no automated coverage by design
-/// (`TST-008`, `DEV-001`).
-pub fn live_canary(home: &Path) -> Result<(), String> {
+/// it is never enabled by default, and the request itself has no automated
+/// coverage by design (`TST-008`, `DEV-001`).
+pub fn live_canary(home: &Path) -> Result<CanaryOutcome, String> {
     let config =
         SyntheticConfig::create("LIVE").ok_or("a temporary configuration could not be created")?;
     let canary = integration::synthetic_canary("LIVE-VALUE");
@@ -265,17 +300,7 @@ pub fn live_canary(home: &Path) -> Result<(), String> {
     if !output.status.success() {
         return Err("Claude exited with a failure status".to_string());
     }
-    if output
-        .stdout
-        .windows(canary.len())
-        .any(|window| window == canary.as_bytes())
-    {
-        return Err(
-            "the generated value reached Claude's reply, so the covered path did not redact it"
-                .to_string(),
-        );
-    }
-    Ok(())
+    Ok(classify_canary(&output.stdout, &canary))
 }
 
 #[cfg(test)]
@@ -284,6 +309,86 @@ mod tests {
     use crate::integration::Detection;
     use crate::source::Environment;
     use crate::testing::Canary;
+
+    /// A reply carrying the placeholder and not the value is the only pass.
+    #[test]
+    fn a_live_canary_reply_passes_only_when_the_placeholder_arrived() {
+        let value = "SSCANARY-LIVE-VALUE-1-0000000000000000";
+        assert_eq!(
+            classify_canary(
+                format!("```\n{SYNTHETIC_PLACEHOLDER}\n```").as_bytes(),
+                value
+            ),
+            CanaryOutcome::Redacted,
+            "the host wraps a verbatim reply in a code fence, so this is a substring match"
+        );
+        assert_eq!(
+            classify_canary(SYNTHETIC_PLACEHOLDER.as_bytes(), value),
+            CanaryOutcome::Redacted
+        );
+    }
+
+    /// Absence of the value alone proves nothing: a refusal contains no value
+    /// either, and reporting that as a pass would be a false assurance.
+    #[test]
+    fn a_reply_that_never_ran_the_command_is_inconclusive_rather_than_a_pass() {
+        let value = "SSCANARY-LIVE-VALUE-2-0000000000000000";
+        for reply in [
+            "I can't run that command.",
+            "",
+            "The environment variable is not set.",
+            "printenv SECRETSIEVE_VERIFY",
+        ] {
+            assert_eq!(
+                classify_canary(reply.as_bytes(), value),
+                CanaryOutcome::Inconclusive,
+                "`{reply}` exercised nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reply_carrying_the_value_is_a_disclosure() {
+        let value = "SSCANARY-LIVE-VALUE-3-0000000000000000";
+        assert_eq!(
+            classify_canary(format!("the value is {value}").as_bytes(), value),
+            CanaryOutcome::Disclosed
+        );
+        // A disclosure outranks the placeholder: one replaced occurrence does
+        // not excuse another that survived.
+        assert_eq!(
+            classify_canary(
+                format!("{SYNTHETIC_PLACEHOLDER} and {value}").as_bytes(),
+                value
+            ),
+            CanaryOutcome::Disclosed
+        );
+    }
+
+    /// Invalid UTF-8 around the placeholder must not hide it, since the reply is
+    /// classified as bytes.
+    #[test]
+    fn classification_reads_bytes_rather_than_text() {
+        let value = "SSCANARY-LIVE-VALUE-4-0000000000000000";
+        let mut reply = vec![0xff, 0xfe];
+        reply.extend_from_slice(SYNTHETIC_PLACEHOLDER.as_bytes());
+        reply.push(0x80);
+        assert_eq!(classify_canary(&reply, value), CanaryOutcome::Redacted);
+    }
+
+    /// An empty needle would otherwise match everything and turn any reply into
+    /// a disclosure.
+    #[test]
+    fn an_empty_value_cannot_match_every_reply() {
+        assert_eq!(
+            classify_canary(SYNTHETIC_PLACEHOLDER.as_bytes(), ""),
+            CanaryOutcome::Redacted
+        );
+        assert_eq!(
+            classify_canary(b"anything", ""),
+            CanaryOutcome::Inconclusive
+        );
+    }
 
     struct Home {
         root: PathBuf,
