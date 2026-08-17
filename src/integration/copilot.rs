@@ -108,6 +108,10 @@ pub fn inspect(
 }
 
 /// Classifies the dedicated file (`INT-004`).
+///
+/// `Outdated` means only the embedded binary path differs, which SecretSieve may
+/// rewrite. Any other difference, such as a hand-edited timeout, means the file
+/// was edited and is preserved rather than reverted or deleted.
 fn classify(path: &Path, executable: Option<&Path>) -> Installed {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -118,19 +122,35 @@ fn classify(path: &Path, executable: Option<&Path>) -> Installed {
         return Installed::Unreadable;
     };
     let commands = event_commands(&value);
+    let modified = || Installed::Modified {
+        command: sanitize::text(&commands.join(", ")),
+    };
     if commands.is_empty() || !commands.iter().all(|command| is_managed_command(command)) {
-        // The dedicated name is SecretSieve's, but this content is not ours to
-        // rewrite or remove.
-        return Installed::Modified {
-            command: sanitize::text(&commands.join(", ")),
-        };
+        // The dedicated name is SecretSieve's, but this content is not ours.
+        return modified();
     }
-    match executable {
-        Some(executable) if text == render(executable) => Installed::Current,
-        _ => Installed::Outdated {
+    if executable.is_some_and(|executable| text == render(executable)) {
+        return Installed::Current;
+    }
+    // Rebuild the file from the path it records; only an exact match means the
+    // binary path is the sole difference.
+    match recorded_executable_in(&value) {
+        Some(recorded) if text == render(&recorded) => Installed::Outdated {
             command: sanitize::text(&commands.join(", ")),
         },
+        _ => modified(),
     }
+}
+
+/// The binary path embedded in a managed command.
+fn recorded_executable_in(value: &Value) -> Option<PathBuf> {
+    event_commands(value).into_iter().find_map(|command| {
+        EVENTS.iter().find_map(|(_, arguments)| {
+            command
+                .strip_suffix(&format!(" {arguments}"))
+                .map(|path| PathBuf::from(path.trim_matches('\'')))
+        })
+    })
 }
 
 /// The executable and timeout recorded in the dedicated file.
@@ -141,13 +161,7 @@ fn managed_entry(path: &Path) -> (Option<PathBuf>, Option<u64>) {
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return (None, None);
     };
-    let executable = event_commands(&value).into_iter().find_map(|command| {
-        EVENTS.iter().find_map(|(_, arguments)| {
-            command
-                .strip_suffix(&format!(" {arguments}"))
-                .map(|path| PathBuf::from(path.trim_matches('\'')))
-        })
-    });
+    let executable = recorded_executable_in(&value);
     let timeout = value
         .get("hooks")
         .and_then(Value::as_object)
@@ -197,7 +211,14 @@ fn conflicts(home: &Path, approved: &[String]) -> Vec<Conflict> {
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| {
-            path.file_name().is_some_and(|name| name != FILENAME)
+            // Only real files are read. A symlink or a special file in this
+            // directory must not be followed: a FIFO or a character device would
+            // block the read, and a symlink could point anywhere.
+            let is_regular = std::fs::symlink_metadata(path)
+                .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+                .unwrap_or(false);
+            is_regular
+                && path.file_name().is_some_and(|name| name != FILENAME)
                 && path
                     .extension()
                     .is_some_and(|extension| extension == "json")
@@ -463,6 +484,63 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn the_conflict_scan_never_follows_a_symlink_or_reads_a_special_file() {
+        let home = Home::new();
+        let hooks = hooks_directory(&home.root);
+        // A FIFO would block a read forever, and a symlink could point anywhere.
+        let fifo = hooks.join("blocking.json");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .expect("mkfifo runs")
+                .success()
+        );
+        std::os::unix::fs::symlink("/etc/passwd", hooks.join("linked.json")).expect("symlink");
+        std::fs::write(
+            hooks.join("real.json"),
+            r#"{"version": 1, "hooks": {"postToolUse": [{"type": "command", "bash": "/other/tool"}]}}"#,
+        )
+        .expect("write real hook file");
+
+        let inspection = home.inspect(&State::default());
+        assert_eq!(inspection.conflicts.len(), 1);
+        assert_eq!(inspection.conflicts[0].command, "/other/tool");
+    }
+
+    #[test]
+    fn hostile_file_shapes_are_classified_without_panicking() {
+        let home = Home::new();
+        for contents in [
+            "[]",
+            "null",
+            r#"{"hooks": []}"#,
+            r#"{"hooks": {"postToolUse": {}}}"#,
+            r#"{"hooks": {"postToolUse": [null, 3, "x", {"type": "command"}]}}"#,
+            r#"{"hooks": {"postToolUse": [{"type": "command", "bash": 5}]}}"#,
+            r#"{"version": "one", "hooks": {"postToolUse": [{"bash": "/x hook copilot tool"}]}}"#,
+        ] {
+            std::fs::write(hook_file(&home.root), contents).expect("write file");
+            let inspection = home.inspect(&State::default());
+            // Whatever the shape, the file is never ours to rewrite.
+            assert!(
+                matches!(
+                    inspection.installed,
+                    Installed::Modified { .. } | Installed::Unreadable | Installed::Absent
+                ),
+                "unexpected classification for {contents}"
+            );
+            assert!(!remove(&home.root, &mut State::default()).expect("remove"));
+            assert_eq!(
+                std::fs::read_to_string(hook_file(&home.root)).expect("read back"),
+                contents,
+                "the file was changed"
+            );
+        }
+    }
+
+    #[test]
     fn a_hand_written_file_with_that_name_is_preserved() {
         let home = Home::new();
         let contents = r#"{"version": 1, "hooks": {"postToolUse": [{"type": "command", "bash": "/mine/tool"}]}}"#;
@@ -481,6 +559,39 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(hook_file(&home.root)).expect("read back"),
             contents
+        );
+    }
+
+    #[test]
+    fn a_hand_edited_managed_file_is_preserved_not_reverted() {
+        // `INT-004`: only a stale binary path may be rewritten. An edit to
+        // anything else, such as the timeout, means the file is no longer ours to
+        // revert or delete.
+        let home = Home::new();
+        let mut state = State::default();
+        install(&home.root, &home.executable(), &mut state).expect("install");
+
+        let edited = std::fs::read_to_string(hook_file(&home.root))
+            .expect("read")
+            .replace("\"timeoutSec\": 5", "\"timeoutSec\": 30");
+        std::fs::write(hook_file(&home.root), &edited).expect("write edit");
+
+        assert!(matches!(
+            home.inspect(&state).installed,
+            Installed::Modified { .. }
+        ));
+        assert_eq!(
+            install(&home.root, &home.executable(), &mut state),
+            Err(InstallError::Unexpected),
+            "an edited file must not be rewritten"
+        );
+        assert!(
+            !remove(&home.root, &mut state).expect("remove"),
+            "an edited file must not be deleted"
+        );
+        assert_eq!(
+            std::fs::read_to_string(hook_file(&home.root)).expect("read back"),
+            edited
         );
     }
 

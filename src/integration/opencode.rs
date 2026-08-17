@@ -95,24 +95,33 @@ fn detect(environment: &crate::source::Environment, home: &Path) -> integration:
 }
 
 /// Classifies the managed plugin file (`INT-004`).
+///
+/// `Outdated` means only the embedded binary path differs, which SecretSieve may
+/// rewrite. Any other difference means the file was edited by hand, and an edited
+/// file is preserved rather than reverted or deleted.
 fn classify(path: &Path, executable: Option<&Path>) -> Installed {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Installed::Absent,
         Err(_) => return Installed::Unreadable,
     };
+    let modified = || Installed::Modified {
+        command: sanitize::path(path),
+    };
     if !text.starts_with(MARKER) {
-        // A file with that name that SecretSieve did not write is not ours to
-        // rewrite or remove.
-        return Installed::Modified {
-            command: sanitize::path(path),
-        };
+        // A file with that name that SecretSieve did not write.
+        return modified();
     }
-    match executable {
-        Some(executable) if text == render(executable) => Installed::Current,
-        _ => Installed::Outdated {
+    if executable.is_some_and(|executable| text == render(executable)) {
+        return Installed::Current;
+    }
+    // Rebuild the file from the path it records. Only if that reproduces it
+    // exactly is the sole difference the binary path.
+    match recorded_executable_in(&text) {
+        Some(recorded) if text == render(&recorded) => Installed::Outdated {
             command: sanitize::path(path),
         },
+        _ => modified(),
     }
 }
 
@@ -122,6 +131,11 @@ fn recorded_executable(path: &Path) -> Option<PathBuf> {
     if !text.starts_with(MARKER) {
         return None;
     }
+    recorded_executable_in(&text)
+}
+
+/// The binary path embedded in plugin source.
+fn recorded_executable_in(text: &str) -> Option<PathBuf> {
     let line = text
         .lines()
         .find(|line| line.starts_with("const SECRETSIEVE_BINARY = "))?;
@@ -327,6 +341,38 @@ mod tests {
     fn an_awkward_binary_path_cannot_break_out_of_the_source_literal() {
         let source = render(Path::new("/tmp/a\"b\\c/secretsieve"));
         assert!(source.contains(r#""/tmp/a\"b\\c/secretsieve""#));
+    }
+
+    #[test]
+    fn a_hand_edited_plugin_is_preserved_not_reverted() {
+        // `INT-004`: the marker comment alone does not make an edited file ours.
+        let home = Home::new();
+        let mut state = State::default();
+        install(&home.root, &home.executable(), &mut state).expect("install");
+
+        let edited = format!(
+            "{}\n// a local change\n",
+            std::fs::read_to_string(plugin_file(&home.root)).expect("read")
+        );
+        std::fs::write(plugin_file(&home.root), &edited).expect("write edit");
+
+        assert!(matches!(
+            home.inspect(&state).installed,
+            Installed::Modified { .. }
+        ));
+        assert_eq!(
+            install(&home.root, &home.executable(), &mut state),
+            Err(InstallError::Unexpected),
+            "an edited plugin must not be rewritten"
+        );
+        assert!(
+            !remove(&home.root, &mut state).expect("remove"),
+            "an edited plugin must not be deleted"
+        );
+        assert_eq!(
+            std::fs::read_to_string(plugin_file(&home.root)).expect("read back"),
+            edited
+        );
     }
 
     #[test]
