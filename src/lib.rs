@@ -9,6 +9,7 @@ pub mod adapter;
 pub mod cli;
 pub mod config;
 pub mod dotenv;
+pub mod integration;
 pub mod matcher;
 pub mod paths;
 pub mod redact;

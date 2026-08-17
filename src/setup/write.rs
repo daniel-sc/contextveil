@@ -98,7 +98,13 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
 /// Returns `Ok(false)` when the file already has exactly this content, so a
 /// rerun with no changes touches nothing.
 pub fn write(path: &Path, sources: &[SourceRef], user_only: bool) -> Result<bool, WriteError> {
-    let contents = render(sources)?;
+    write_text(path, &render(sources)?, user_only)
+}
+
+/// Writes any text file atomically, with the same guarantees as `write`.
+///
+/// Used for configuration and for the integration ownership record.
+pub fn write_text(path: &Path, contents: &str, user_only: bool) -> Result<bool, WriteError> {
     if std::fs::read_to_string(path).is_ok_and(|existing| existing == contents) {
         return Ok(false);
     }

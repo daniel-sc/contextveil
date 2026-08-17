@@ -174,7 +174,13 @@ fn run_setup(err: &mut dyn Write) -> Exit {
     let current_directory =
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut terminal = crate::setup::ui::Terminal::new(std::io::stdin(), std::io::stdout());
-    let exit = crate::setup::run(&mut terminal, &environment, &current_directory);
+    let executable = crate::integration::claude::current_executable();
+    let exit = crate::setup::run(
+        &mut terminal,
+        &environment,
+        &current_directory,
+        executable.as_deref(),
+    );
     terminal.finish();
     exit
 }

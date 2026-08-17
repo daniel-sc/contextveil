@@ -360,7 +360,7 @@ resolver framework yet.
 
 ## Production Integration
 
-### [ ] T050: Finish Claude Production Integration
+### [x] T050: Finish Claude Production Integration
 
 **Depends on:** `T020`, `T030`, `T040`
 
@@ -387,6 +387,39 @@ resolver framework yet.
 
 **Contributes to:** `SEC-001`, `RUN-001`, `RUN-002`, `RUN-004`, `RUN-006`,
 `INT-001` through `INT-006`, `CLA-001` through `CLA-005`, `TST-004`, `TST-005`.
+
+**Evidence:**
+
+- `src/integration/claude.rs` manages exactly one wildcard `PostToolUse` command
+  hook in `~/.claude/settings.json` with `timeout = 5` seconds (`CLA-001`,
+  `RUN-004`) and an absolute binary path that is shell-quoted so the host cannot
+  re-split or expand it (`INT-003`);
+- ownership is established by the recorded command plus the exact managed shape,
+  so an update replaces its own entry, a hand-modified entry is preserved with a
+  warning, and a foreign hook is never touched (`INT-004`);
+- other `PostToolUse` command hooks are discovered, sanitized, and offered for
+  individual approval; approvals are recorded next to the global config and do
+  not make the integration unhealthy (`INT-005`, `CLA-005`, `LIM-017`);
+- `src/integration/state.rs` stores ownership and approvals only, user-only, and
+  a missing or malformed record degrades safely to "not ours to remove";
+- `claude::verify_offline` runs the installed binary against a synthetic
+  `PostToolUse` payload through a temporary configuration, requires the generated
+  value to be replaced, and enforces the same 5-second bound as the host; the
+  setup phase rolls the integration back to its exact prior state when the check
+  fails (`SET-014`, `INT-006`, `DIA-007`);
+- `tests/claude_hook.rs` covers eight successful result shapes, including two MCP
+  shapes, asserting that keys, key order, and non-string values are byte-identical
+  and only string leaves change (`CLA-002`); negative cases cover the failed-tool
+  event, cross-field values, secret-bearing object keys, malformed and non-UTF-8
+  input, unresolved sources, and a 2 MiB payload answered inside the host timeout;
+- `tests/setup.rs` adds six integration-phase cases: clean install with offline
+  verification, deselection removing only the managed entry, conflict decline and
+  approval, undetected-harness disclosure, malformed settings left unchanged, and
+  skipping the phase;
+- schema rejection is a host behavior that cannot be triggered locally; the
+  adapter never synthesizes a shape, which the shape-preservation assertions
+  enforce, and the exposure is recorded in `LIM-013`;
+- `mise run check` passes.
 
 ### [ ] T060: Implement Status And Doctor
 

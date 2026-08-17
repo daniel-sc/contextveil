@@ -19,7 +19,7 @@ pub mod vocabulary;
 pub mod write;
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::cli::Exit;
 use crate::config::{self, Config, ConfigError, Load};
@@ -57,6 +57,7 @@ pub fn run(
     terminal: &mut Terminal<'_>,
     environment: &Environment,
     current_directory: &Path,
+    executable: Option<&Path>,
 ) -> Exit {
     let home = environment.home();
     let Some(global_path) = config::global_config_path(environment) else {
@@ -125,7 +126,13 @@ pub fn run(
         return Exit::Failure;
     }
 
-    match integrations::phase(terminal) {
+    match integrations::phase(
+        terminal,
+        environment,
+        home.as_deref(),
+        &global_path,
+        executable,
+    ) {
         Ok(()) => {}
         Err(exit) => return exit,
     }

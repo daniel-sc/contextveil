@@ -83,9 +83,20 @@ impl Fixture {
         let mut output: Vec<u8> = Vec::new();
         let exit = {
             let mut terminal = Terminal::new(std::io::Cursor::new(script.to_string()), &mut output);
-            setup::run(&mut terminal, environment, directory)
+            // The real binary is used so the integration phase can install a
+            // working hook and verify it offline.
+            setup::run(
+                &mut terminal,
+                environment,
+                directory,
+                Some(Path::new(env!("CARGO_BIN_EXE_secretsieve"))),
+            )
         };
         (exit, String::from_utf8(output).expect("UTF-8 transcript"))
+    }
+
+    fn claude_settings(&self) -> PathBuf {
+        self.home().join(".claude").join("settings.json")
     }
 }
 
@@ -95,8 +106,8 @@ impl Drop for Fixture {
     }
 }
 
-/// Accepts the default selection in both enrollment phases.
-const ACCEPT_BOTH: &str = "\n\n";
+/// Accepts the defaults in both enrollment phases and the integration phase.
+const ACCEPT_ALL: &str = "\n\n\n";
 
 #[test]
 fn a_gated_environment_candidate_is_enrolled_by_default() {
@@ -108,7 +119,7 @@ fn a_gated_environment_candidate_is_enrolled_by_default() {
         ("PATH", "/usr/bin"),
     ]);
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &environment);
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "transcript:\n{transcript}");
 
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
@@ -131,7 +142,7 @@ fn setup_shows_a_masked_preview_and_its_reason() {
     let fixture = Fixture::new();
     let environment = fixture.environment(&[("API_KEY", canary.value())]);
 
-    let (_, transcript) = fixture.run(ACCEPT_BOTH, &environment);
+    let (_, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     assert!(transcript.contains("(40 characters)"));
     assert!(transcript.contains("name contains `key`"));
@@ -148,11 +159,11 @@ fn rerunning_setup_with_no_changes_is_idempotent() {
     let fixture = Fixture::new();
     let environment = fixture.environment(&[("STRIPE_SECRET", canary.value())]);
 
-    assert_eq!(fixture.run(ACCEPT_BOTH, &environment).0, Exit::Ok);
+    assert_eq!(fixture.run(ACCEPT_ALL, &environment).0, Exit::Ok);
     let first_global = std::fs::read(fixture.global_config()).expect("global config");
     let first_project = std::fs::read(fixture.project_config()).expect("project config");
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &environment);
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok);
     assert_eq!(
         std::fs::read(fixture.global_config()).expect("global config"),
@@ -193,7 +204,7 @@ fn an_invalid_existing_config_is_preserved_byte_for_byte() {
     std::fs::create_dir_all(fixture.global_config().parent().expect("parent")).expect("directory");
     std::fs::write(fixture.global_config(), invalid).expect("write invalid config");
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Failure);
     assert_eq!(
         std::fs::read_to_string(fixture.global_config()).expect("read back"),
@@ -211,7 +222,7 @@ fn an_invalid_project_config_stops_setup_before_the_global_phase() {
     let invalid = "version = 2\n";
     std::fs::write(fixture.project_config(), invalid).expect("write invalid project config");
 
-    let (exit, _) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[("API_TOKEN", "v")]));
+    let (exit, _) = fixture.run(ACCEPT_ALL, &fixture.environment(&[("API_TOKEN", "v")]));
     assert_eq!(exit, Exit::Failure);
     assert!(!fixture.global_config().exists());
     assert_eq!(
@@ -229,7 +240,7 @@ fn project_dotenv_keys_are_discovered_and_gated() {
         &format!("SERVICE_TOKEN={}\nLOG_LEVEL=debug\n", canary.value()),
     );
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
 
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
@@ -250,7 +261,7 @@ fn a_colliding_candidate_is_visible_but_unselected() {
     fixture.write(".env", "APP_SECRET=common\n");
     fixture.write("src/config.rs", "let default = \"common\";\n");
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("collision:"));
     assert!(transcript.contains("src/config.rs"));
@@ -267,7 +278,7 @@ fn a_collision_can_be_overridden_by_the_user() {
     fixture.write(".env", "APP_SECRET=common\n");
     fixture.write("notes.txt", "common\n");
 
-    let (exit, _) = fixture.run("\n1\n\n", &fixture.environment(&[]));
+    let (exit, _) = fixture.run("\n1\n\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok);
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("APP_SECRET"));
@@ -279,7 +290,7 @@ fn wildcard_enrollment_requires_an_extra_confirmation() {
     fixture.write(".env.shared", "A_TOKEN=one\nB=two\n");
 
     // Decline the confirmation: nothing is added.
-    let (exit, transcript) = fixture.run("\nw\n.env.shared\nn\n\n", &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run("\nw\n.env.shared\nn\n\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("every current and future key"));
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
@@ -288,7 +299,7 @@ fn wildcard_enrollment_requires_an_extra_confirmation() {
     // Accept it: the wildcard entry is stored with the path as entered.
     let fixture = Fixture::new();
     fixture.write(".env.shared", "A_TOKEN=one\nB=two\n");
-    let (exit, _) = fixture.run("\nw\n.env.shared\ny\n\n", &fixture.environment(&[]));
+    let (exit, _) = fixture.run("\nw\n.env.shared\ny\n\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok);
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("all = true"));
@@ -300,7 +311,7 @@ fn an_unresolved_manual_source_requires_confirmation() {
     let fixture = Fixture::new();
 
     // Decline: not saved.
-    let (exit, transcript) = fixture.run("e\nABSENT_TOKEN\nn\n\n\n", &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run("e\nABSENT_TOKEN\nn\n\n\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("currently unresolved"));
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
@@ -308,7 +319,7 @@ fn an_unresolved_manual_source_requires_confirmation() {
 
     // Accept: saved even though it does not resolve yet (`SET-005`).
     let fixture = Fixture::new();
-    let (exit, _) = fixture.run("e\nABSENT_TOKEN\ny\n\n\n", &fixture.environment(&[]));
+    let (exit, _) = fixture.run("e\nABSENT_TOKEN\ny\n\n\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok);
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("ABSENT_TOKEN"));
@@ -325,7 +336,7 @@ fn existing_enrollment_survives_a_rerun_even_when_unresolved() {
     )
     .expect("write existing config");
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("ROTATED_TOKEN"));
@@ -342,7 +353,7 @@ fn an_enrolled_entry_can_be_removed_deliberately() {
     )
     .expect("write existing config");
 
-    let (exit, _) = fixture.run("1\n\n\n", &fixture.environment(&[("OLD_TOKEN", "value")]));
+    let (exit, _) = fixture.run("1\n\n\n\n", &fixture.environment(&[("OLD_TOKEN", "value")]));
     assert_eq!(exit, Exit::Ok);
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(!global.contains("OLD_TOKEN"));
@@ -360,7 +371,7 @@ fn an_enrolled_malformed_source_must_be_repaired_or_removed() {
     .expect("write project config");
 
     // Trying to save without removing it is refused, then removal succeeds.
-    let (exit, transcript) = fixture.run("\n\n1\n\n", &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run("\n\n1\n\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("must be repaired or deselected"));
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
@@ -374,7 +385,7 @@ fn an_unavailable_discovered_file_does_not_stop_discovery() {
     fixture.write(".env.broken", "unparseable line\n");
     fixture.write(".env", &format!("GOOD_TOKEN={}\n", canary.value()));
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("GOOD_TOKEN"));
@@ -391,7 +402,7 @@ fn a_non_utf8_path_is_reported_and_never_persisted() {
     let name = OsString::from_vec(vec![b'.', b'e', b'n', b'v', b'.', 0xff]);
     std::fs::write(fixture.project().join(&name), "API_TOKEN=value\n").expect("write file");
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(!project.contains("\\xff"));
@@ -414,7 +425,7 @@ fn a_project_phase_failure_keeps_the_committed_global_phase() {
     let writable = std::fs::write(fixture.project().join(".probe"), "x").is_ok();
 
     let environment = fixture.environment(&[("KEEP_TOKEN", canary.value())]);
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &environment);
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     let _ = std::fs::set_permissions(fixture.project(), std::fs::Permissions::from_mode(0o700));
 
     if writable {
@@ -437,7 +448,7 @@ fn the_project_root_is_selected_from_the_working_directory() {
     let nested = fixture.project().join("packages").join("app");
     std::fs::create_dir_all(&nested).expect("nested directory");
 
-    let (exit, _) = fixture.run_from(ACCEPT_BOTH, &fixture.environment(&[]), &nested);
+    let (exit, _) = fixture.run_from(ACCEPT_ALL, &fixture.environment(&[]), &nested);
     assert_eq!(exit, Exit::Ok);
     assert!(fixture.project_config().exists());
     assert!(!nested.join(".secretsieve.toml").exists());
@@ -454,7 +465,7 @@ fn global_dotenv_probing_covers_the_documented_locations() {
     )
     .expect("write harness dotenv");
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("~/.claude/.env"));
@@ -469,7 +480,7 @@ fn the_transcript_never_contains_a_full_value_or_a_fingerprint() {
     fixture.write(".env", &format!("MASTER_PASSWORD={}\n", canary.value()));
     let environment = fixture.environment(&[("MASTER_PASSWORD", canary.value())]);
 
-    let (_, transcript) = fixture.run(ACCEPT_BOTH, &environment);
+    let (_, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     // No deterministic fingerprint is shown either (`SET-010`).
     assert!(!transcript.contains("sha"));
@@ -482,9 +493,139 @@ fn terminal_escapes_in_names_and_paths_are_neutralized() {
     let hostile = "\u{1b}[31mAPI_TOKEN";
     let environment = fixture.environment(&[(hostile, "value")]);
 
-    let (_, transcript) = fixture.run(ACCEPT_BOTH, &environment);
+    let (_, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert!(!transcript.contains('\u{1b}'));
     assert!(transcript.contains("\\e[31mAPI_TOKEN"));
+}
+
+/// Marks Claude Code as present so the integration phase detects it.
+fn detect_claude(fixture: &Fixture) {
+    std::fs::create_dir_all(fixture.home().join(".claude")).expect("claude directory");
+}
+
+#[test]
+fn the_claude_hook_is_installed_and_verified_offline() {
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("detected"));
+    assert!(transcript.contains("Installed the Claude hook"));
+    assert!(transcript.contains("Offline protocol check passed"));
+
+    let settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture.claude_settings()).expect("settings"),
+    )
+    .expect("valid JSON");
+    let group = &settings["hooks"]["PostToolUse"][0];
+    assert_eq!(group["matcher"], serde_json::json!("*"));
+    assert_eq!(group["hooks"][0]["type"], serde_json::json!("command"));
+    assert_eq!(group["hooks"][0]["timeout"], serde_json::json!(5));
+    let command = group["hooks"][0]["command"].as_str().expect("command");
+    assert!(command.ends_with(" hook claude"));
+    assert!(command.starts_with('/') || command.starts_with('\''));
+
+    // Ownership is recorded next to the global configuration.
+    let record =
+        std::fs::read_to_string(fixture.global_config().with_file_name("integrations.toml"))
+            .expect("integration record");
+    assert!(record.contains("hook claude"));
+}
+
+#[test]
+fn deselecting_the_integration_removes_only_the_managed_hook() {
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    std::fs::write(
+        fixture.claude_settings(),
+        r#"{"model": "opus", "hooks": {"PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/other/tool"}]}]}}"#,
+    )
+    .expect("write settings");
+
+    // The pre-existing hook is a conflict, so the first run answers its prompt.
+    assert_eq!(
+        fixture.run("\n\n\nn\n", &fixture.environment(&[])).0,
+        Exit::Ok
+    );
+    let (exit, transcript) = fixture.run("\n\n1\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Removed the Claude hook"));
+
+    let settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture.claude_settings()).expect("settings"),
+    )
+    .expect("valid JSON");
+    assert_eq!(settings["model"], serde_json::json!("opus"));
+    let groups = settings["hooks"]["PostToolUse"].as_array().expect("array");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(
+        groups[0]["hooks"][0]["command"],
+        serde_json::json!("/other/tool")
+    );
+}
+
+#[test]
+fn a_competing_mutating_hook_is_offered_for_approval() {
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    std::fs::write(
+        fixture.claude_settings(),
+        r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/other/mutator"}]}]}}"#,
+    )
+    .expect("write settings");
+
+    // Decline first: the conflict stays unapproved.
+    let (exit, transcript) = fixture.run("\n\n\nn\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("/other/mutator"));
+    assert!(transcript.contains("can also change tool results"));
+    let record_path = fixture.global_config().with_file_name("integrations.toml");
+    let record = std::fs::read_to_string(&record_path).expect("integration record");
+    assert!(!record.contains("/other/mutator"));
+
+    // Approve on the next run: the approval is recorded (`INT-005`).
+    let (exit, _) = fixture.run("\n\n\ny\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok);
+    let record = std::fs::read_to_string(&record_path).expect("integration record");
+    assert!(record.contains("/other/mutator"));
+}
+
+#[test]
+fn an_undetected_harness_discloses_limited_verification() {
+    let fixture = Fixture::new();
+    // No `~/.claude` directory and no executable on PATH.
+    let (exit, transcript) =
+        fixture.run("\n\n1\n\n", &fixture.environment(&[("PATH", "/nowhere")]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("not detected"));
+    assert!(transcript.contains("cannot \nconfirm") || transcript.contains("cannot confirm"));
+    assert!(fixture.claude_settings().exists());
+}
+
+#[test]
+fn a_malformed_settings_file_fails_the_integration_phase_without_changing_it() {
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    let malformed = "{ not json";
+    std::fs::write(fixture.claude_settings(), malformed).expect("write settings");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Failure, "{transcript}");
+    assert!(transcript.contains("Installation failed"));
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_settings()).expect("read back"),
+        malformed
+    );
+}
+
+#[test]
+fn skipping_the_integration_phase_changes_nothing() {
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    let (exit, transcript) = fixture.run("\n\ns\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!fixture.claude_settings().exists());
 }
 
 #[test]
@@ -499,7 +640,7 @@ fn duplicate_dotenv_keys_are_warned_about_without_values() {
         ),
     );
 
-    let (exit, transcript) = fixture.run(ACCEPT_BOTH, &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("more than once"));
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
