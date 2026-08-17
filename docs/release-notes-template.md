@@ -36,6 +36,19 @@ production support promise, and always require an affirmative choice during
 setup. Coverage applies only where a local harness loads and honors the installed
 integration.
 
+## Tested host versions
+
+Protocol behavior was verified against these host versions. V1 performs no host
+version checks (`LIM-018`), so these are evidence rather than a supported range:
+run `secretsieve doctor` after upgrading a coding agent.
+
+| Host | Verified against |
+| --- | --- |
+| Claude Code | 2.1.233, by inspecting the shipped binary's own hook protocol strings |
+| OpenAI Codex CLI | `openai/codex` source at commit `c6058cca`, `codex-rs/hooks` and `codex-rs/config` |
+| GitHub Copilot CLI | 1.0.80, against the published hooks reference |
+| OpenCode | 1.18.18, by inspecting the installed plugin API types and runtime call sites |
+
 ## Platforms
 
 Linux and macOS on x86_64 and arm64. Each asset is listed in

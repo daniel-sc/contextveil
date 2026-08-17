@@ -54,8 +54,12 @@ V1 targets Linux and macOS on x86_64 and arm64.
 | OpenCode | EXPERIMENTAL | New V1 `chat.message` user text and successful standard `tool.execute.after` text | Abort when the executing plugin detects a covered malfunction |
 
 Experimental integrations are functional and fixture-tested, but outside the
-production support promise and always opt-in. Coverage applies only where a local
-harness loads and honors the installed integration. See
+production support promise and always opt-in.
+
+Coverage applies only where a local harness loads and honors the integration that
+setup installed for your user account. Cloud, remote, container, and
+managed-policy modes are covered only if SecretSieve is installed separately there
+and that environment honors the configured hook. See
 [limitations.md](limitations.md) for host-specific gaps.
 
 ## Commands

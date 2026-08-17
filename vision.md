@@ -117,8 +117,8 @@ change.
   remain visible.
 - **Small and inspectable.** Prefer the smallest maintainable implementation
   that preserves the security claim.
-- **Free and open source.** Keep the complete protection path available under
-  permissive licenses without an account or hosted dependency.
+- **Free and open source.** Keep the entire protection path inspectable under
+  permissive licenses, without an account or hosted dependency.
 - **Pragmatic evolution.** Tactical implementation choices may vary when they
   preserve intent and observable behavior. Known gaps belong in
   [limitations.md](limitations.md).

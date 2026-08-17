@@ -57,6 +57,9 @@ required-features = ["testing"]
 name = "limits"
 required-features = ["testing"]
 
+[[test]]
+name = "wording"
+
 [[bench]]
 name = "redaction"
 harness = false
