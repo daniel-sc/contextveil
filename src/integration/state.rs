@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::integration::Harness;
+
 /// File name inside the global SecretSieve configuration directory.
 pub const STATE_FILENAME: &str = "integrations.toml";
 
@@ -17,9 +19,10 @@ pub const STATE_FILENAME: &str = "integrations.toml";
 pub struct State {
     #[serde(default = "one")]
     pub version: i64,
-    /// The Claude integration, when SecretSieve installed one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude: Option<Managed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex: Option<Managed>,
 }
 
 fn one() -> i64 {
@@ -29,11 +32,43 @@ fn one() -> i64 {
 /// What SecretSieve installed for one harness, and what the user approved.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Managed {
-    /// The exact command string that was installed.
+    /// The exact command or artifact identity that was installed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub command: String,
     /// Competing mutating hooks the user approved (`INT-005`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub approved_conflicts: Vec<String>,
+}
+
+impl State {
+    pub fn get(&self, harness: Harness) -> Option<&Managed> {
+        match harness {
+            Harness::Claude => self.claude.as_ref(),
+            Harness::Codex => self.codex.as_ref(),
+        }
+    }
+
+    /// Mutable state for one harness, created empty when absent.
+    pub fn entry(&mut self, harness: Harness) -> &mut Managed {
+        match harness {
+            Harness::Claude => self.claude.get_or_insert_with(Managed::default),
+            Harness::Codex => self.codex.get_or_insert_with(Managed::default),
+        }
+    }
+
+    pub fn set(&mut self, harness: Harness, managed: Option<Managed>) {
+        match harness {
+            Harness::Claude => self.claude = managed,
+            Harness::Codex => self.codex = managed,
+        }
+    }
+
+    /// Conflicts the user approved for one harness.
+    pub fn approved_conflicts(&self, harness: Harness) -> Vec<String> {
+        self.get(harness)
+            .map(|managed| managed.approved_conflicts.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// Path of the state file next to the global configuration file.
@@ -76,18 +111,21 @@ mod tests {
     }
 
     #[test]
-    fn state_round_trips() {
+    fn state_round_trips_for_every_harness() {
         let root = temporary();
         let file = path(&root.join("config.toml"));
         assert_eq!(file.file_name().expect("name"), STATE_FILENAME);
 
-        let state = State {
-            version: 1,
-            claude: Some(Managed {
-                command: "/opt/secretsieve hook claude".to_string(),
-                approved_conflicts: vec!["/other/hook".to_string()],
-            }),
-        };
+        let mut state = State::default();
+        for harness in crate::integration::HARNESSES {
+            state.set(
+                harness,
+                Some(Managed {
+                    command: format!("/opt/secretsieve hook {harness:?}"),
+                    approved_conflicts: vec!["/other/hook".to_string()],
+                }),
+            );
+        }
         save(&file, &state).expect("save");
         assert_eq!(load(&file), state);
         let _ = std::fs::remove_dir_all(&root);
@@ -114,10 +152,21 @@ mod tests {
         .expect("write state");
         let state = load(&file);
         assert_eq!(
-            state.claude.expect("claude state").command,
+            state.get(Harness::Claude).expect("claude state").command,
             "/x hook claude"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn approvals_are_recorded_per_harness() {
+        let mut state = State::default();
+        state
+            .entry(Harness::Codex)
+            .approved_conflicts
+            .push("/other".to_string());
+        assert_eq!(state.approved_conflicts(Harness::Codex), ["/other"]);
+        assert!(state.approved_conflicts(Harness::Claude).is_empty());
     }
 
     #[test]

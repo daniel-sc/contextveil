@@ -202,18 +202,36 @@ negative failed-result cases. Manual release qualification checks resume replay.
 ### LIM-014: Codex Textual Replacement
 
 **Reality:** Codex does not provide shape-preserving `tool_response` replacement.
-On intervention, SecretSieve blocks the original model-facing result and supplies
-a sanitized textual rendering for supported `PostToolUse` events.
+Its `updatedMCPToolOutput` field is rejected by the host, so the only mechanism
+that changes what the model sees is a block decision whose `reason` becomes the
+model-facing text. On intervention, SecretSieve therefore blocks the original
+model-facing result and supplies a sanitized textual rendering for supported
+`PostToolUse` events.
+
+Three further host-specific limits apply, verified against the Codex source:
+
+- a newly installed or changed hook stays untrusted, and untrusted hooks do not
+  run, until the user accepts it in Codex's own hook-review screen;
+- Codex also accepts hooks declared inline in `config.toml`. SecretSieve neither
+  writes nor inspects that form, so a competing mutating hook declared there is
+  not reported as a conflict;
+- a tool call that fails outright emits no `PostToolUse` event at all, while a
+  shell command that merely exits non-zero does emit one and is covered.
 
 **Impact:** A successful or typed result may appear error-like and lose structure,
-images, or code-mode semantics. Hosted or specialized tools may not emit the
-event, and failed-result coverage is not universal.
+images, or code-mode semantics. Protection does not start until the user trusts
+the hook. Hosted or specialized tools may not emit the event, and failed-result
+coverage is not universal.
 
-**Workaround:** Retry with narrower text-producing tools when the sanitized
-replacement no longer gives Codex enough structure.
+**Workaround:** Complete Codex's hook-review step after setup, declare competing
+hooks in `~/.codex/hooks.json` so they are visible to `secretsieve doctor`, and
+retry with narrower text-producing tools when the sanitized replacement no longer
+gives Codex enough structure.
 
-**Verification:** Experimental protocol fixtures assert original suppression and
-document semantic degradation.
+**Verification:** Experimental protocol fixtures assert original suppression,
+cover the non-zero-exit and structured-result paths, and document semantic
+degradation. Setup prints the trust step, and the offline synthetic check
+requires the block decision to carry the placeholder.
 
 ### LIM-015: Copilot Coverage Gaps
 

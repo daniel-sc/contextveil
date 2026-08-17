@@ -2,23 +2,33 @@
 //!
 //! `INT-001`: every supported harness is detected, Claude is selected by default
 //! when detected, and experimental integrations stay unselected unless
-//! SecretSieve already installed them. `INT-002`: an undetected harness may
-//! still be installed, with disclosure. `SET-014`: each integration action is a
-//! separate transaction that restores its prior managed state on failure.
+//! SecretSieve already installed them. `INT-002`: an undetected harness may still
+//! be installed, with disclosure. `SUP-003`: experimental integrations are
+//! labeled and require an affirmative choice. `SET-014`: each integration action
+//! is a separate transaction that restores its prior managed state on failure.
 //!
-//! This is plain code over concrete integrations, not a plugin framework
-//! (`architecture.md`). Codex, Copilot, and OpenCode join it in `T070`, `T080`,
-//! and `T090`.
+//! Dispatch is a plain match over a small enum, not a plugin framework
+//! (`architecture.md`).
 
 use std::path::Path;
 
 use crate::cli::Exit;
-use crate::integration::claude::{self, Installed, Verification};
-use crate::integration::state::State;
-use crate::integration::{Detection, state};
+use crate::integration::hooks_json::Installed;
+use crate::integration::state::{Managed, State};
+use crate::integration::{
+    self, Detection, HARNESSES, Harness, Inspection, Tier, Verification, state,
+};
 use crate::sanitize;
 use crate::setup::ui::{Cancelled, Terminal};
 use crate::source::Environment;
+
+/// One selectable integration row.
+struct Row {
+    inspection: Inspection,
+    selected: bool,
+    /// Whether a managed artifact existed when the phase started.
+    installed: bool,
+}
 
 /// Runs the integration phase.
 ///
@@ -40,104 +50,53 @@ pub fn phase(
 
     let state_path = state::path(global_config_path);
     let mut state = state::load(&state_path);
-    let inspection = claude::inspect(environment, home, executable, &state);
-
-    let installed = matches!(
-        inspection.installed,
-        Installed::Current | Installed::Outdated { .. }
-    );
-    // `INT-001`: Claude is the production integration and is selected by default
-    // when detected.
-    let mut selected = installed || inspection.detection == Detection::Detected;
+    let mut rows: Vec<Row> = HARNESSES
+        .iter()
+        .map(|harness| {
+            let inspection = integration::inspect(*harness, environment, home, executable, &state);
+            let installed = inspection.is_installed();
+            Row {
+                // `INT-001`: production is selected by default when detected;
+                // experimental integrations only when already installed.
+                selected: installed
+                    || (harness.tier() == Tier::Production
+                        && inspection.detection == Detection::Detected),
+                installed,
+                inspection,
+            }
+        })
+        .collect();
 
     loop {
-        terminal.blank();
-        terminal.line(&format!(
-            "   1 [{}] Claude Code (production) - {}, {}",
-            if selected { "x" } else { " " },
-            match inspection.detection {
-                Detection::Detected => "detected",
-                Detection::NotDetected => "not detected",
-            },
-            describe(&inspection.installed)
-        ));
-        terminal.line(&format!(
-            "        settings: {}",
-            sanitize::path(&inspection.settings_path)
-        ));
-        for conflict in &inspection.conflicts {
-            terminal.line(&format!(
-                "        other PostToolUse hook: {} ({})",
-                conflict.command,
-                if conflict.approved {
-                    "approved"
-                } else {
-                    "needs review"
-                }
-            ));
-        }
-        terminal.line(
-            "  Installation is not proof of protection; run `secretsieve doctor` to check it.",
-        );
-
-        let answer = match terminal.ask("Toggle 1, Enter to apply, [s]kip, [q]uit:") {
+        render(terminal, &rows);
+        let answer = match terminal.ask("Toggle numbers, Enter to apply, [s]kip, [q]uit:") {
             Ok(answer) => answer,
             Err(Cancelled) => return cancelled(terminal),
         };
         match answer.trim() {
             "" => break,
-            "1" => selected = !selected,
             "s" => {
                 terminal.line("  Skipped; integrations are unchanged.");
                 terminal.blank();
                 return Ok(());
             }
             "q" => return cancelled(terminal),
-            other => {
-                terminal.line(&format!("  Not a choice: {}", sanitize::text(other)));
-            }
+            selection => toggle(terminal, &mut rows, selection),
         }
     }
 
-    if selected && !installed && inspection.detection == Detection::NotDetected {
-        // `INT-002`: disclose that verification is limited.
-        terminal.line(
-            "  Claude Code was not detected. The hook will be installed, but SecretSieve cannot \
-             confirm the host will load it.",
-        );
-    }
-
-    let outcome = apply(
-        terminal,
-        home,
-        executable,
-        &inspection,
-        selected,
-        installed,
-        &mut state,
-    );
-
-    // `INT-005`: each competing mutating hook is approved individually.
-    if selected {
-        for conflict in &inspection.conflicts {
-            if conflict.approved {
-                continue;
-            }
-            terminal.line(&format!(
-                "  Another PostToolUse hook can also change tool results: {}",
-                conflict.command
-            ));
-            terminal.line(
-                "  SecretSieve cannot stop it from seeing the original result or replacing the \
-                 sanitized one.",
-            );
-            match terminal.confirm("  Keep it and continue?", false) {
-                Ok(true) => claude::approve_conflict(&mut state, &conflict.command),
-                Ok(false) => {
-                    terminal.line("  Leaving it unapproved; `secretsieve doctor` will report it.");
-                }
-                Err(Cancelled) => return cancelled(terminal),
-            }
+    let mut outcome = Ok(());
+    for row in &rows {
+        // `SET-014`: each action is its own transaction, and an earlier
+        // completed action stays applied when a later one fails.
+        let result = apply(terminal, home, executable, row, &mut state);
+        if result.is_err() && outcome.is_ok() {
+            outcome = result;
+        }
+        if row.selected
+            && let Err(Cancelled) = approve_conflicts(terminal, row, &mut state)
+        {
+            return cancelled(terminal);
         }
     }
 
@@ -151,93 +110,209 @@ pub fn phase(
     outcome
 }
 
+fn render(terminal: &mut Terminal<'_>, rows: &[Row]) {
+    terminal.blank();
+    for (index, row) in rows.iter().enumerate() {
+        let harness = row.inspection.harness;
+        terminal.line(&format!(
+            "  {:>2} [{}] {} ({}) - {}, {}",
+            index + 1,
+            if row.selected { "x" } else { " " },
+            harness.label(),
+            harness.tier_label(),
+            match row.inspection.detection {
+                Detection::Detected => "detected",
+                Detection::NotDetected => "not detected",
+            },
+            describe(&row.inspection.installed)
+        ));
+        terminal.line(&format!(
+            "        file: {}",
+            sanitize::path(&row.inspection.artifact_path)
+        ));
+        for conflict in &row.inspection.conflicts {
+            terminal.line(&format!(
+                "        other hook on the same event: {} ({})",
+                conflict.command,
+                if conflict.approved {
+                    "approved"
+                } else {
+                    "needs review"
+                }
+            ));
+        }
+    }
+    terminal
+        .line("  Installation is not proof of protection; run `secretsieve doctor` to check it.");
+}
+
 fn describe(installed: &Installed) -> &'static str {
     match installed {
         Installed::Absent => "not installed",
         Installed::Current => "installed",
         Installed::Outdated { .. } => "installed, pointing at another binary",
         Installed::Modified { .. } => "installed entry was modified by hand",
-        Installed::SettingsUnreadable => "settings file is not valid JSON",
-        Installed::SettingsUnexpected => "settings file has an unexpected shape",
+        Installed::Unreadable => "host file is not valid JSON",
+        Installed::Unexpected => "host file has an unexpected shape",
     }
 }
 
-/// Performs the requested install or removal as one transaction (`SET-014`).
+fn toggle(terminal: &mut Terminal<'_>, rows: &mut [Row], selection: &str) {
+    let mut unknown = Vec::new();
+    for token in selection.split_whitespace() {
+        match token.parse::<usize>() {
+            Ok(number) if number >= 1 && number <= rows.len() => {
+                let row = &mut rows[number - 1];
+                row.selected = !row.selected;
+                if row.selected
+                    && !row.installed
+                    && row.inspection.harness.tier() == Tier::Experimental
+                {
+                    // `SUP-003`: experimental installation is an affirmative
+                    // choice, and the label follows it everywhere.
+                    terminal.line(&format!(
+                        "  {} is EXPERIMENTAL: functional and fixture-tested, but outside the \
+                         production support promise.",
+                        row.inspection.harness.label()
+                    ));
+                }
+            }
+            _ => unknown.push(sanitize::text(token)),
+        }
+    }
+    if !unknown.is_empty() {
+        terminal.line(&format!("  Not a choice: {}", unknown.join(", ")));
+    }
+}
+
+/// Performs one requested install or removal (`SET-014`).
 fn apply(
     terminal: &mut Terminal<'_>,
     home: &Path,
     executable: Option<&Path>,
-    inspection: &claude::Inspection,
-    selected: bool,
-    installed: bool,
+    row: &Row,
     state: &mut State,
 ) -> Result<(), Exit> {
-    if let Installed::Modified { command } = &inspection.installed {
+    let harness = row.inspection.harness;
+    let label = harness.label();
+
+    if let Installed::Modified { command } = &row.inspection.installed {
         // `INT-004`: a hand-modified entry is preserved, not rewritten.
         terminal.line(&format!(
-            "  warning: the existing SecretSieve hook was modified ({command}); it was left \
-             unchanged."
+            "  warning: the existing {label} hook was modified ({command}); it was left unchanged."
         ));
         return Ok(());
     }
 
-    match (selected, installed) {
+    match (row.selected, row.installed) {
         (false, false) => Ok(()),
-        (false, true) => match claude::remove(home, state) {
+        (false, true) => match integration::remove(harness, home, state) {
             Ok(true) => {
-                terminal.line("  Removed the Claude hook.");
+                terminal.line(&format!("  Removed the {label} integration."));
                 Ok(())
             }
             Ok(false) => {
-                terminal
-                    .line("  warning: a modified SecretSieve hook was preserved and not removed.");
+                terminal.line(&format!(
+                    "  warning: a modified {label} artifact was preserved and not removed."
+                ));
                 Ok(())
             }
             Err(error) => {
-                terminal.line(&format!("  Removal failed: {}.", error.reason()));
+                terminal.line(&format!("  {label} removal failed: {}.", error.reason()));
                 Err(Exit::Failure)
             }
         },
         (true, _) => {
+            if !row.installed && row.inspection.detection == Detection::NotDetected {
+                // `INT-002`: disclose that verification is limited.
+                terminal.line(&format!(
+                    "  {label} was not detected. The integration will be installed, but \
+                     SecretSieve cannot confirm the host will load it."
+                ));
+            }
             let Some(executable) = executable else {
                 terminal.line(&format!(
-                    "  Installation failed: {}.",
-                    claude::InstallError::ExecutablePath.reason()
+                    "  {label} installation failed: {}.",
+                    integration::InstallError::ExecutablePath.reason()
                 ));
                 return Err(Exit::Failure);
             };
-            let previous = state.claude.clone();
-            if let Err(error) = claude::install(home, executable, state) {
-                terminal.line(&format!("  Installation failed: {}.", error.reason()));
+
+            let previous = state.get(harness).cloned();
+            if let Err(error) = integration::install(harness, home, executable, state) {
+                terminal.line(&format!(
+                    "  {label} installation failed: {}.",
+                    error.reason()
+                ));
                 return Err(Exit::Failure);
             }
-            terminal.line("  Installed the Claude hook with a 5-second timeout.");
+            terminal.line(&format!(
+                "  Installed the {label} integration with a 5-second timeout."
+            ));
+            if let Some(note) = harness.post_install_note() {
+                terminal.line(&format!("  {note}"));
+            }
 
-            // Offline synthetic verification of the real protocol path.
-            match claude::verify_offline(executable) {
+            match integration::verify_offline(harness, executable) {
                 Verification::Passed => {
                     terminal.line("  Offline protocol check passed.");
                     Ok(())
                 }
                 Verification::Failed(reason) => {
                     terminal.line(&format!("  Offline protocol check failed: {reason}."));
-                    // Restore the exact prior managed state.
-                    let restored = if previous.is_some() {
-                        claude::install(home, executable, state).is_ok()
-                    } else {
-                        claude::remove(home, state).is_ok()
-                    };
-                    if !restored {
-                        terminal.line(
-                            "  warning: the previous integration state could not be restored.",
-                        );
-                    }
-                    state.claude = previous;
+                    restore(terminal, harness, home, executable, previous, state);
                     Err(Exit::Failure)
                 }
             }
         }
     }
+}
+
+/// Restores an integration's exact prior managed state (`SET-014`).
+fn restore(
+    terminal: &mut Terminal<'_>,
+    harness: Harness,
+    home: &Path,
+    executable: &Path,
+    previous: Option<Managed>,
+    state: &mut State,
+) {
+    let restored = match &previous {
+        Some(_) => integration::install(harness, home, executable, state).is_ok(),
+        None => integration::remove(harness, home, state).is_ok(),
+    };
+    if !restored {
+        terminal.line("  warning: the previous integration state could not be restored.");
+    }
+    state.set(harness, previous);
+}
+
+/// Individual approval for every competing mutating hook (`INT-005`).
+fn approve_conflicts(
+    terminal: &mut Terminal<'_>,
+    row: &Row,
+    state: &mut State,
+) -> Result<(), Cancelled> {
+    for conflict in &row.inspection.conflicts {
+        if conflict.approved {
+            continue;
+        }
+        terminal.line(&format!(
+            "  Another {} hook can also change the same content: {}",
+            row.inspection.harness.label(),
+            conflict.command
+        ));
+        terminal.line(
+            "  SecretSieve cannot stop it from seeing the original content or replacing the \
+             sanitized one.",
+        );
+        if terminal.confirm("  Keep it and continue?", false)? {
+            integration::approve_conflict(row.inspection.harness, state, &conflict.command);
+        } else {
+            terminal.line("  Leaving it unapproved; `secretsieve doctor` will report it.");
+        }
+    }
+    Ok(())
 }
 
 fn cancelled(terminal: &mut Terminal<'_>) -> Result<(), Exit> {

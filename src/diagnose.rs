@@ -16,14 +16,17 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::Exit;
 use crate::config::{self, Load};
-use crate::integration::claude::{self, Installed};
-use crate::integration::{Detection, state};
+use crate::integration::hooks_json::Installed;
+use crate::integration::{self as integration, Detection, HARNESSES, Inspection, Tier, state};
 use crate::matcher::Redactor;
 use crate::paths;
 use crate::sanitize;
 use crate::secret::SourceId;
 use crate::setup::collision;
 use crate::source::{Environment, Resolution, Resolver, SourceMalfunction, SourceRef, Unresolved};
+
+/// Every installed runtime hook uses this timeout (`RUN-004`).
+const EXPECTED_TIMEOUT_SECONDS: u64 = 5;
 
 /// Severity of one reported finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -174,8 +177,9 @@ struct Snapshot {
     /// Dotenv files with repeated keys (`SRC-004`).
     duplicate_keys: Vec<(PathBuf, Vec<String>)>,
     redactor: Redactor,
-    /// Present unless the home directory is unknown.
-    claude: Option<claude::Inspection>,
+    /// One entry per supported harness, empty when the home directory is
+    /// unknown.
+    integrations: Vec<Inspection>,
     executable: Option<PathBuf>,
     home: Option<PathBuf>,
 }
@@ -237,14 +241,18 @@ impl Snapshot {
             Redactor::new(resolved)
         };
 
-        let claude = home.as_deref().map(|home| {
-            claude::inspect(
-                environment,
-                home,
-                executable,
-                &state::load(&state::path(&global_path)),
-            )
-        });
+        let integrations = match home.as_deref() {
+            None => Vec::new(),
+            Some(home) => {
+                let recorded = state::load(&state::path(&global_path));
+                HARNESSES
+                    .iter()
+                    .map(|harness| {
+                        integration::inspect(*harness, environment, home, executable, &recorded)
+                    })
+                    .collect()
+            }
+        };
 
         Some(Self {
             global_path,
@@ -255,7 +263,7 @@ impl Snapshot {
             resolutions,
             duplicate_keys,
             redactor,
-            claude,
+            integrations,
             executable: executable.map(Path::to_path_buf),
             home,
         })
@@ -324,41 +332,43 @@ impl Snapshot {
     /// The integration facet, kept independent of registry health (`DIA-002`).
     fn render_integrations(&self, out: &mut dyn Write) {
         let _ = writeln!(out, "\nIntegrations");
-        let Some(claude) = &self.claude else {
+        if self.integrations.is_empty() {
             let _ = writeln!(out, "  unknown: the home directory could not be determined");
             return;
-        };
-        let _ = writeln!(
-            out,
-            "  Claude Code (production)  {}, {}",
-            match claude.detection {
-                Detection::Detected => "detected",
-                Detection::NotDetected => "not detected",
-            },
-            describe_installed(&claude.installed)
-        );
-        let _ = writeln!(
-            out,
-            "                           settings {}",
-            sanitize::path(&claude.settings_path)
-        );
-        for conflict in &claude.conflicts {
+        }
+        for inspection in &self.integrations {
+            let harness = inspection.harness;
+            // `SUP-003`: the experimental label follows the integration
+            // everywhere it appears.
             let _ = writeln!(
                 out,
-                "                           other PostToolUse hook: {} ({})",
-                conflict.command,
-                if conflict.approved {
-                    "approved"
-                } else {
-                    "not approved"
-                }
+                "  {} ({})  {}, {}",
+                harness.label(),
+                harness.tier_label(),
+                match inspection.detection {
+                    Detection::Detected => "detected",
+                    Detection::NotDetected => "not detected",
+                },
+                describe_installed(&inspection.installed)
             );
+            let _ = writeln!(
+                out,
+                "      file {}",
+                sanitize::path(&inspection.artifact_path)
+            );
+            for conflict in &inspection.conflicts {
+                let _ = writeln!(
+                    out,
+                    "      other hook on the same event: {} ({})",
+                    conflict.command,
+                    if conflict.approved {
+                        "approved"
+                    } else {
+                        "not approved"
+                    }
+                );
+            }
         }
-        // `SUP-003`: experimental integrations are labeled wherever they appear.
-        let _ = writeln!(
-            out,
-            "  Codex CLI, GitHub Copilot CLI, OpenCode  EXPERIMENTAL, not available in this build"
-        );
     }
 
     /// Configuration, source, permission, duplicate, and collision checks.
@@ -479,102 +489,131 @@ impl Snapshot {
 
     /// Ownership, policy, executable, timeout, and synthetic protocol checks.
     fn integration_findings(&self) -> Vec<Finding> {
-        let Some(claude) = &self.claude else {
+        if self.integrations.is_empty() {
             return vec![Finding::failure(
                 "integration state is unknown because the home directory could not be determined",
             )];
-        };
-        let mut findings = Vec::new();
-
-        match &claude.installed {
-            Installed::Current => {
-                findings.push(Finding::ok("the Claude hook is installed and owned by SecretSieve"))
-            }
-            Installed::Outdated { .. } => findings.push(Finding::warning(
-                "the Claude hook points at a different SecretSieve binary; rerun `secretsieve setup`",
-            )),
-            Installed::Modified { command } => findings.push(Finding::warning(format!(
-                "the Claude hook was modified by hand ({command}); SecretSieve will not change it"
-            ))),
-            Installed::Absent => {
-                // `DIA-008`: no installed integration is a health failure.
-                findings.push(Finding::failure(
-                    "no coding-agent integration is installed; run `secretsieve setup`",
-                ));
-            }
-            Installed::SettingsUnreadable => findings.push(Finding::failure(
-                "the Claude settings file is not valid JSON, so the hook cannot be verified",
-            )),
-            Installed::SettingsUnexpected => findings.push(Finding::failure(
-                "the Claude settings file has an unexpected `hooks` shape",
-            )),
         }
 
-        if claude.hooks_disabled_by_policy {
+        let mut findings = Vec::new();
+        let installed_count = self
+            .integrations
+            .iter()
+            .filter(|inspection| inspection.is_installed())
+            .count();
+        if installed_count == 0 {
+            // `DIA-008`: no installed integration is a health failure. An absent
+            // unselected integration on its own is only informational.
             findings.push(Finding::failure(
-                "a managed policy on this machine disables all Claude hooks",
+                "no coding-agent integration is installed; run `secretsieve setup`",
             ));
         }
 
-        if let Some(path) = &claude.hook_executable {
+        for inspection in &self.integrations {
+            findings.extend(self.findings_for(inspection));
+        }
+        findings
+    }
+
+    fn findings_for(&self, inspection: &Inspection) -> Vec<Finding> {
+        let label = inspection.harness.label();
+        let experimental = match inspection.harness.tier() {
+            Tier::Production => "",
+            Tier::Experimental => " (EXPERIMENTAL)",
+        };
+        let mut findings = Vec::new();
+
+        match &inspection.installed {
+            Installed::Current => findings.push(Finding::ok(format!(
+                "the {label}{experimental} integration is installed and owned by SecretSieve"
+            ))),
+            Installed::Outdated { .. } => findings.push(Finding::warning(format!(
+                "the {label} integration points at a different SecretSieve binary; rerun \
+                 `secretsieve setup`"
+            ))),
+            Installed::Modified { command } => findings.push(Finding::warning(format!(
+                "the {label} integration was modified by hand ({command}); SecretSieve will not \
+                 change it"
+            ))),
+            // Absent is informational per integration; the aggregate check above
+            // decides whether that is a failure.
+            Installed::Absent => {}
+            Installed::Unreadable => findings.push(Finding::failure(format!(
+                "the {label} host file is not valid JSON, so the integration cannot be verified"
+            ))),
+            Installed::Unexpected => findings.push(Finding::failure(format!(
+                "the {label} host file has an unexpected shape"
+            ))),
+        }
+
+        if inspection.disabled_by_policy {
+            findings.push(Finding::failure(format!(
+                "a managed policy on this machine disables all {label} hooks"
+            )));
+        }
+
+        if let Some(path) = &inspection.hook_executable {
             if path.is_file() {
                 findings.push(Finding::ok(format!(
-                    "the configured executable exists: {}",
+                    "the {label} configured executable exists: {}",
                     sanitize::path(path)
                 )));
             } else {
                 findings.push(Finding::failure(format!(
-                    "the configured executable is missing: {}",
+                    "the {label} configured executable is missing: {}",
                     sanitize::path(path)
                 )));
             }
         }
 
-        match claude.hook_timeout {
-            Some(timeout) if timeout == claude::TIMEOUT_SECONDS => findings.push(Finding::ok(
-                format!("the hook timeout is {timeout} seconds"),
+        match inspection.hook_timeout {
+            Some(timeout) if timeout == EXPECTED_TIMEOUT_SECONDS => findings.push(Finding::ok(
+                format!("the {label} hook timeout is {timeout} seconds"),
             )),
             Some(timeout) => findings.push(Finding::warning(format!(
-                "the hook timeout is {timeout} seconds instead of {}",
-                claude::TIMEOUT_SECONDS
+                "the {label} hook timeout is {timeout} seconds instead of \
+                 {EXPECTED_TIMEOUT_SECONDS}"
             ))),
-            None if matches!(claude.installed, Installed::Absent) => {}
-            None => findings.push(Finding::warning(
-                "the hook has no timeout, so the host default applies",
-            )),
+            None if matches!(inspection.installed, Installed::Absent) => {}
+            None => findings.push(Finding::warning(format!(
+                "the {label} hook has no timeout, so the host default applies"
+            ))),
         }
 
-        for conflict in &claude.conflicts {
+        for conflict in &inspection.conflicts {
             if conflict.approved {
                 // `INT-005`: an approved conflict stays visible but healthy.
                 findings.push(Finding::warning(format!(
-                    "an approved hook can also change tool results: {}",
+                    "an approved {label} hook can also change the same content: {}",
                     conflict.command
                 )));
             } else {
                 findings.push(Finding::failure(format!(
-                    "an unapproved hook can also change tool results: {}; rerun `secretsieve setup`",
+                    "an unapproved {label} hook can also change the same content: {}; rerun \
+                     `secretsieve setup`",
                     conflict.command
                 )));
             }
         }
 
-        // The synthetic protocol check runs the real hook path offline.
-        if !matches!(claude.installed, Installed::Absent) {
-            let candidate = claude
+        // The synthetic protocol check runs the real hook path offline
+        // (`DIA-006`: experimental integrations have offline verification only).
+        if !matches!(inspection.installed, Installed::Absent) {
+            let candidate = inspection
                 .hook_executable
                 .clone()
                 .or_else(|| self.executable.clone());
             match candidate {
-                None => findings.push(Finding::warning(
-                    "the synthetic protocol check was skipped because no executable is known",
-                )),
-                Some(path) => match claude::verify_offline(&path) {
-                    claude::Verification::Passed => {
-                        findings.push(Finding::ok("the synthetic protocol check passed"))
-                    }
-                    claude::Verification::Failed(reason) => findings.push(Finding::failure(
-                        format!("the synthetic protocol check failed: {reason}"),
+                None => findings.push(Finding::warning(format!(
+                    "the {label} synthetic protocol check was skipped because no executable is \
+                     known"
+                ))),
+                Some(path) => match integration::verify_offline(inspection.harness, &path) {
+                    integration::Verification::Passed => findings.push(Finding::ok(format!(
+                        "the {label} synthetic protocol check passed"
+                    ))),
+                    integration::Verification::Failed(reason) => findings.push(Finding::failure(
+                        format!("the {label} synthetic protocol check failed: {reason}"),
                     )),
                 },
             }
@@ -593,7 +632,7 @@ impl Snapshot {
             "\nRunning the live Claude canary. It starts one paid, networked Claude Code request \
              that reads a generated non-credential value through the installed hook."
         );
-        match claude::live_canary(home) {
+        match integration::claude::live_canary(home) {
             Ok(()) => Finding::ok(
                 "the live canary value was absent from Claude's reply; this tested one successful \
                  Bash PostToolUse result only",
@@ -633,8 +672,8 @@ fn describe_installed(installed: &Installed) -> &'static str {
         Installed::Current => "installed",
         Installed::Outdated { .. } => "installed, pointing at another binary",
         Installed::Modified { .. } => "installed entry modified by hand",
-        Installed::SettingsUnreadable => "settings file is not valid JSON",
-        Installed::SettingsUnexpected => "settings file has an unexpected shape",
+        Installed::Unreadable => "host file is not valid JSON",
+        Installed::Unexpected => "host file has an unexpected shape",
     }
 }
 
@@ -907,8 +946,8 @@ mod tests {
 
         let (exit, output) = fixture.doctor(&[("TOKEN", canary.value())]);
         assert_eq!(exit, Exit::Failure);
-        assert!(output.contains("the configured executable is missing"));
-        assert!(output.contains("an unapproved hook can also change tool results"));
+        assert!(output.contains("configured executable is missing"));
+        assert!(output.contains("unapproved Claude Code hook can also change"));
     }
 
     #[test]
@@ -923,7 +962,7 @@ mod tests {
         .expect("write settings");
 
         let (_, output) = fixture.doctor(&[]);
-        assert!(output.contains("the hook timeout is 30 seconds instead of 5"));
+        assert!(output.contains("hook timeout is 30 seconds instead of 5"));
     }
 
     #[test]

@@ -36,6 +36,10 @@ required-features = ["testing"]
 name = "diagnose"
 required-features = ["testing"]
 
+[[test]]
+name = "codex_hook"
+required-features = ["testing"]
+
 [[bench]]
 name = "redaction"
 harness = false

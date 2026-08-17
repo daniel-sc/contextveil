@@ -111,7 +111,7 @@ fn a_healthy_machine_exits_zero_for_both_commands() {
 
     let doctor = machine.run("doctor", &[("GITHUB_TOKEN", canary.value())]);
     assert_eq!(doctor.status.code(), Some(0), "{}", text(&doctor));
-    assert!(text(&doctor).contains("the synthetic protocol check passed"));
+    assert!(text(&doctor).contains("synthetic protocol check passed"));
     assert_canary_absent("doctor stdout", &doctor.stdout, &canary);
     assert_canary_absent("doctor stderr", &doctor.stderr, &canary);
 }
@@ -172,7 +172,7 @@ fn an_approved_conflict_stays_healthy_but_visible() {
 
     let doctor = machine.run("doctor", &[("TOKEN", canary.value())]);
     assert_eq!(doctor.status.code(), Some(0), "{}", text(&doctor));
-    assert!(text(&doctor).contains("an approved hook can also change tool results"));
+    assert!(text(&doctor).contains("approved Claude Code hook can also change"));
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn an_unapproved_conflict_is_a_health_failure() {
 
     let doctor = machine.run("doctor", &[("TOKEN", canary.value())]);
     assert_eq!(doctor.status.code(), Some(1));
-    assert!(text(&doctor).contains("an unapproved hook can also change tool results"));
+    assert!(text(&doctor).contains("unapproved Claude Code hook can also change"));
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn status_runs_no_adapter_protocol_test() {
     // Doctor does run it, and fails because the executable is gone.
     let doctor = machine.run("doctor", &[("TOKEN", canary.value())]);
     assert_eq!(doctor.status.code(), Some(1));
-    assert!(text(&doctor).contains("the configured executable is missing"));
+    assert!(text(&doctor).contains("configured executable is missing"));
 }
 
 #[test]

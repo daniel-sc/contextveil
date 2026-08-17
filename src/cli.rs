@@ -145,6 +145,8 @@ pub fn run(
         }
         Ok(Command::Doctor) => run_doctor(out),
         Ok(Command::Hook(Harness::Claude)) => run_claude_hook(input, out),
+        Ok(Command::Hook(Harness::OpenCode)) => run_opencode_hook(input, out),
+        Ok(Command::Hook(Harness::Codex)) => run_codex_hook(input, out),
         Ok(Command::Hook(harness)) => {
             unimplemented_command(&format!("hook {}", harness.as_str()), err)
         }
@@ -154,6 +156,17 @@ pub fn run(
             Exit::Usage
         }
     }
+}
+
+/// Reads a hook payload from stdin.
+///
+/// A read error or non-UTF-8 bytes cannot be a host protocol envelope. Both
+/// become an empty payload, which every adapter diagnoses as a malformed event
+/// without ever echoing what it received (`RUN-006`).
+fn read_payload(input: &mut dyn Read) -> String {
+    let mut payload = Vec::new();
+    let _ = input.read_to_end(&mut payload);
+    String::from_utf8(payload).unwrap_or_default()
 }
 
 fn current_directory() -> std::path::PathBuf {
@@ -185,7 +198,7 @@ fn run_doctor(out: &mut dyn Write) -> Exit {
         out,
         &Environment::from_process(),
         &current_directory(),
-        crate::integration::claude::current_executable().as_deref(),
+        crate::integration::current_executable().as_deref(),
         live,
     )
 }
@@ -210,7 +223,7 @@ fn run_setup(err: &mut dyn Write) -> Exit {
     let current_directory =
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut terminal = crate::setup::ui::Terminal::new(std::io::stdin(), std::io::stdout());
-    let executable = crate::integration::claude::current_executable();
+    let executable = crate::integration::current_executable();
     let exit = crate::setup::run(
         &mut terminal,
         &environment,
@@ -227,18 +240,34 @@ fn run_setup(err: &mut dyn Write) -> Exit {
 /// diagnosed failure still exits zero so the host can present the warning
 /// (`CLI-007`).
 fn run_claude_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {
-    let mut payload = Vec::new();
-    // A read error or non-UTF-8 bytes cannot be a host protocol envelope. Both
-    // become an empty payload, which the adapter diagnoses as a malformed event
-    // without ever echoing what it received (`RUN-006`).
-    let _ = input.read_to_end(&mut payload);
-    let payload = String::from_utf8(payload).unwrap_or_default();
-
+    let payload = read_payload(input);
     let response = crate::adapter::claude::handle(&payload, &Environment::from_process());
     if let Some(stdout) = response.stdout {
         let _ = writeln!(out, "{stdout}");
     }
     response.exit
+}
+
+/// Runs the hidden Codex `PostToolUse` entry point.
+fn run_codex_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {
+    let payload = read_payload(input);
+    let response = crate::adapter::codex::handle(&payload, &Environment::from_process());
+    if let Some(stdout) = response.stdout {
+        let _ = writeln!(out, "{stdout}");
+    }
+    response.exit
+}
+
+/// Runs the hidden OpenCode transport entry point (`OCO-001`).
+///
+/// The plugin sends one JSON request on stdin and reads one JSON response from
+/// stdout. The response always carries its own status, so the process exits zero
+/// whenever it produced one.
+fn run_opencode_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {
+    let payload = read_payload(input);
+    let response = crate::adapter::opencode::handle(&payload, &Environment::from_process());
+    let _ = writeln!(out, "{}", response.to_json());
+    response.exit()
 }
 
 /// Placeholder for a command whose task has not landed yet.

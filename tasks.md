@@ -482,7 +482,7 @@ resolver framework yet.
 
 ## Experimental Integrations
 
-### [ ] T070: Implement Codex Experimental Adapter
+### [x] T070: Implement Codex Experimental Adapter
 
 **Depends on:** `T020`, `T030`, `T040`, `T060`
 
@@ -507,6 +507,43 @@ resolver framework yet.
 **Contributes to:** `SEC-001`, `SUP-003`, `RUN-001`, `RUN-002`, `RUN-004`,
 `RUN-006`, `INT-001` through `INT-006`, `COD-001` through `COD-004`, `DIA-006`,
 `TST-004`, `TST-005`.
+
+**Evidence:**
+
+- protocol facts were taken from the openai/codex source at commit
+  `c6058cca`: hooks live in `~/.codex/hooks.json` as
+  `{"hooks": {"PostToolUse": [ matcher groups ]}}`, `timeout` is seconds, an
+  omitted/empty/`*` matcher matches every tool, `updatedMCPToolOutput` is
+  rejected by the host, a block decision's `reason` is the only text that
+  replaces what the model sees, every other failure path is fail-open, a new or
+  changed hook stays untrusted until the user accepts it, a failed tool call
+  emits no event at all while a non-zero-exit shell command does, and `cwd` is
+  the only root field;
+- `src/integration/hooks_json.rs` is the shared JSON hooks-file installer,
+  extracted only after Claude and Codex became two concrete uses; it preserves
+  unrelated keys and hooks, refuses to rewrite an unreadable or unexpected file,
+  never creates a second managed entry, prunes only containers it created, and
+  proves in a test that two specs never claim each other's entries;
+- `src/integration/codex.rs` manages `~/.codex/hooks.json` with a 5-second
+  timeout, exposes the trust step setup prints after installing, and verifies
+  offline that the hook blocks and that the sanitized reason carries the
+  placeholder;
+- `src/adapter/codex.rs` blocks the original result and renders sanitized text
+  that discloses the tool succeeded and that structure may be lost (`COD-002`,
+  `COD-003`); a diagnosed malfunction emits `systemMessage` and no decision, so
+  the host keeps the original result (`RUN-001`, `RUN-002`);
+- `tests/codex_hook.rs` covers clean output, string and structured intervention,
+  non-zero-exit output, unresolved sources, malformed protocol, malfunction,
+  project selection from `cwd`, and a 1 MiB payload inside the host bound;
+- `tests/setup.rs` proves Codex is never selected by default even when detected,
+  that installing it prints the `EXPERIMENTAL` label and the trust step, and that
+  deselecting removes it (`SUP-003`, `INT-001`);
+- `src/setup/integrations.rs` and `src/diagnose.rs` now iterate every harness, so
+  the experimental label, conflicts, executable, timeout, and synthetic checks
+  are reported per integration;
+- `limitations.md` `LIM-014` records the trust requirement, the uninspected
+  `config.toml` hook form, and the failed-versus-non-zero-exit distinction;
+- `mise run check` passes.
 
 ### [ ] T080: Implement Copilot Experimental Adapter
 

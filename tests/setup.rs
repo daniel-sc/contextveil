@@ -511,7 +511,7 @@ fn the_claude_hook_is_installed_and_verified_offline() {
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("detected"));
-    assert!(transcript.contains("Installed the Claude hook"));
+    assert!(transcript.contains("Installed the Claude Code integration"));
     assert!(transcript.contains("Offline protocol check passed"));
 
     let settings: serde_json::Value = serde_json::from_str(
@@ -534,6 +534,36 @@ fn the_claude_hook_is_installed_and_verified_offline() {
 }
 
 #[test]
+fn rerunning_setup_leaves_an_installed_integration_byte_identical() {
+    // `SET-014`, `INT-004`: a second run must not duplicate or rewrite the
+    // managed entry.
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+
+    assert_eq!(
+        fixture.run(ACCEPT_ALL, &fixture.environment(&[])).0,
+        Exit::Ok
+    );
+    let first = std::fs::read(fixture.claude_settings()).expect("settings");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        std::fs::read(fixture.claude_settings()).expect("settings"),
+        first
+    );
+
+    let settings: serde_json::Value = serde_json::from_slice(&first).expect("valid JSON");
+    assert_eq!(
+        settings["hooks"]["PostToolUse"]
+            .as_array()
+            .expect("array")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn deselecting_the_integration_removes_only_the_managed_hook() {
     let fixture = Fixture::new();
     detect_claude(&fixture);
@@ -550,7 +580,7 @@ fn deselecting_the_integration_removes_only_the_managed_hook() {
     );
     let (exit, transcript) = fixture.run("\n\n1\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(transcript.contains("Removed the Claude hook"));
+    assert!(transcript.contains("Removed the Claude Code integration"));
 
     let settings: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(fixture.claude_settings()).expect("settings"),
@@ -579,7 +609,7 @@ fn a_competing_mutating_hook_is_offered_for_approval() {
     let (exit, transcript) = fixture.run("\n\n\nn\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("/other/mutator"));
-    assert!(transcript.contains("can also change tool results"));
+    assert!(transcript.contains("can also change the same content"));
     let record_path = fixture.global_config().with_file_name("integrations.toml");
     let record = std::fs::read_to_string(&record_path).expect("integration record");
     assert!(!record.contains("/other/mutator"));
@@ -612,11 +642,53 @@ fn a_malformed_settings_file_fails_the_integration_phase_without_changing_it() {
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Failure, "{transcript}");
-    assert!(transcript.contains("Installation failed"));
+    assert!(transcript.contains("installation failed"));
     assert_eq!(
         std::fs::read_to_string(fixture.claude_settings()).expect("read back"),
         malformed
     );
+}
+
+#[test]
+fn an_experimental_integration_requires_an_affirmative_choice() {
+    // `SUP-003`, `INT-001`: Codex is never selected by default, even when
+    // detected, and installing it is an explicit opt-in.
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    let codex_hooks = fixture.home().join(".codex").join("hooks.json");
+
+    // Accepting the defaults installs Claude only.
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Codex CLI (EXPERIMENTAL)"));
+    assert!(fixture.claude_settings().exists());
+    assert!(!codex_hooks.exists());
+
+    // Toggling it on installs it, with the experimental label and the host's
+    // trust workflow disclosed.
+    let (exit, transcript) = fixture.run("\n\n2\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("is EXPERIMENTAL"));
+    assert!(transcript.contains("Trust all and continue"));
+    assert!(transcript.contains("Installed the Codex CLI integration"));
+
+    let hooks: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&codex_hooks).expect("hooks file"))
+            .expect("valid JSON");
+    let group = &hooks["hooks"]["PostToolUse"][0];
+    assert_eq!(group["hooks"][0]["timeout"], serde_json::json!(5));
+    assert!(
+        group["hooks"][0]["command"]
+            .as_str()
+            .expect("command")
+            .ends_with(" hook codex")
+    );
+
+    // Deselecting removes it again.
+    let (exit, transcript) = fixture.run("\n\n2\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Removed the Codex CLI integration"));
 }
 
 #[test]
