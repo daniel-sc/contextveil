@@ -857,9 +857,12 @@ other part of this task is done and listed below.
 
 **Evidence for the completed parts:**
 
-- **Traceability audit.** `docs/traceability.md` maps every requirement ID in
-  `specification.md` to its implementation and its evidence, with an explicit
-  status per row and a closing list of everything that is not `covered`;
+- **Traceability audit.** `docs/traceability.md` has one row for each of the 124
+  requirement IDs in `specification.md`, naming its implementation and the test or
+  check that would fail on regression. No row is a gap: 116 are covered by a test,
+  four are prohibitions satisfied by the absence of a mechanism, and three are
+  manual. The document was produced by an independent pass over the code and then
+  corrected where it had gone stale or cited the wrong deviation;
 - **Verification from final artifacts.** A packaged release artifact was installed
   with `install.sh`, then the complete journey was run against it: `setup` over a
   real pty, an intervention through the installed Claude hook that replaced a
