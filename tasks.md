@@ -809,7 +809,7 @@ through `TST-007`.
   written before the upgrade with the newly installed binary;
 - `mise run check` and `mise run release-check` pass.
 
-### [ ] T120: Qualify And Publish V1
+### [!] T120: Qualify And Publish V1
 
 **Depends on:** `T110`
 
@@ -840,6 +840,56 @@ through `TST-007`.
 
 **Closes:** all V1 requirements, including `SEC-002`, `SUP-002` through `SUP-005`,
 `REL-008`, and `TST-008`.
+
+**Blocked on:** three items that cannot be completed from this environment. Every
+other part of this task is done and listed below.
+
+1. **The manual live Claude qualification (`REL-008`).** It starts a paid,
+   networked Claude Code session and must prove that a redacted tool result is
+   still sanitized after `claude --resume`. `secretsieve doctor` offers the live
+   canary for the intervention half; the resume half needs a human. Until it is
+   run, resume coverage must not be claimed, which is why no document claims it.
+2. **Automated gates on the other three release targets.** Only
+   `x86_64-unknown-linux-gnu` can be built and exercised here. The release
+   workflow builds and packages all four, but that requires CI runners.
+3. **Publishing.** Tagging, pushing, and creating the GitHub Release are outside
+   what may be done here, and the repository has no remote release yet.
+
+**Evidence for the completed parts:**
+
+- **Traceability audit.** `docs/traceability.md` maps every requirement ID in
+  `specification.md` to its implementation and its evidence, with an explicit
+  status per row and a closing list of everything that is not `covered`;
+- **Verification from final artifacts.** A packaged release artifact was installed
+  with `install.sh`, then the complete journey was run against it: `setup` over a
+  real pty, an intervention through the installed Claude hook that replaced a
+  planted value, `status`, `doctor` exiting zero, and integration removal that
+  left the host settings file valid. `mise run release-check` covers installation
+  and upgrade from artifacts on this target;
+- **Two defects found that way and fixed:** `status` reported its own installed
+  hook as pointing at another binary because it passed no executable path, and the
+  OpenCode inspection reported a five-second timeout even when no plugin was
+  installed. Both have regression tests;
+- **Public wording.** `tests/wording.rs` enforces `SEC-002`, `SUP-002`, `SUP-003`,
+  `SUP-005`, and `TST-008` against the shipped documents: no overclaiming phrase,
+  the required boundary statements present, every experimental integration
+  labeled in every support matrix, no routine workflow that would make CI paid or
+  networked, and every limitation entry carrying its required sections. It found
+  that the README was missing the `SUP-005` scoping statement, now added;
+- **Tested host versions** are recorded in `docs/release-notes-template.md` as
+  evidence rather than as a supported range, since `SUP-004` forbids version
+  gates: Claude Code 2.1.233, `openai/codex` at commit `c6058cca`, Copilot CLI
+  1.0.80, and OpenCode 1.18.18;
+- **Claude is the only production integration** in every surface: setup, status,
+  doctor, the README matrix, the vision matrix, and the release notes. The other
+  three are labeled `EXPERIMENTAL`, are never selected by default, and each has
+  protocol fixtures and an offline synthetic check;
+- **Deviations.** `DEV-001` (the live canary has no automated coverage) and
+  `DEV-002` (Copilot prompt coverage rests on an inferred host rule) are the only
+  open implementation deviations, both recorded with impact, workaround, and
+  verification;
+- `mise run check`, `mise run fuzz-smoke`, and `mise run release-check` pass on
+  this target.
 
 ## Deferred Until A Changed Requirement
 

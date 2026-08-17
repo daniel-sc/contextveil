@@ -156,7 +156,7 @@ fn read_budget(name: &str, default: usize) -> usize {
 }
 
 /// Runs one target, catching a panic so the harness can report and continue.
-fn run(target: fn(&[u8]), input: &[u8]) -> bool {
+fn run(target: fuzz::Target, input: &[u8]) -> bool {
     let input = input.to_vec();
     // The default panic hook would print the payload; the harness reports the
     // saved file instead, so the hook is silenced for the call.

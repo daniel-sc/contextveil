@@ -78,8 +78,11 @@ pub fn context() -> Option<&'static Context> {
     CONTEXT.get_or_init(Context::create).as_ref()
 }
 
+/// One fuzz target: raw bytes in, no output, must never panic.
+pub type Target = fn(&[u8]);
+
 /// Every target, by name, for the smoke harness.
-pub const TARGETS: [(&str, fn(&[u8])); 8] = [
+pub const TARGETS: [(&str, Target); 8] = [
     ("dotenv", dotenv),
     ("config", config),
     ("matcher", matcher),

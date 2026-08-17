@@ -104,7 +104,7 @@ pub fn parse(input: &str) -> Result<Dotenv, ParseError> {
             Some(position) => {
                 // Last assignment wins (`SRC-004`).
                 entries[*position].1 = value;
-                if !duplicates.iter().any(|known| *known == key) {
+                if !duplicates.contains(&key) {
                     duplicates.push(key);
                 }
             }
