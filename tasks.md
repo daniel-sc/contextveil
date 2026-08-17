@@ -608,7 +608,7 @@ resolver framework yet.
   confirmed by a live run;
 - `mise run check` passes.
 
-### [ ] T090: Implement OpenCode Experimental Adapter
+### [x] T090: Implement OpenCode Experimental Adapter
 
 **Depends on:** `T020`, `T030`, `T040`, `T060`
 
@@ -635,6 +635,44 @@ resolver framework yet.
 **Contributes to:** `SEC-001`, `SUP-003`, `RUN-003`, `RUN-004`, `RUN-006`,
 `INT-001` through `INT-006`, `OCO-001` through `OCO-004`, `DIA-006`, `TST-004`,
 `TST-005`.
+
+**Evidence:**
+
+- protocol facts come from the installed OpenCode 1.18.18: plugins load one level
+  deep from `plugin/` and `plugins/`, `*.ts` and `*.js` are accepted, any exported
+  function of the plugin type is used, `chat.message` receives
+  `output.parts[i].text` and `tool.execute.after` receives `output.output` and both
+  are mutated in place, `worktree` is the stable project root, the toast API is
+  `client.tui.showToast({body: {message, variant}})`, a throwing hook aborts the
+  covered operation, `tool.execute.after` runs only on success, and plugins execute
+  inside OpenCode's own Bun process;
+- `assets/opencode/plugin.ts` is the managed plugin: it registers only the two V1
+  hooks, spawns the absolute binary with one JSON request and one JSON response,
+  bounds it at five seconds, throws on subprocess failure, nonzero exit, invalid
+  protocol, or a reported malfunction, and swallows notification failures after a
+  successful mutation. A test asserts the file carries no matcher, resolver, or
+  replacement logic and no V2 API use;
+- `src/adapter/opencode.rs` is the Rust side of that transport: it redacts each
+  string independently, returns them in request order, reports interventions and
+  configuration warnings, and answers a malformed request with a protocol error
+  that makes the plugin abort;
+- `src/integration/opencode.rs` installs exactly one owned plugin file, embeds the
+  binary path as a JSON literal so an awkward path cannot break the source, updates
+  an outdated file in place, preserves a same-named file it did not write, removes
+  only its own file, and lists other plugin files for approval;
+- `tests/opencode/plugin.test.ts`, run by `mise run test-plugin` as part of
+  `mise run check`, drives the real plugin against the real binary: user text,
+  successful tool output, clean events, unsupported paths without spawning,
+  subprocess failure, invalid protocol, nonzero exit, reported malfunction,
+  notification failure that does not undo the mutation, and the incomplete-setup
+  warning;
+- `tests/setup.rs` proves OpenCode is opt-in, that installation writes only the
+  managed plugin, and that an unrelated plugin survives installation and removal;
+- while writing the fixtures, `Bun.spawn` was found to inherit a startup snapshot
+  of the environment rather than the live one, so the plugin forwards the current
+  environment explicitly to satisfy `SRC-001`; `LIM-016` records that and the
+  success-only and approval-by-name limits;
+- `mise run check` passes, now including the plugin suite.
 
 ## Hardening And Release
 

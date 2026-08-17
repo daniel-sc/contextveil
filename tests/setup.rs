@@ -735,6 +735,40 @@ fn copilot_installs_one_dedicated_file_and_leaves_others_alone() {
 }
 
 #[test]
+fn opencode_installs_one_owned_plugin_file() {
+    // `OCO-001`: one SecretSieve-owned plugin file, opt-in like every
+    // experimental integration.
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    let plugins = fixture
+        .home()
+        .join(".config")
+        .join("opencode")
+        .join("plugins");
+    std::fs::create_dir_all(&plugins).expect("plugins directory");
+    let other = plugins.join("other.ts");
+    std::fs::write(&other, "export const Other = async () => ({})\n").expect("write other plugin");
+
+    // OpenCode is row 4; its existing sibling plugin needs review once selected.
+    let (exit, transcript) = fixture.run("\n\n4\n\nn\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("OpenCode (EXPERIMENTAL)"));
+    assert!(transcript.contains("Installed the OpenCode integration"));
+    assert!(transcript.contains("other.ts"));
+
+    let plugin = std::fs::read_to_string(plugins.join("secretsieve.ts")).expect("plugin file");
+    assert!(plugin.starts_with("// SecretSieve managed plugin."));
+    assert!(plugin.contains("chat.message"));
+    assert!(plugin.contains("tool.execute.after"));
+    assert!(!plugin.contains("__SECRETSIEVE_BINARY__"));
+
+    let (exit, transcript) = fixture.run("\n\n4\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!plugins.join("secretsieve.ts").exists());
+    assert!(other.exists(), "unrelated plugins are never removed");
+}
+
+#[test]
 fn skipping_the_integration_phase_changes_nothing() {
     let fixture = Fixture::new();
     detect_claude(&fixture);

@@ -273,6 +273,20 @@ paths, attachments, existing history, or auxiliary model requests. Throw/abort
 behavior applies only after the plugin has loaded and is executing; load failure,
 disablement, and host bypass cannot be made fail-closed by the plugin.
 
+Two further host-specific limits apply, verified against OpenCode 1.18.18:
+
+- `tool.execute.after` runs only after a tool returns successfully, so a tool that
+  throws is not covered at all;
+- OpenCode discovers plugins one level deep in `plugin/` and `plugins/`, and gives
+  no static way to tell which hooks another plugin registers. Setup therefore lists
+  every other plugin file for approval by name rather than by behavior, and cannot
+  tell whether one of them also rewrites the same content.
+
+`Bun.spawn` inherits a snapshot of the environment taken when the host process
+started rather than the live environment, so the plugin forwards the current
+environment explicitly. Environment rotation still requires restarting the
+harness (`LIM-007`).
+
 **Impact:** OpenCode coverage is broad enough to be useful but incomplete and
 version-sensitive. A malfunction detected by an executing plugin aborts the
 covered operation; a plugin that never loads cannot intervene.
