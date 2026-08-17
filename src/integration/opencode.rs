@@ -418,6 +418,20 @@ mod tests {
     }
 
     #[test]
+    fn the_plugin_bounds_the_subprocess_at_five_seconds() {
+        // `RUN-004`: the bound lives in the plugin source rather than in host
+        // configuration, so it is asserted against the shared constant.
+        let source = render(Path::new("/opt/secretsieve"));
+        let expected = claude::TIMEOUT_SECONDS * 1000;
+        assert!(
+            source.contains(&format!("TIMEOUT_MS = {expected}")),
+            "the plugin no longer bounds the subprocess at {expected} ms"
+        );
+        assert!(source.contains("setTimeout"), "the bound is never armed");
+        assert!(source.contains("kill()"), "the bound never kills the subprocess");
+    }
+
+    #[test]
     fn opencode_is_experimental_and_needs_no_extra_host_step() {
         assert_eq!(Harness::OpenCode.tier_label(), "EXPERIMENTAL");
         assert_eq!(Harness::OpenCode.post_install_note(), None);
