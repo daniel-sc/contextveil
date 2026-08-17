@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Bounded fuzz smoke run over untrusted input surfaces (`TST-006`).
 #
-# Implemented by task T100. The placeholder fails clearly so a green pipeline
-# never implies coverage that does not exist yet.
+# It replays the committed regression corpus and then mutates seeds
+# deterministically, so a failure is always reproducible. Raise
+# SECRETSIEVE_FUZZ_ITERATIONS or SECRETSIEVE_FUZZ_SECONDS for a longer run.
 set -euo pipefail
 
-echo "mise run fuzz-smoke: not implemented yet (task T100)." >&2
-echo "It must cover the matcher and untrusted JSON, TOML, and dotenv input." >&2
-exit 1
+cargo run --locked --release --features testing --bin fuzz_smoke

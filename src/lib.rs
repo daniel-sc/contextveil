@@ -21,6 +21,8 @@ pub mod setup;
 pub mod source;
 
 #[cfg(any(test, feature = "testing"))]
+pub mod fuzz;
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
 /// Version of the running binary, used by `--version` and diagnostics.

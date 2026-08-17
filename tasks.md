@@ -676,7 +676,7 @@ resolver framework yet.
 
 ## Hardening And Release
 
-### [ ] T100: Complete Security, Fuzz, And Performance Hardening
+### [x] T100: Complete Security, Fuzz, And Performance Hardening
 
 **Depends on:** `T050`, `T060`, `T070`, `T080`, `T090`
 
@@ -700,6 +700,51 @@ resolver framework yet.
 
 **Contributes to:** `SEC-003` through `SEC-006`, `RUN-004`, `RUN-005`, `TST-001`
 through `TST-007`.
+
+**Evidence:**
+
+- `src/fuzz.rs` provides eight targets covering the matcher, the dotenv grammar,
+  configuration TOML, terminal sanitization, and the JSON payload surface of all
+  four adapters. Each asserts its own invariants, and every adapter target also
+  asserts that the enrolled value never reaches any output channel;
+- `src/bin/fuzz_smoke.rs` replays the committed corpus first, then mutates seeds
+  with a deterministic generator, so a failure is reproducible and CI never
+  depends on luck. `mise run fuzz-smoke` executed 32,016 inputs with no panic, no
+  unbounded recursion, and no disclosure. The harness was verified by temporarily
+  breaking a target: it reported the failure, wrote the input to
+  `fuzz/regressions/`, and exited nonzero;
+- `fuzz/regressions/` holds 16 seeded edge cases plus a README explaining seed
+  promotion; the harness replays them on every run regardless of budget;
+- `tests/leaks.rs` pushes one canary through all four adapters, `status`,
+  `doctor`, and a complete `setup` run, then asserts absence from stdout, stderr,
+  and every file under the isolated home, including the installed hooks and the
+  integration record. It also asserts each path actually redacted something, so
+  absence is never vacuous, and covers the malfunction path of every adapter;
+- `tests/limits.rs` measures a 4 MiB dotenv file with about 90,000 wildcard keys,
+  a 20,000-deep nested payload, a moderately nested payload that is still
+  redacted, and 201 active values over a 512 KiB payload; all stay inside the
+  five-second host bound and no size cap was added (`SRC-008`, `LIM-010`);
+- those tests exposed two quadratic paths that are now fixed: the dotenv parser
+  recomputed line numbers from the start of the file for every assignment, and the
+  matcher deduplicated values and checked placeholder safety by scanning the whole
+  registry per value. A 90,000-key file went from about 190 seconds to 0.27
+  seconds, and cost is now linear in input size;
+- `mise run bench` records p50 5.4 ms and p95 8.1 ms against the `RUN-005` 100 ms
+  target for a 1 MiB payload, 100 values, and 10 dotenv files;
+- terminal sanitization is covered by unit tests, by the fuzz target that asserts
+  no rendering can contain a line break or escape, and end to end for `status`,
+  `doctor`, and `setup`;
+- dependency and license review: three direct dependencies (`serde`, `serde_json`,
+  `toml`) and 20 crates in total, every one under a permissive license compatible
+  with MIT OR Apache-2.0 distribution. No `unsafe` appears anywhere in the crate,
+  and `lint` denies warnings;
+- `.github/workflows/fuzz.yml` runs `mise run fuzz-smoke` weekly with a larger
+  budget and uploads any promoted regression input;
+- every limitation was reviewed against implemented behavior; `LIM-010`,
+  `LIM-014`, `LIM-015`, and `LIM-016` were updated with what the implementation
+  actually does, and the two open deviations are recorded as `DEV-001` and
+  `DEV-002`;
+- `mise run check` and `mise run fuzz-smoke` pass.
 
 ### [ ] T110: Build Release And Installer Pipeline
 

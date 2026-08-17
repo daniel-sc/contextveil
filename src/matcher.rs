@@ -7,6 +7,8 @@
 //! Matching is deliberately literal. No name, entropy, provider-format, length,
 //! or collision heuristic may influence runtime behavior (`REG-001`).
 
+use std::collections::HashMap;
+
 use crate::secret::{ResolvedSecret, SourceId};
 
 /// A resolved value compiled into a match pattern.
@@ -42,6 +44,9 @@ impl Redactor {
     /// order followed by global entries in file order (`REG-002`).
     pub fn new(secrets: Vec<ResolvedSecret>) -> Self {
         let mut patterns: Vec<Pattern> = Vec::with_capacity(secrets.len());
+        // Deduplication is keyed rather than scanned, so a very large wildcard
+        // file stays linear in its key count (`SRC-008` allows any size).
+        let mut positions: HashMap<String, usize> = HashMap::with_capacity(secrets.len());
 
         for secret in secrets {
             // Resolvers classify an empty value as unresolved (`SRC-002`,
@@ -51,13 +56,11 @@ impl Redactor {
             if secret.value.is_empty() {
                 continue;
             }
-            if let Some(existing) = patterns
-                .iter_mut()
-                .find(|pattern| pattern.value == secret.value)
-            {
-                existing.aliases.push(secret.source);
+            if let Some(position) = positions.get(&secret.value) {
+                patterns[*position].aliases.push(secret.source);
                 continue;
             }
+            positions.insert(secret.value.clone(), patterns.len());
             patterns.push(Pattern {
                 value: secret.value,
                 // An identity without a key has no label, so it can only ever
@@ -69,15 +72,19 @@ impl Redactor {
             });
         }
 
+        let mut redactor = Self {
+            patterns,
+            by_first_byte: Vec::new(),
+        };
+        redactor.build_index();
+
         // A label or placeholder is emit-safe only when it cannot reproduce any
-        // active value (`RED-006`, `RED-008`). Both checks need the complete set
-        // of values, so they run after deduplication.
-        let values: Vec<&str> = patterns
-            .iter()
-            .map(|pattern| pattern.value.as_str())
-            .collect();
-        let generic_is_safe = is_emit_safe(GENERIC_PLACEHOLDER, &values);
-        let decisions: Vec<(String, Option<String>)> = patterns
+        // active value (`RED-006`, `RED-008`). The check runs through the index
+        // that was just built, so it costs the length of the candidate rather
+        // than the size of the registry.
+        let generic_is_safe = redactor.is_emit_safe(GENERIC_PLACEHOLDER);
+        let decisions: Vec<(String, Option<String>)> = redactor
+            .patterns
             .iter()
             .map(|pattern| {
                 let named = pattern
@@ -85,7 +92,7 @@ impl Redactor {
                     .as_deref()
                     .map(|label| format!("<SECRET:{label}>"));
                 let replacement = if let Some(named) =
-                    named.filter(|candidate| is_emit_safe(candidate, &values))
+                    named.filter(|candidate| redactor.is_emit_safe(candidate))
                 {
                     named
                 } else if generic_is_safe {
@@ -98,34 +105,42 @@ impl Redactor {
                 let safe_label = pattern
                     .label
                     .clone()
-                    .filter(|label| is_emit_safe(label, &values));
+                    .filter(|label| redactor.is_emit_safe(label));
                 (replacement, safe_label)
             })
             .collect();
 
-        for (pattern, (replacement, safe_label)) in patterns.iter_mut().zip(decisions) {
+        for (pattern, (replacement, safe_label)) in redactor.patterns.iter_mut().zip(decisions) {
             pattern.replacement = replacement;
             pattern.label = safe_label;
         }
+        redactor
+    }
 
+    /// Buckets pattern indexes by first byte, longest first.
+    ///
+    /// The first hit at a position is then the leftmost-longest match
+    /// (`RED-003`), and registry order breaks a length tie so the canonical
+    /// source wins (`REG-002`).
+    fn build_index(&mut self) {
         let mut by_first_byte = vec![Vec::new(); 256];
-        let mut order: Vec<u32> = (0..patterns.len() as u32).collect();
-        // Longest first, then registry order, so the first hit at a position is
-        // the leftmost-longest match (`RED-003`).
+        let mut order: Vec<u32> = (0..self.patterns.len() as u32).collect();
         order.sort_by(|left, right| {
-            let left_len = patterns[*left as usize].value.len();
-            let right_len = patterns[*right as usize].value.len();
+            let left_len = self.patterns[*left as usize].value.len();
+            let right_len = self.patterns[*right as usize].value.len();
             right_len.cmp(&left_len).then(left.cmp(right))
         });
         for index in order {
-            let first = patterns[index as usize].value.as_bytes()[0];
+            let first = self.patterns[index as usize].value.as_bytes()[0];
             by_first_byte[first as usize].push(index);
         }
+        self.by_first_byte = by_first_byte;
+    }
 
-        Self {
-            patterns,
-            by_first_byte,
-        }
+    /// True when `candidate` reproduces no active value.
+    fn is_emit_safe(&self, candidate: &str) -> bool {
+        let bytes = candidate.as_bytes();
+        (0..bytes.len()).all(|position| self.match_at(bytes, position).is_none())
     }
 
     /// Number of active values.
@@ -235,11 +250,6 @@ impl Redactor {
 }
 
 const GENERIC_PLACEHOLDER: &str = "<SECRET>";
-
-/// True when `candidate` reproduces no active value.
-fn is_emit_safe(candidate: &str, values: &[&str]) -> bool {
-    !values.iter().any(|value| candidate.contains(*value))
-}
 
 /// Replacement counts accumulated while redacting one payload.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

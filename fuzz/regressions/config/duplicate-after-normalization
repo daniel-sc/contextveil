@@ -1,0 +1,11 @@
+version = 1
+
+[[secret]]
+source = "dotenv"
+file = "./sub/../.env"
+key = "A"
+
+[[secret]]
+source = "dotenv"
+file = ".env"
+key = "A"

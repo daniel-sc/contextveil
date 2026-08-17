@@ -7,11 +7,17 @@
 //! Malformed syntax is a malfunction (`SRC-006`), not an unresolved source, so
 //! the caller must disable the whole effective registry for the event.
 
+use std::collections::HashMap;
+
 /// Parsed assignments from one dotenv file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Dotenv {
     /// Assignments in file order after applying last-key-wins (`SRC-004`).
     entries: Vec<(String, String)>,
+    /// Position of each key in `entries`, so lookup and last-key-wins stay linear
+    /// in file size rather than quadratic in key count (`SRC-008`: files have no
+    /// size cap, so this has to hold for large files too).
+    index: HashMap<String, usize>,
     /// Keys assigned more than once, in first-occurrence order.
     duplicates: Vec<String>,
 }
@@ -19,10 +25,8 @@ pub struct Dotenv {
 impl Dotenv {
     /// Current value of one key, or `None` when the key is absent.
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.entries
-            .iter()
-            .find(|(name, _)| name == key)
-            .map(|(_, value)| value.as_str())
+        let position = *self.index.get(key)?;
+        Some(self.entries[position].1.as_str())
     }
 
     /// Every assignment in file order.
@@ -88,25 +92,32 @@ pub fn parse(input: &str) -> Result<Dotenv, ParseError> {
         text,
         bytes,
         position: 0,
+        counted_to: 0,
+        counted_lines: 0,
     };
     let mut entries: Vec<(String, String)> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
     let mut duplicates: Vec<String> = Vec::new();
 
     while let Some((key, value)) = parser.next_assignment()? {
-        match entries.iter_mut().find(|(name, _)| *name == key) {
-            Some(existing) => {
+        match index.get(&key) {
+            Some(position) => {
                 // Last assignment wins (`SRC-004`).
-                existing.1 = value;
-                if !duplicates.contains(&key) {
+                entries[*position].1 = value;
+                if !duplicates.iter().any(|known| *known == key) {
                     duplicates.push(key);
                 }
             }
-            None => entries.push((key, value)),
+            None => {
+                index.insert(key.clone(), entries.len());
+                entries.push((key, value));
+            }
         }
     }
 
     Ok(Dotenv {
         entries,
+        index,
         duplicates,
     })
 }
@@ -115,6 +126,13 @@ struct Parser<'a> {
     text: &'a str,
     bytes: &'a [u8],
     position: usize,
+    /// Offset up to which newlines have already been counted, and the count.
+    ///
+    /// Parsing only moves forward, so line numbers are accumulated instead of
+    /// recomputed from the start of the file. Recomputing made a large file cost
+    /// quadratic time, which matters because `SRC-008` allows any size.
+    counted_to: usize,
+    counted_lines: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -327,8 +345,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn line_of(&self, offset: usize) -> usize {
-        self.text[..offset].matches('\n').count() + 1
+    fn line_of(&mut self, offset: usize) -> usize {
+        debug_assert!(offset >= self.counted_to, "parsing only moves forward");
+        self.counted_lines += self.text[self.counted_to..offset].matches('\n').count();
+        self.counted_to = offset;
+        self.counted_lines + 1
     }
 }
 

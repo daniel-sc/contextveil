@@ -142,14 +142,22 @@ review project policy before starting the harness.
 **Reality:** V1 imposes no SecretSieve-specific size cap on dotenv files or
 intercepted payloads.
 
+Setup's collision analysis also reads every readable regular file under the
+project root, so it scales with project size rather than with the number of
+candidates.
+
 **Impact:** Very large files or payloads can consume excessive memory or exceed
 the five-second host timeout, causing fail-open behavior in process-hook hosts.
+Setup can take a noticeable moment on a very large repository.
 
 **Workaround:** Keep credential files small and rely on normal harness output
 limits. Diagnose slow paths with `secretsieve doctor` and benchmarks.
 
 **Verification:** Large-input tests measure behavior without promising a fixed
-maximum.
+maximum: a 4 MiB dotenv file with about 90,000 wildcard keys, a 2 MiB tool
+result, and 201 active values over a 512 KiB payload all complete well inside the
+five-second host bound, and runtime cost is linear in input size rather than
+quadratic.
 
 ### LIM-011: Limited Source Formats
 

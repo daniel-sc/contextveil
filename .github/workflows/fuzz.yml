@@ -1,0 +1,41 @@
+name: Fuzz
+
+on:
+  schedule:
+    # Weekly, so generated inputs keep accumulating coverage without slowing
+    # routine pull requests.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Time budget per run
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@v2
+        with:
+          version: 2026.8.6
+          experimental: true
+
+      # The task itself owns the command line (`AGENTS.md`); only its budget is
+      # passed in.
+      - run: mise run fuzz-smoke
+        env:
+          SECRETSIEVE_FUZZ_SECONDS: ${{ inputs.seconds || '300' }}
+          SECRETSIEVE_FUZZ_ITERATIONS: "200000"
+
+      - name: Upload promoted regressions
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-regressions
+          path: fuzz/regressions/

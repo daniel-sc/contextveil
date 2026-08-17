@@ -24,6 +24,11 @@ path = "src/lib.rs"
 name = "secretsieve"
 path = "src/main.rs"
 
+[[bin]]
+name = "fuzz_smoke"
+path = "src/bin/fuzz_smoke.rs"
+required-features = ["testing"]
+
 [[test]]
 name = "claude_hook"
 required-features = ["testing"]
@@ -42,6 +47,14 @@ required-features = ["testing"]
 
 [[test]]
 name = "copilot_hook"
+required-features = ["testing"]
+
+[[test]]
+name = "leaks"
+required-features = ["testing"]
+
+[[test]]
+name = "limits"
 required-features = ["testing"]
 
 [[bench]]
