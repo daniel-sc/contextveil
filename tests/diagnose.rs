@@ -317,7 +317,7 @@ fn the_project_root_follows_the_working_directory() {
     assert_eq!(output.status.code(), Some(0));
     let text = String::from_utf8(output.stdout).expect("UTF-8 stdout");
     assert!(text.contains(".secretsieve.toml"));
-    assert!(text.contains("active          1 value(s)"));
+    assert!(text.contains("active          1 value"));
 }
 
 /// Sanity check that the fixtures above really point at a usable binary.

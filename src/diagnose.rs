@@ -298,15 +298,27 @@ impl Snapshot {
                 );
             }
         }
-        let _ = writeln!(out, "  enrolled        {} source(s)", self.enrolled());
+        let _ = writeln!(
+            out,
+            "  enrolled        {}",
+            count(self.enrolled(), "source", "sources")
+        );
         let active = self.redactor.active_count();
         if active == 0 {
             // `DIA-002`: zero active values is shown as INACTIVE.
-            let _ = writeln!(out, "  active          0 value(s) - INACTIVE");
+            let _ = writeln!(out, "  active          0 values - INACTIVE");
         } else {
-            let _ = writeln!(out, "  active          {active} value(s)");
+            let _ = writeln!(
+                out,
+                "  active          {}",
+                count(active, "value", "values")
+            );
         }
-        let _ = writeln!(out, "  unresolved      {} source(s)", self.unresolved());
+        let _ = writeln!(
+            out,
+            "  unresolved      {}",
+            count(self.unresolved(), "source", "sources")
+        );
     }
 
     /// The integration facet, kept independent of registry health (`DIA-002`).
@@ -402,18 +414,18 @@ impl Snapshot {
 
         for (path, keys) in &self.duplicate_keys {
             findings.push(Finding::warning(format!(
-                "{} assigns {} key(s) more than once; the last assignment wins",
+                "{} assigns {} more than once; the last assignment wins",
                 sanitize::path(path),
-                keys.len()
+                count(keys.len(), "key", "keys")
             )));
         }
 
         // `REG-002`: report aliases without values.
         for (canonical, aliases) in self.redactor.aliases() {
             findings.push(Finding::warning(format!(
-                "{} has {} alias(es) that resolve to the same value",
+                "{} has {} resolving to the same value",
                 describe_source(canonical),
-                aliases.len()
+                count(aliases.len(), "alias", "aliases")
             )));
         }
 
@@ -425,8 +437,8 @@ impl Snapshot {
             ));
         } else {
             findings.push(Finding::ok(format!(
-                "{} value(s) would be redacted right now",
-                self.redactor.active_count()
+                "{} would be redacted right now",
+                count(self.redactor.active_count(), "value", "values")
             )));
         }
 
@@ -591,6 +603,15 @@ impl Snapshot {
     }
 }
 
+/// Renders a count with a correctly pluralized noun.
+fn count(number: usize, singular: &str, plural: &str) -> String {
+    if number == 1 {
+        format!("{number} {singular}")
+    } else {
+        format!("{number} {plural}")
+    }
+}
+
 fn sources_of(load: &Load) -> Vec<SourceRef> {
     match load {
         Load::Valid(config) => config.sources.clone(),
@@ -600,7 +621,7 @@ fn sources_of(load: &Load) -> Vec<SourceRef> {
 
 fn describe_load(load: &Load) -> String {
     match load {
-        Load::Valid(config) => format!("{} entr(ies)", config.sources.len()),
+        Load::Valid(config) => count(config.sources.len(), "entry", "entries"),
         Load::Missing => "missing".to_string(),
         Load::Invalid(error) => format!("invalid: {}", error.kind.reason()),
     }
@@ -762,9 +783,9 @@ mod tests {
 
         let (exit, output) = fixture.status(&[("GITHUB_TOKEN", canary.value())]);
         assert_eq!(exit, Exit::Ok);
-        assert!(output.contains("enrolled        2 source(s)"));
-        assert!(output.contains("active          1 value(s)"));
-        assert!(output.contains("unresolved      1 source(s)"));
+        assert!(output.contains("enrolled        2 sources"));
+        assert!(output.contains("active          1 value"));
+        assert!(output.contains("unresolved      1 source"));
         crate::testing::assert_canary_absent("status output", output.as_bytes(), &canary);
     }
 
@@ -922,7 +943,7 @@ mod tests {
 
         let (_, output) = fixture.doctor(&[("ALSO_DOUBLE", canary.value())]);
         assert!(output.contains("more than once"));
-        assert!(output.contains("alias(es)"));
+        assert!(output.contains("1 alias resolving"));
         crate::testing::assert_canary_absent("doctor output", output.as_bytes(), &canary);
     }
 
