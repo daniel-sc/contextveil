@@ -2,7 +2,9 @@ name: Release
 
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    # The second pattern carries prerelease tags such as `v1.0.0-alpha.1`, which
+    # publish as GitHub prereleases.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
   workflow_dispatch:
 
 permissions:
@@ -91,7 +93,25 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           notes="$(mktemp)"
           sed "s/__VERSION__/${version}/g" docs/release-notes-template.md > "${notes}"
+          # A prerelease is published as one, and its notes say how to install it
+          # given that the installer never selects a prerelease on its own
+          # (`REL-002`).
+          prerelease=()
+          case "${version}" in
+            *-*)
+              prerelease=(--prerelease)
+              {
+                printf '\n## This is a prerelease\n\n'
+                printf 'The installer only selects stable releases on its own, so name this one:\n\n'
+                printf '```bash\n'
+                printf 'curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/v%s/install.sh | bash -s -- --version %s\n' \
+                  "${version}" "${version}"
+                printf '```\n'
+              } >>"${notes}"
+              ;;
+          esac
           gh release create "${GITHUB_REF_NAME}" \
             --title "SecretSieve ${version}" \
             --notes-file "${notes}" \
+            "${prerelease[@]}" \
             dist/*

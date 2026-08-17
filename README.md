@@ -130,6 +130,14 @@ and installs atomically into `~/.local/bin/secretsieve`.
 install.sh [--install-dir DIR] [--version VERSION] [--allow-major-upgrade]
 ```
 
+A prerelease is never selected automatically. Until the first stable release,
+name the current one:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/main/install.sh |
+  bash -s -- --version 1.0.0-alpha.1
+```
+
 Rerunning it upgrades to the latest release inside the installed major version;
 crossing a major version requires `--allow-major-upgrade`. The installer only
 installs or upgrades the binary: it never runs setup, never edits SecretSieve

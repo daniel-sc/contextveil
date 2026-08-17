@@ -856,6 +856,14 @@ other part of this task is done and listed below.
    `docs/qualification.md` records it as a reproducible test report with the
    host's own transcript records attached, not as a signed-off gate.
 
+**Prerelease track:** `1.0.0-alpha.1` is prepared as a GitHub prerelease ahead of
+stable 1.0.0, so the four-target packaging and installer paths are exercised
+against real published artifacts before the stable release. `install.sh` never
+selects a prerelease automatically and installs one only when `--version` names it
+(`REL-002`); the release workflow publishes a `-`-suffixed tag as a prerelease;
+and `mise run release-check` covers both the prerelease and stable selection
+paths. The `REL-008` human sign-off above still gates the stable release.
+
 **Evidence for the completed parts:**
 
 - **The live Claude qualification (`REL-008`) was run and passed** on 2026-08-17
