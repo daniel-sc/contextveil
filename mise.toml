@@ -1,7 +1,10 @@
 min_version = "2025.1.0"
 
 [tools]
-rust = "1.97.1"
+# mise installs the toolchain itself and does not read the `components` list in
+# `rust-toolchain.toml`, so `format-check` and `lint` need them named here too.
+# Keep both files in step.
+rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy" }
 # Only the OpenCode plugin test suite needs Bun; OpenCode itself runs the plugin
 # inside its own Bun process (`OCO-001`).
 bun = "1.3.14"
