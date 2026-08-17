@@ -52,8 +52,11 @@ fn no_public_document_promises_more_than_the_security_claim() {
                 "{document} contains the overclaiming phrase `{phrase}`"
             );
         }
+        // Line wrapping must not split a sentence, or a disclaimer could land on
+        // the other side of the break and look like a bare claim.
+        let unwrapped = text.replace('\n', " ");
         for phrase in requires_disclaimer {
-            for sentence in text.split(['.', '\n']) {
+            for sentence in unwrapped.split('.') {
                 if !sentence.contains(phrase) {
                     continue;
                 }
