@@ -692,6 +692,49 @@ fn an_experimental_integration_requires_an_affirmative_choice() {
 }
 
 #[test]
+fn copilot_installs_one_dedicated_file_and_leaves_others_alone() {
+    // `COP-001`: only SecretSieve's own hook file is managed.
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    let hooks = fixture.home().join(".copilot").join("hooks");
+    std::fs::create_dir_all(&hooks).expect("copilot hooks directory");
+    let other = hooks.join("team-policy.json");
+    let other_contents =
+        r#"{"version": 1, "hooks": {"postToolUse": [{"type": "command", "bash": "/other/tool"}]}}"#;
+    std::fs::write(&other, other_contents).expect("write other hook file");
+
+    // Copilot is row 3 and is never selected by default; the conflict in the
+    // other file needs review once it is selected.
+    let (exit, transcript) = fixture.run("\n\n3\n\nn\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("GitHub Copilot CLI (EXPERIMENTAL)"));
+    assert!(transcript.contains("Installed the GitHub Copilot CLI integration"));
+    assert!(transcript.contains("/other/tool"));
+
+    let managed: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(hooks.join("secretsieve.json")).expect("managed hook file"),
+    )
+    .expect("valid JSON");
+    assert_eq!(managed["version"], serde_json::json!(1));
+    for event in ["userPromptTransformed", "postToolUse"] {
+        assert_eq!(
+            managed["hooks"][event][0]["timeoutSec"],
+            serde_json::json!(5)
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&other).expect("read other hook file"),
+        other_contents
+    );
+
+    // Deselecting removes only the managed file.
+    let (exit, transcript) = fixture.run("\n\n3\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!hooks.join("secretsieve.json").exists());
+    assert!(other.exists());
+}
+
+#[test]
 fn skipping_the_integration_phase_changes_nothing() {
     let fixture = Fixture::new();
     detect_claude(&fixture);

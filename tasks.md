@@ -545,7 +545,7 @@ resolver framework yet.
   `config.toml` hook form, and the failed-versus-non-zero-exit distinction;
 - `mise run check` passes.
 
-### [ ] T080: Implement Copilot Experimental Adapter
+### [x] T080: Implement Copilot Experimental Adapter
 
 **Depends on:** `T020`, `T030`, `T040`, `T060`
 
@@ -569,6 +569,44 @@ resolver framework yet.
 **Contributes to:** `SEC-001`, `SUP-003`, `RUN-001`, `RUN-002`, `RUN-004`,
 `RUN-006`, `INT-001` through `INT-006`, `COP-001` through `COP-004`, `DIA-006`,
 `TST-004`, `TST-005`.
+
+**Evidence:**
+
+- protocol facts come from the GitHub Copilot CLI hooks reference for CLI 1.0.80:
+  every `*.json` file under `~/.copilot/hooks/` is loaded and merged, a handler is
+  a flat object with `type`, `bash`, and a seconds-valued `timeoutSec`, events are
+  camelCase, `userPromptTransformed` returns `modifiedTransformedPrompt`,
+  `postToolUse` returns `modifiedResult` and is honored for command hooks, a
+  progress line is a single-line JSON object with `"type": "progress"`, exit 2
+  surfaces stderr as a warning while the run continues, and a failed tool result
+  arrives on the separate `postToolUseFailure` event;
+- `src/integration/copilot.rs` owns exactly one file,
+  `~/.copilot/hooks/secretsieve.json`, declaring both covered events with a
+  5-second `timeoutSec`. It never writes or deletes another file, refuses to
+  overwrite a same-named file whose content is not SecretSieve's, updates an
+  outdated file in place, and reports other files in that directory that act on a
+  covered event as conflicts;
+- `src/adapter/copilot.rs` redacts the transformed prompt and successful
+  `toolResult.textResultForLlm`, preserving every other field of the host result
+  shape, emits exactly one safe progress summary before the mutation object
+  (`COP-003`), stays silent for failed results and clean content, and reports a
+  diagnosed malfunction through the host's warning channel without mutating
+  anything (`RUN-001`);
+- the installed command names the event it serves, because Copilot payloads carry
+  no event name; a payload that does not match its entry point is diagnosed rather
+  than guessed;
+- `tests/copilot_hook.rs` covers prompt and successful-result intervention, the
+  failed-result negative case, clean events, unresolved sources, malformed input,
+  an unknown event, project selection from `cwd`, the malfunction warning path,
+  and a 1 MiB result inside the host timeout;
+- `tests/setup.rs` proves Copilot is opt-in, that installation creates only the
+  dedicated file, that an unrelated hook file survives installation and removal,
+  and that its conflict is offered for approval;
+- `limitations.md` `LIM-015` records the uninspected hook sources and the
+  undocumented rewrite composition; `DEV-002` records that command-hook support
+  for `modifiedTransformedPrompt` is inferred from the host schema rather than
+  confirmed by a live run;
+- `mise run check` passes.
 
 ### [ ] T090: Implement OpenCode Experimental Adapter
 

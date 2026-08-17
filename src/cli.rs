@@ -40,7 +40,10 @@ enum Command {
     Help,
     Version,
     /// Hidden per-harness hook entry point, for example `hook claude`.
-    Hook(Harness),
+    ///
+    /// Copilot needs a second word because its payloads carry no event name, so
+    /// the installed command states which covered event it serves.
+    Hook(Harness, Option<String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,15 +64,6 @@ impl Harness {
             _ => None,
         }
     }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Harness::Claude => "claude",
-            Harness::Codex => "codex",
-            Harness::Copilot => "copilot",
-            Harness::OpenCode => "opencode",
-        }
-    }
 }
 
 /// Why an invocation could not be turned into a command.
@@ -83,6 +77,7 @@ enum ParseError {
     UnknownOption,
     MissingHarness,
     UnknownHarness,
+    MissingHookEvent,
     UnexpectedArgument,
 }
 
@@ -94,6 +89,7 @@ impl ParseError {
             ParseError::UnknownOption => "unknown option",
             ParseError::MissingHarness => "missing harness name",
             ParseError::UnknownHarness => "unknown harness name",
+            ParseError::MissingHookEvent => "missing hook event name",
             ParseError::UnexpectedArgument => "unexpected argument",
         }
     }
@@ -144,11 +140,11 @@ pub fn run(
             crate::diagnose::status(out, &Environment::from_process(), &current_directory())
         }
         Ok(Command::Doctor) => run_doctor(out),
-        Ok(Command::Hook(Harness::Claude)) => run_claude_hook(input, out),
-        Ok(Command::Hook(Harness::OpenCode)) => run_opencode_hook(input, out),
-        Ok(Command::Hook(Harness::Codex)) => run_codex_hook(input, out),
-        Ok(Command::Hook(harness)) => {
-            unimplemented_command(&format!("hook {}", harness.as_str()), err)
+        Ok(Command::Hook(Harness::Claude, _)) => run_claude_hook(input, out),
+        Ok(Command::Hook(Harness::OpenCode, _)) => run_opencode_hook(input, out),
+        Ok(Command::Hook(Harness::Codex, _)) => run_codex_hook(input, out),
+        Ok(Command::Hook(Harness::Copilot, event)) => {
+            run_copilot_hook(event.as_deref(), input, out, err)
         }
         Err(error) => {
             let _ = writeln!(err, "secretsieve: {}", error.message());
@@ -248,6 +244,32 @@ fn run_claude_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {
     response.exit
 }
 
+/// Runs the hidden Copilot entry point for one covered event.
+///
+/// Copilot surfaces stderr as a warning when a hook exits 2 and continues the
+/// run with the original content, which is how a diagnosed malfunction is
+/// reported for this host (`RUN-001`, `CLI-007`).
+fn run_copilot_hook(
+    event: Option<&str>,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Exit {
+    let Some(event) = event.and_then(crate::adapter::copilot::Event::parse) else {
+        let _ = writeln!(err, "secretsieve: unknown hook event");
+        return Exit::Usage;
+    };
+    let payload = read_payload(input);
+    let response = crate::adapter::copilot::handle(event, &payload, &Environment::from_process());
+    if let Some(stdout) = response.stdout {
+        let _ = writeln!(out, "{stdout}");
+    }
+    if let Some(stderr) = response.stderr {
+        let _ = writeln!(err, "{stderr}");
+    }
+    response.exit
+}
+
 /// Runs the hidden Codex `PostToolUse` entry point.
 fn run_codex_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {
     let payload = read_payload(input);
@@ -268,17 +290,6 @@ fn run_opencode_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {
     let response = crate::adapter::opencode::handle(&payload, &Environment::from_process());
     let _ = writeln!(out, "{}", response.to_json());
     response.exit()
-}
-
-/// Placeholder for a command whose task has not landed yet.
-///
-/// It fails loudly instead of pretending protection exists.
-fn unimplemented_command(name: &str, err: &mut dyn Write) -> Exit {
-    let _ = writeln!(
-        err,
-        "secretsieve: `{name}` is not implemented in this build"
-    );
-    Exit::Usage
 }
 
 fn parse(args: &[OsString]) -> Result<Command, ParseError> {
@@ -312,17 +323,20 @@ fn parse(args: &[OsString]) -> Result<Command, ParseError> {
                 _ => Command::Doctor,
             })
         }
-        "hook" => match positional.get(1) {
-            None => Err(ParseError::MissingHarness),
-            Some(harness) => {
-                if positional.len() > 2 {
-                    return Err(ParseError::UnexpectedArgument);
-                }
-                Harness::parse(harness)
-                    .map(Command::Hook)
-                    .ok_or(ParseError::UnknownHarness)
+        "hook" => {
+            let Some(name) = positional.get(1) else {
+                return Err(ParseError::MissingHarness);
+            };
+            let harness = Harness::parse(name).ok_or(ParseError::UnknownHarness)?;
+            let event = positional.get(2).map(|event| event.to_string());
+            match (harness, &event, positional.len()) {
+                // Copilot serves two events, so its command names one.
+                (Harness::Copilot, Some(_), 3) => Ok(Command::Hook(harness, event)),
+                (Harness::Copilot, _, _) => Err(ParseError::MissingHookEvent),
+                (_, None, 2) => Ok(Command::Hook(harness, None)),
+                _ => Err(ParseError::UnexpectedArgument),
             }
-        },
+        }
         _ => Err(ParseError::UnknownCommand),
     }
 }
@@ -384,11 +398,23 @@ mod tests {
     fn hidden_hook_entry_points_parse() {
         assert_eq!(
             parse(&args(&["hook", "claude"])),
-            Ok(Command::Hook(Harness::Claude))
+            Ok(Command::Hook(Harness::Claude, None))
         );
         assert_eq!(
             parse(&args(&["hook", "opencode"])),
-            Ok(Command::Hook(Harness::OpenCode))
+            Ok(Command::Hook(Harness::OpenCode, None))
+        );
+        assert_eq!(
+            parse(&args(&["hook", "copilot", "prompt"])),
+            Ok(Command::Hook(Harness::Copilot, Some("prompt".to_string())))
+        );
+        assert_eq!(
+            parse(&args(&["hook", "copilot"])),
+            Err(ParseError::MissingHookEvent)
+        );
+        assert_eq!(
+            parse(&args(&["hook", "claude", "extra"])),
+            Err(ParseError::UnexpectedArgument)
         );
         assert_eq!(
             parse(&args(&["hook", "nope"])),

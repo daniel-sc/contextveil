@@ -10,6 +10,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod copilot;
 pub mod hooks_json;
 pub mod state;
 
@@ -25,10 +26,11 @@ use crate::source::Environment;
 pub enum Harness {
     Claude,
     Codex,
+    Copilot,
 }
 
 /// Every harness setup and diagnostics know about, in presentation order.
-pub const HARNESSES: [Harness; 2] = [Harness::Claude, Harness::Codex];
+pub const HARNESSES: [Harness; 3] = [Harness::Claude, Harness::Codex, Harness::Copilot];
 
 /// Support tier (`SUP-002`, `SUP-003`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,13 +46,14 @@ impl Harness {
         match self {
             Harness::Claude => "Claude Code",
             Harness::Codex => "Codex CLI",
+            Harness::Copilot => "GitHub Copilot CLI",
         }
     }
 
     pub fn tier(self) -> Tier {
         match self {
             Harness::Claude => Tier::Production,
-            Harness::Codex => Tier::Experimental,
+            Harness::Codex | Harness::Copilot => Tier::Experimental,
         }
     }
 
@@ -64,7 +67,7 @@ impl Harness {
     /// Extra step the host requires after installation, if any.
     pub fn post_install_note(self) -> Option<&'static str> {
         match self {
-            Harness::Claude => None,
+            Harness::Claude | Harness::Copilot => None,
             // Verified against openai/codex: a newly added or changed hook is
             // `Untrusted` until the user reviews it, and untrusted hooks do not
             // run (`COD-001`).
@@ -132,6 +135,7 @@ pub fn inspect(
     match harness {
         Harness::Claude => claude::inspect(environment, home, executable, state),
         Harness::Codex => codex::inspect(environment, home, executable, state),
+        Harness::Copilot => copilot::inspect(environment, home, executable, state),
     }
 }
 
@@ -145,6 +149,7 @@ pub fn install(
     match harness {
         Harness::Claude => claude::install(home, executable, state),
         Harness::Codex => codex::install(home, executable, state),
+        Harness::Copilot => copilot::install(home, executable, state),
     }
 }
 
@@ -155,6 +160,7 @@ pub fn remove(harness: Harness, home: &Path, state: &mut State) -> Result<bool, 
     match harness {
         Harness::Claude => claude::remove(home, state),
         Harness::Codex => codex::remove(home, state),
+        Harness::Copilot => copilot::remove(home, state),
     }
 }
 
@@ -163,6 +169,7 @@ pub fn verify_offline(harness: Harness, executable: &Path) -> Verification {
     match harness {
         Harness::Claude => claude::verify_offline(executable),
         Harness::Codex => codex::verify_offline(executable),
+        Harness::Copilot => copilot::verify_offline(executable),
     }
 }
 

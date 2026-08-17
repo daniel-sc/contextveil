@@ -237,15 +237,32 @@ requires the block decision to carry the placeholder.
 
 **Reality:** Copilot V1 covers transformed prompt text and successful textual
 tool results. Failed errors, non-text attachments, other context injection paths,
-and the original prompt displayed in the local timeline are not rewritten.
+and the original prompt displayed in the local timeline are not rewritten. A
+failed tool result arrives on a separate host event that offers no result
+replacement at all.
 
-**Impact:** Enrolled values may remain in uncovered model paths or local UI.
+Two further host-specific limits apply:
 
-**Workaround:** Avoid pasting credentials into attachments and treat failed tool
-output as uncovered.
+- Copilot merges hooks from repository files and from inline `settings.json`
+  sections as well as from `~/.copilot/hooks/`. SecretSieve owns one file in that
+  directory and inspects only that directory for competing hooks, so a mutating
+  hook declared elsewhere is not reported as a conflict.
+- The host documents that rewrites do not compose across multiple hooks on some
+  events, and does not document composition for the two covered events. Another
+  hook that also rewrites the same content may therefore win, regardless of
+  order.
 
-**Verification:** Fixtures cover both mutable paths and negative failure/non-text
-paths.
+**Impact:** Enrolled values may remain in uncovered model paths or local UI, and
+a competing rewrite outside the inspected directory is neither reported nor
+prevented.
+
+**Workaround:** Avoid pasting credentials into attachments, treat failed tool
+output as uncovered, and keep competing hooks in `~/.copilot/hooks/` so
+`secretsieve doctor` can report them.
+
+**Verification:** Fixtures cover both mutable paths, the failed-result negative
+case, clean and malformed input, the progress summary, and the warning channel.
+Installation and removal tests assert that unrelated hook files are untouched.
 
 ### LIM-016: OpenCode V1 API Only
 
@@ -379,6 +396,35 @@ before relying on it, and treat `REL-008` as the gate for release.
 
 **Verification:** The manual live qualification in `REL-008` exercises this path
 against the tested host version, and its result is recorded as release evidence.
+
+### DEV-002: Copilot Prompt Coverage Rests On An Inferred Host Rule
+
+Contract: `COP-002`, `SUP-004`
+
+**Observed behavior:** The Copilot adapter redacts `userPromptTransformed` text by
+returning `modifiedTransformedPrompt`. The host documentation states explicitly
+that the neighboring `userPromptSubmitted` event honors its `modifiedPrompt` only
+for SDK hooks, not for command hooks, and it states explicitly that `postToolUse`
+honors `modifiedResult` for command hooks. It makes no such statement either way
+for `userPromptTransformed`.
+
+**Reason:** Copilot CLI is experimental in V1 (`SUP-003`) and `SUP-004` forbids
+host version gates, so coverage is derived from the documented schema plus offline
+synthetic verification rather than from a live host run.
+
+**Impact:** If Copilot ignores `modifiedTransformedPrompt` for command hooks, the
+prompt path is silently uncovered while the tool-result path still works. The
+offline synthetic check cannot detect this, because it exercises SecretSieve's
+side of the protocol only.
+
+**Workaround:** Treat Copilot prompt coverage as unproven until a live check is
+performed, and rely on the Claude production integration where prompt-path
+assurance matters.
+
+**Verification:** Protocol fixtures assert SecretSieve emits exactly the
+documented response shape for both events. Confirming that the host honors the
+prompt mutation requires a live Copilot run, which is out of scope for automated
+tests (`TST-008`).
 
 Add future deviations using this template:
 

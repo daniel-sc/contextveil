@@ -40,6 +40,10 @@ required-features = ["testing"]
 name = "codex_hook"
 required-features = ["testing"]
 
+[[test]]
+name = "copilot_hook"
+required-features = ["testing"]
+
 [[bench]]
 name = "redaction"
 harness = false

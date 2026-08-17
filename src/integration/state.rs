@@ -23,6 +23,8 @@ pub struct State {
     pub claude: Option<Managed>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex: Option<Managed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copilot: Option<Managed>,
 }
 
 fn one() -> i64 {
@@ -45,6 +47,7 @@ impl State {
         match harness {
             Harness::Claude => self.claude.as_ref(),
             Harness::Codex => self.codex.as_ref(),
+            Harness::Copilot => self.copilot.as_ref(),
         }
     }
 
@@ -53,6 +56,7 @@ impl State {
         match harness {
             Harness::Claude => self.claude.get_or_insert_with(Managed::default),
             Harness::Codex => self.codex.get_or_insert_with(Managed::default),
+            Harness::Copilot => self.copilot.get_or_insert_with(Managed::default),
         }
     }
 
@@ -60,6 +64,7 @@ impl State {
         match harness {
             Harness::Claude => self.claude = managed,
             Harness::Codex => self.codex = managed,
+            Harness::Copilot => self.copilot = managed,
         }
     }
 
