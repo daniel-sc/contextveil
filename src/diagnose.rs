@@ -59,8 +59,16 @@ pub enum LiveCanary {
 }
 
 /// Runs `status` (`CLI-005`).
-pub fn status(out: &mut dyn Write, environment: &Environment, current_directory: &Path) -> Exit {
-    let Some(snapshot) = Snapshot::take(environment, current_directory, None) else {
+///
+/// `executable` is the running binary, so an installed hook that points at it is
+/// reported as current rather than as outdated.
+pub fn status(
+    out: &mut dyn Write,
+    environment: &Environment,
+    current_directory: &Path,
+    executable: Option<&Path>,
+) -> Exit {
+    let Some(snapshot) = Snapshot::take(environment, current_directory, executable) else {
         let _ = writeln!(
             out,
             "secretsieve: the configuration location could not be determined. Set HOME or \
@@ -789,7 +797,7 @@ mod tests {
 
         fn status(&self, pairs: &[(&str, &str)]) -> (Exit, String) {
             let mut out = Vec::new();
-            let exit = status(&mut out, &self.environment(pairs), &self.project());
+            let exit = status(&mut out, &self.environment(pairs), &self.project(), None);
             (exit, String::from_utf8(out).expect("UTF-8 output"))
         }
 
@@ -855,6 +863,7 @@ mod tests {
             &mut out,
             &Environment::from_pairs([("HOME", "")]),
             Path::new("/tmp"),
+            None,
         );
         assert_eq!(exit, Exit::Usage);
     }

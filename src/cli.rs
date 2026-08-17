@@ -136,9 +136,12 @@ pub fn run(
             Exit::Ok
         }
         Ok(Command::Setup) => run_setup(err),
-        Ok(Command::Status) => {
-            crate::diagnose::status(out, &Environment::from_process(), &current_directory())
-        }
+        Ok(Command::Status) => crate::diagnose::status(
+            out,
+            &Environment::from_process(),
+            &current_directory(),
+            crate::integration::current_executable().as_deref(),
+        ),
         Ok(Command::Doctor) => run_doctor(out),
         Ok(Command::Hook(Harness::Claude, _)) => run_claude_hook(input, out),
         Ok(Command::Hook(Harness::OpenCode, _)) => run_opencode_hook(input, out),

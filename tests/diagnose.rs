@@ -231,6 +231,42 @@ fn an_inspection_that_cannot_complete_exits_two() {
 }
 
 #[test]
+fn status_recognizes_a_hook_that_points_at_the_running_binary() {
+    // Regression: status passed no executable path, so its own installed hook was
+    // reported as pointing at another binary while doctor reported it as current.
+    let canary = Canary::generate("TOKEN");
+    let machine = Machine::new();
+    machine.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");
+    machine.install_hook("");
+
+    let status = machine.run("status", &[("TOKEN", canary.value())]);
+    let text = text(&status);
+    assert!(
+        !text.contains("pointing at another binary"),
+        "status misreported its own hook: {text}"
+    );
+    assert!(text.contains("Claude Code (production)  detected, installed"));
+}
+
+#[test]
+fn an_uninstalled_integration_reports_no_timeout() {
+    // Regression: OpenCode reported a 5-second timeout even with no plugin
+    // installed, which read as a passing check for something absent.
+    let canary = Canary::generate("TOKEN");
+    let machine = Machine::new();
+    machine.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");
+    machine.install_hook("");
+
+    let doctor = machine.run("doctor", &[("TOKEN", canary.value())]);
+    let text = text(&doctor);
+    assert!(text.contains("the Claude Code hook timeout is 5 seconds"));
+    assert!(
+        !text.contains("the OpenCode hook timeout"),
+        "an absent integration reported a timeout: {text}"
+    );
+}
+
+#[test]
 fn status_runs_no_adapter_protocol_test() {
     // `DIA-001`: status must not spawn the hook. A hook path that does not exist
     // would make a protocol test fail, yet status still exits zero and says

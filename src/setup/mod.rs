@@ -295,6 +295,15 @@ impl Item {
     }
 }
 
+/// Renders a count with a correctly pluralized noun.
+fn count(number: usize, singular: &str, plural: &str) -> String {
+    if number == 1 {
+        format!("{number} {singular}")
+    } else {
+        format!("{number} {plural}")
+    }
+}
+
 /// Sanitized, value-free description of a source reference.
 fn describe(source: &SourceRef) -> String {
     match source {
@@ -670,9 +679,10 @@ fn verification_phase(
     terminal.line("Verification");
     match crate::registry::build(environment, Some(project_root)) {
         crate::registry::Outcome::Ready(registry) => {
+            let enrolled = global_sources.len() + project_sources.len();
             terminal.line(&format!(
-                "  {} enrolled source(s): {} active, {} unresolved.",
-                global_sources.len() + project_sources.len(),
+                "  {} enrolled: {} active, {} unresolved.",
+                count(enrolled, "source", "sources"),
                 registry.redactor.active_count(),
                 registry.unresolved.len()
             ));

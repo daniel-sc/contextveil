@@ -65,6 +65,12 @@ pub fn inspect(
 ) -> Inspection {
     let artifact_path = plugin_file(home);
     let installed = classify(&artifact_path, executable);
+    // The 5-second bound lives inside the installed plugin source rather than in
+    // host configuration, so it is reported only when a plugin is present.
+    let hook_timeout = match installed {
+        Installed::Current | Installed::Outdated { .. } => Some(claude::TIMEOUT_SECONDS),
+        _ => None,
+    };
 
     Inspection {
         harness: Harness::OpenCode,
@@ -73,9 +79,7 @@ pub fn inspect(
         installed,
         conflicts: conflicts(home, &state.approved_conflicts(Harness::OpenCode)),
         hook_executable: recorded_executable(&plugin_file(home)),
-        // The 5-second bound lives inside the plugin source, not in host
-        // configuration, so there is no separate timeout field to inspect.
-        hook_timeout: Some(claude::TIMEOUT_SECONDS),
+        hook_timeout,
         disabled_by_policy: false,
     }
 }
