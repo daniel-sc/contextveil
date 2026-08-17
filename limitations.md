@@ -390,8 +390,10 @@ renders the unavailable path safely in setup.
 **Workaround:** Rename the file or an ancestor directory to a UTF-8 name, or
 expose the credential through an enrolled environment variable.
 
-**Verification:** Unix filesystem tests create a non-UTF-8 matching path and
-assert it is safely reported, not parsed or persisted.
+**Verification:** A Unix test asserts such a path is safely reported, not parsed
+or persisted. Its discovery half additionally creates the file, which runs only
+where the filesystem accepts a non-UTF-8 name; APFS rejects one, so macOS covers
+the reporting half alone.
 
 ## Implementation Deviations
 
