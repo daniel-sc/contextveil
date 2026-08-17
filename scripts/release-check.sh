@@ -170,6 +170,43 @@ cp "${work}/archive.good" "${archive}"
 installer >/dev/null 2>&1 || fail "reinstalling after a corrupt download failed"
 check "a corrupt download is rejected, installs nothing, and leaves no temporary file"
 
+# --- hostile archive contents ------------------------------------------------
+
+# An archive whose `secretsieve` member is a symlink must be refused rather than
+# followed, and an archive carrying extra paths must not have them extracted.
+hostile="${work}/hostile"
+mkdir -p "${hostile}/v${version}"
+staging="$(mktemp -d)"
+ln -s /etc/passwd "${staging}/secretsieve"
+mkdir -p "${staging}/extra"
+printf 'unwanted\n' >"${staging}/extra/payload"
+# No --dereference, so the symlink is archived as a symlink.
+tar --create --gzip \
+  --directory "${staging}" \
+  --file "${hostile}/v${version}/secretsieve-${version}-${target}.tar.gz" \
+  secretsieve extra
+(
+  cd "${hostile}/v${version}"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "secretsieve-${version}-${target}.tar.gz" >"secretsieve-${version}-SHA256SUMS"
+  else
+    shasum -a 256 "secretsieve-${version}-${target}.tar.gz" >"secretsieve-${version}-SHA256SUMS"
+  fi
+)
+rm -rf "${staging}"
+
+rm -f "${binary}"
+if env HOME="${work}/home" \
+  SECRETSIEVE_RELEASE_INDEX="file://${index}" \
+  SECRETSIEVE_RELEASE_BASE="file://${hostile}" \
+  bash "${root}/install.sh" >"${work}/hostile.log" 2>&1; then
+  fail "an archive whose binary member is a symlink was installed"
+fi
+[ ! -e "${binary}" ] || fail "the hostile archive left a binary behind"
+[ ! -e "${work}/home/.local/bin/extra" ] || fail "the hostile archive wrote an extra path"
+installer >/dev/null 2>&1 || fail "reinstalling after the hostile archive failed"
+check "an archive with a symlinked or extra member is refused"
+
 # --- major upgrade gating (`REL-004`) --------------------------------------
 
 # An installed binary from the next major version, so the packaged release is

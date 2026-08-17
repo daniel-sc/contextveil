@@ -215,9 +215,14 @@ if [ "${expected}" != "${actual}" ]; then
 fi
 printf 'install.sh: checksum verified\n'
 
-tar -xzf "${work}/${archive}" -C "${work}" ||
-  fail "the release archive could not be extracted"
-[ -f "${work}/secretsieve" ] || fail "the release archive does not contain \`secretsieve\`"
+# Extract only the one member that is installed. A hostile archive therefore
+# cannot write anywhere else, and a member that is a symlink rather than a
+# regular file is refused instead of followed.
+tar -xzf "${work}/${archive}" -C "${work}" secretsieve ||
+  fail "the release archive does not contain an extractable \`secretsieve\`"
+if [ -L "${work}/secretsieve" ] || [ ! -f "${work}/secretsieve" ]; then
+  fail "the release archive does not contain \`secretsieve\` as a regular file"
+fi
 chmod 755 "${work}/secretsieve"
 
 mkdir -p "${install_dir}" || fail "${install_dir} could not be created"
