@@ -6,6 +6,9 @@
 //!
 //! Matching is deliberately literal. No name, entropy, provider-format, length,
 //! or collision heuristic may influence runtime behavior (`REG-001`).
+//!
+//! `RED-010` is satisfied by construction: nothing here, and no other module, maps
+//! a placeholder back to a source value. Replacement is one way.
 
 use std::collections::HashMap;
 

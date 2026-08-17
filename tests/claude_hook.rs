@@ -3,6 +3,10 @@
 //! These drive the built binary over stdin and stdout, the way Claude Code
 //! invokes it (`INT-003`), instead of calling adapter functions directly
 //! (`architecture.md`, test architecture).
+//!
+//! Together with the Codex, Copilot, and OpenCode suites they are the `TST-004`
+//! protocol fixtures: clean, intervened, unresolved, malformed-input,
+//! diagnosed-malfunction, timeout-adjacent, and conflicting-installation states.
 
 use std::io::Write;
 use std::path::PathBuf;

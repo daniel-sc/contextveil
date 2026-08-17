@@ -2,6 +2,11 @@
 //!
 //! Each test drives `setup::run` with a scripted transcript inside an isolated
 //! home and project, so no developer configuration is read or written.
+//!
+//! With the config and source unit tests, these cover the `TST-002` and `TST-003`
+//! cases: strict fields, duplicate identities, cross-scope duplicates, missing
+//! sources, recursive discovery and its exclusions, permissions, atomic writes,
+//! invalid-config preservation, repeat setup, and partial multi-phase failure.
 
 use std::path::{Path, PathBuf};
 

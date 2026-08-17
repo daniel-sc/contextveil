@@ -7,6 +7,9 @@
 //!
 //! Inputs are generated from a deterministic PRNG so a failure is reproducible
 //! from its seed and CI never depends on a random schedule.
+//!
+//! The named `TST-001` vectors have focused tests in `src/matcher.rs`; this file
+//! covers the same rules over generated input.
 
 use secretsieve::matcher::Redactor;
 use secretsieve::secret::{ResolvedSecret, SourceId};

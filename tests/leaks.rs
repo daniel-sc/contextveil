@@ -349,6 +349,49 @@ fn a_malfunction_on_every_adapter_discloses_nothing() {
 }
 
 #[test]
+fn runtime_writes_no_log_or_telemetry_file() {
+    // `SEC-005`: no telemetry, crash upload, analytics, or persistent runtime
+    // logging. Every covered path is exercised, then the file tree is compared
+    // with what existed before.
+    let machine = Machine::new();
+    let value = machine.canary.value().to_string();
+    let project = machine.project().to_string_lossy().into_owned();
+    let before: Vec<PathBuf> = walk(&machine.home());
+
+    let payloads: Vec<(Vec<&str>, String)> = vec![
+        (
+            vec!["hook", "claude"],
+            json!({"hook_event_name": "PostToolUse", "cwd": project, "tool_response": {"stdout": value}})
+                .to_string(),
+        ),
+        (
+            vec!["hook", "codex"],
+            json!({"hook_event_name": "PostToolUse", "cwd": project, "tool_response": {"output": value}})
+                .to_string(),
+        ),
+        (
+            vec!["hook", "copilot", "tool"],
+            json!({"cwd": project, "toolResult": {"resultType": "success", "textResultForLlm": value}})
+                .to_string(),
+        ),
+        (
+            vec!["hook", "opencode"],
+            json!({"version": 1, "event": "chat.message", "project_root": project, "texts": [value]})
+                .to_string(),
+        ),
+    ];
+    for (arguments, payload) in payloads {
+        machine.run_with_payload(&arguments, &payload);
+    }
+    machine.run(&["status"]);
+    machine.run(&["doctor"]);
+
+    let after: Vec<PathBuf> = walk(&machine.home());
+    let created: Vec<&PathBuf> = after.iter().filter(|path| !before.contains(path)).collect();
+    assert!(created.is_empty(), "runtime created files: {created:?}");
+}
+
+#[test]
 fn terminal_hostile_names_and_paths_are_escaped_in_diagnostics() {
     // `SEC-006`: everything untrusted reaching a terminal is escaped.
     let machine = Machine::new();

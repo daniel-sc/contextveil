@@ -7,7 +7,9 @@
 //!
 //! `SRC-009`: sources are resolved afresh for every event. The dotenv cache here
 //! exists only so one file referenced by several entries is read once per event;
-//! it never survives the process.
+//! it never survives the process. `SRC-010` follows from that: a dotenv edit is
+//! visible on the next event, while an environment change needs the harness to be
+//! restarted, because the hook inherits the harness environment.
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};

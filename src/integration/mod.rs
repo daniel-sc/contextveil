@@ -7,6 +7,11 @@
 //! (`INT-006`); the state file here records only ownership and user intent.
 //!
 //! Dispatch is a plain `match` over a small enum rather than a plugin framework.
+//!
+//! `REL-005`: no installer, hook, or plugin downloads or updates the binary. The
+//! only component that fetches anything is `install.sh`.
+//! `SUP-004`: nothing here compares host versions. Health comes from observed
+//! configuration plus the offline synthetic checks.
 
 pub mod claude;
 pub mod codex;

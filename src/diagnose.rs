@@ -6,6 +6,10 @@
 //! active values is shown as `INACTIVE`. `DIA-003` adds doctor's deeper checks,
 //! and `DIA-004` keeps collision findings advisory.
 //!
+//! `DIA-007`: a passing check is never presented as a permanent certificate;
+//! both commands re-derive everything from current configuration and artifacts,
+//! and say so.
+//!
 //! Output is human-readable only; V1 provides no stable machine-readable
 //! contract (`CLI-003`, `LIM-021`). Every untrusted path, key, and command is
 //! rendered through `crate::sanitize` (`SEC-006`), and no diagnostic contains a
