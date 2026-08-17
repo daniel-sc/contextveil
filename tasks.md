@@ -778,7 +778,10 @@ through `TST-007`.
   toolchain, a locked dependency set, stripped symbols, and deterministic tar
   metadata, then writes its SHA-256 into
   `secretsieve-<version>-SHA256SUMS`. `mise run package [TARGET]` is the entry
-  point, and only the four `SUP-001` targets are accepted;
+  point, and only the four `SUP-001` targets are accepted. GNU tar and the bsdtar
+  that macOS ships take separate invocations because bsdtar rejects `--sort` and
+  `--owner`; both produce byte-identical archives across runs on one platform,
+  which `release-check` asserts on Linux and macOS;
 - `install.sh` implements the `REL-002` interface exactly: platform and
   architecture detection for Linux and macOS on x86_64 and arm64, checksum
   verification before anything is replaced, atomic replacement through a staged
@@ -860,9 +863,10 @@ other part of this task is done and listed below.
 stable 1.0.0, so the four-target packaging and installer paths are exercised
 against real published artifacts before the stable release. `install.sh` never
 selects a prerelease automatically and installs one only when `--version` names it
-(`REL-002`); the release workflow publishes a `-`-suffixed tag as a prerelease;
-and `mise run release-check` covers both the prerelease and stable selection
-paths. The `REL-008` human sign-off above still gates the stable release.
+(`REL-002`); the release workflow publishes a `-`-suffixed tag as a prerelease,
+and verifies artifacts on Linux and macOS rather than Linux alone; and
+`mise run release-check` covers both the prerelease and stable selection paths.
+The `REL-008` human sign-off above still gates the stable release.
 
 **Evidence for the completed parts:**
 
