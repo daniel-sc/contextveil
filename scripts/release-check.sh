@@ -74,13 +74,25 @@ check "packaging the same commit twice produces identical bytes"
 index="${work}/index.json"
 printf '[{"tag_name": "v%s"}]\n' "${version}" >"${index}"
 
-installer() {
+# `REL-002`: automatic selection never picks a prerelease, so a prerelease under
+# test has to be named exactly. The `+` expansion keeps an empty array safe under
+# `set -u` on the bash 3.2 that macOS still ships.
+select=()
+case "${version}" in
+  *-*) select=(--version "${version}") ;;
+esac
+
+installer_with() {
   env \
     HOME="${work}/home" \
     PATH="${PATH}" \
     SECRETSIEVE_RELEASE_INDEX="file://${index}" \
     SECRETSIEVE_RELEASE_BASE="file://${work}/releases" \
     bash "${root}/install.sh" "$@"
+}
+
+installer() {
+  installer_with ${select[@]+"${select[@]}"} "$@"
 }
 
 # --- clean install (`REL-002`) ----------------------------------------------
@@ -114,6 +126,24 @@ check "no configuration or harness file was created"
 installer >"${work}/repeat.log" 2>&1 || fail "a repeat install failed"
 grep -q "already installed" "${work}/repeat.log" || fail "a repeat install did not detect the current version"
 check "a repeat install is a no-op"
+
+# --- prerelease selection (`REL-002`) ---------------------------------------
+
+# Only meaningful while the version under test is a prerelease; a stable release
+# has nothing to exclude.
+if [ "${#select[@]}" -gt 0 ]; then
+  rm -f "${binary}"
+  if installer_with >"${work}/prerelease.log" 2>&1; then
+    fail "a prerelease was selected automatically"
+  fi
+  grep -q "no stable release was found" "${work}/prerelease.log" ||
+    fail "the prerelease refusal was reported for the wrong reason"
+  [ ! -e "${binary}" ] || fail "the refused prerelease was installed anyway"
+  installer >/dev/null 2>&1 || fail "installing the prerelease by exact version failed"
+  reported="$("${binary}" --version | awk '{print $2}')"
+  [ "${reported}" = "${version}" ] || fail "the prerelease install reports ${reported}"
+  check "a prerelease is refused automatically and installs only when named"
+fi
 
 # --- upgrade from an older release in the same major (`REL-004`, `REL-007`) --
 
@@ -199,7 +229,7 @@ rm -f "${binary}"
 if env HOME="${work}/home" \
   SECRETSIEVE_RELEASE_INDEX="file://${index}" \
   SECRETSIEVE_RELEASE_BASE="file://${hostile}" \
-  bash "${root}/install.sh" >"${work}/hostile.log" 2>&1; then
+  bash "${root}/install.sh" ${select[@]+"${select[@]}"} >"${work}/hostile.log" 2>&1; then
   fail "an archive whose binary member is a symlink was installed"
 fi
 [ ! -e "${binary}" ] || fail "the hostile archive left a binary behind"
@@ -229,11 +259,12 @@ check "crossing a major version requires an explicit opt-in"
 env HOME="${work}/home" \
   SECRETSIEVE_RELEASE_INDEX="file://${majorindex}" \
   SECRETSIEVE_RELEASE_BASE="file://${work}/releases" \
-  bash "${root}/install.sh" --allow-major-upgrade >"${work}/major-ok.log" 2>&1 ||
+  bash "${root}/install.sh" --allow-major-upgrade ${select[@]+"${select[@]}"} \
+  >"${work}/major-ok.log" 2>&1 ||
   fail "an explicit major upgrade failed"
 reported="$("${binary}" --version | awk '{print $2}')"
 [ "${reported}" = "${version}" ] || fail "the explicit major upgrade did not install"
-check "an explicit major upgrade installs the latest stable release"
+check "an explicit major upgrade installs the selected release"
 
 # --- alternative install directory -----------------------------------------
 

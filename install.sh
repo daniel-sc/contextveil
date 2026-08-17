@@ -15,6 +15,9 @@
 # requires `--allow-major-upgrade`. With an installed binary, a standalone
 # `--allow-major-upgrade` selects the latest stable release across majors.
 #
+# A prerelease such as 1.0.0-alpha.1 is never selected automatically. Naming it
+# with `--version` installs it.
+#
 # The two environment variables below exist so `mise run release-check` can
 # exercise this script against locally produced artifacts. They are not part of
 # the supported interface.
@@ -41,7 +44,8 @@ usage() {
 Usage: install.sh [--install-dir DIR] [--version VERSION] [--allow-major-upgrade]
 
   --install-dir DIR       Install into DIR instead of ~/.local/bin
-  --version VERSION       Install exactly this release, for example 1.2.3
+  --version VERSION       Install exactly this release, for example 1.2.3, or a
+                          prerelease such as 1.0.0-alpha.1
   --allow-major-upgrade   Permit crossing the installed major version
   -h, --help              Show this help
 
@@ -136,14 +140,21 @@ major_of() {
 }
 
 # Every published release tag, newest first.
+#
+# `stable` keeps only the three-numeric-component tags that automatic selection
+# may choose. `any` also lists prereleases such as 1.0.0-alpha.1, which only an
+# exact `--version` request can install (`REL-002`).
 list_versions() {
-  local index
+  local scope="$1" index pattern
   index="$(mktemp)"
   fetch "${RELEASE_INDEX}" "${index}" || fail "the release list could not be downloaded"
-  # Tags look like "tag_name": "v1.2.3". Prereleases are excluded by requiring
-  # exactly three numeric components.
-  grep -o '"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}"' "${index}" |
-    sed 's/.*"v\{0,1\}\([0-9.]*\)"/\1/' |
+  # Tags look like "tag_name": "v1.2.3" or "tag_name": "v1.0.0-alpha.1".
+  pattern='"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}"'
+  if [ "${scope}" = "any" ]; then
+    pattern='"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}[-+.0-9A-Za-z]*"'
+  fi
+  grep -o "${pattern}" "${index}" |
+    sed 's/.*"v\{0,1\}\([^"]*\)"/\1/' |
     sort -t. -k1,1nr -k2,2nr -k3,3nr |
     awk '!seen[$0]++'
   rm -f "${index}"
@@ -151,15 +162,19 @@ list_versions() {
 
 select_version() {
   local current="$1" versions latest
-  versions="$(list_versions)"
-  [ -n "${versions}" ] || fail "no stable release was found"
 
   if [ -n "${requested_version}" ]; then
-    printf '%s\n' "${versions}" | grep -qx "${requested_version}" ||
+    # `REL-002`: an exact request may name a prerelease.
+    versions="$(list_versions any)"
+    printf '%s\n' "${versions}" | grep -Fqx "${requested_version}" ||
       fail "release ${requested_version} was not found"
     printf '%s' "${requested_version}"
     return
   fi
+
+  # A prerelease is never chosen for the user.
+  versions="$(list_versions stable)"
+  [ -n "${versions}" ] || fail "no stable release was found"
 
   if [ -z "${current}" ] || [ "${allow_major_upgrade}" = "yes" ]; then
     # No installed binary, or an explicit opt-in: the latest stable release.

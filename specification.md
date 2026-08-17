@@ -643,6 +643,10 @@ release, but crossing the installed major still requires
 installed binary, the flag has no additional effect because latest stable is
 already the default.
 
+A prerelease version such as `1.0.0-alpha.1` MUST NOT be selected automatically
+by any of those rules. `--version` MUST be able to name one exactly, and the
+major-version gate applies to it unchanged.
+
 **REL-003** The install script MUST install or upgrade only the binary. It MUST
 NOT launch setup, edit config, install adapters, or accept enrollment defaults.
 
