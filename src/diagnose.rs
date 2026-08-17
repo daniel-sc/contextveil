@@ -1,0 +1,949 @@
+//! `status` and `doctor`.
+//!
+//! `DIA-001`: status inspects the selected configuration, resolves current
+//! sources, and reports counts without running any adapter protocol test.
+//! `DIA-002`: registry and integration health are independent facets, and zero
+//! active values is shown as `INACTIVE`. `DIA-003` adds doctor's deeper checks,
+//! and `DIA-004` keeps collision findings advisory.
+//!
+//! Output is human-readable only; V1 provides no stable machine-readable
+//! contract (`CLI-003`, `LIM-021`). Every untrusted path, key, and command is
+//! rendered through `crate::sanitize` (`SEC-006`), and no diagnostic contains a
+//! resolved value, source content, or a value fingerprint (`SEC-004`).
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use crate::cli::Exit;
+use crate::config::{self, Load};
+use crate::integration::claude::{self, Installed};
+use crate::integration::{Detection, state};
+use crate::matcher::Redactor;
+use crate::paths;
+use crate::sanitize;
+use crate::secret::SourceId;
+use crate::setup::collision;
+use crate::source::{Environment, Resolution, Resolver, SourceMalfunction, SourceRef, Unresolved};
+
+/// Severity of one reported finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    Ok,
+    /// Visible, but not a health failure (`CLI-006`, `DIA-004`).
+    Warning,
+    /// A diagnosed condition that prevents effective protection (`DIA-008`).
+    Failure,
+}
+
+impl Level {
+    fn marker(self) -> &'static str {
+        match self {
+            Level::Ok => "ok  ",
+            Level::Warning => "warn",
+            Level::Failure => "fail",
+        }
+    }
+}
+
+/// Whether doctor should run the optional paid, networked Claude canary.
+///
+/// `DIA-005`: disabled by default and only ever enabled by explicit
+/// confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveCanary {
+    Skip,
+    Run,
+}
+
+/// Runs `status` (`CLI-005`).
+pub fn status(out: &mut dyn Write, environment: &Environment, current_directory: &Path) -> Exit {
+    let Some(snapshot) = Snapshot::take(environment, current_directory, None) else {
+        let _ = writeln!(
+            out,
+            "secretsieve: the configuration location could not be determined. Set HOME or \
+             XDG_CONFIG_HOME."
+        );
+        // Inspection itself could not complete.
+        return Exit::Usage;
+    };
+
+    let _ = writeln!(out, "SecretSieve status");
+    snapshot.render_registry(out);
+    snapshot.render_integrations(out);
+    let _ = writeln!(
+        out,
+        "\nInstallation is not proof of protection. Run `secretsieve doctor` for deeper checks."
+    );
+    // `CLI-005`: zero whenever inspection completes, whatever it found.
+    Exit::Ok
+}
+
+/// Runs `doctor` (`CLI-006`, `DIA-008`).
+pub fn doctor(
+    out: &mut dyn Write,
+    environment: &Environment,
+    current_directory: &Path,
+    executable: Option<&Path>,
+    live: LiveCanary,
+) -> Exit {
+    let Some(snapshot) = Snapshot::take(environment, current_directory, executable) else {
+        let _ = writeln!(
+            out,
+            "secretsieve: the configuration location could not be determined. Set HOME or \
+             XDG_CONFIG_HOME."
+        );
+        // `CLI-006`: two only for usage or an inspection that cannot complete.
+        return Exit::Usage;
+    };
+
+    let _ = writeln!(out, "SecretSieve doctor");
+    snapshot.render_registry(out);
+    snapshot.render_integrations(out);
+
+    let mut findings = snapshot.registry_findings();
+    findings.extend(snapshot.integration_findings());
+
+    if live == LiveCanary::Run {
+        findings.push(snapshot.run_live_canary(out));
+    }
+
+    let _ = writeln!(out, "\nChecks");
+    for finding in &findings {
+        let _ = writeln!(out, "  [{}] {}", finding.level.marker(), finding.text);
+    }
+
+    let worst = findings
+        .iter()
+        .map(|finding| finding.level)
+        .max()
+        .unwrap_or(Level::Ok);
+    match worst {
+        Level::Failure => {
+            let _ = writeln!(
+                out,
+                "\nProtection is not effective right now. Address every `fail` line above."
+            );
+            Exit::Failure
+        }
+        _ => {
+            let _ = writeln!(out, "\nNo condition preventing protection was found.");
+            Exit::Ok
+        }
+    }
+}
+
+/// One reported line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Finding {
+    pub level: Level,
+    pub text: String,
+}
+
+impl Finding {
+    fn ok(text: impl Into<String>) -> Self {
+        Self {
+            level: Level::Ok,
+            text: text.into(),
+        }
+    }
+
+    fn warning(text: impl Into<String>) -> Self {
+        Self {
+            level: Level::Warning,
+            text: text.into(),
+        }
+    }
+
+    fn failure(text: impl Into<String>) -> Self {
+        Self {
+            level: Level::Failure,
+            text: text.into(),
+        }
+    }
+}
+
+/// Everything both commands inspect, gathered once.
+struct Snapshot {
+    global_path: PathBuf,
+    global: Load,
+    project_root: PathBuf,
+    project_path: Option<PathBuf>,
+    project: Load,
+    /// Every enrolled source with its current resolution.
+    resolutions: Vec<(SourceRef, Resolution)>,
+    /// Dotenv files with repeated keys (`SRC-004`).
+    duplicate_keys: Vec<(PathBuf, Vec<String>)>,
+    redactor: Redactor,
+    /// Present unless the home directory is unknown.
+    claude: Option<claude::Inspection>,
+    executable: Option<PathBuf>,
+    home: Option<PathBuf>,
+}
+
+impl Snapshot {
+    fn take(
+        environment: &Environment,
+        current_directory: &Path,
+        executable: Option<&Path>,
+    ) -> Option<Self> {
+        let home = environment.home();
+        let global_path = config::global_config_path(environment)?;
+        // `DIA-001`: status and doctor select their project root with `CFG-003`
+        // from the current working directory.
+        let project_root = paths::setup_project_root(current_directory);
+        let project_path = paths::runtime_project_config(&project_root);
+
+        let global = config::load(&global_path, home.as_deref());
+        let project = match &project_path {
+            Some(path) => config::load(path, home.as_deref()),
+            None => Load::Missing,
+        };
+
+        let mut resolver = Resolver::new();
+        let mut resolutions = Vec::new();
+        let mut resolved = Vec::new();
+        for source in sources_of(&project)
+            .iter()
+            .chain(sources_of(&global).iter())
+        {
+            let resolution = resolver.resolve(source, environment);
+            if let Resolution::Resolved(secrets) = &resolution {
+                resolved.extend(secrets.clone());
+            }
+            resolutions.push((source.clone(), resolution));
+        }
+
+        let mut duplicate_keys: Vec<(PathBuf, Vec<String>)> = Vec::new();
+        for (source, _) in &resolutions {
+            if let Some(path) = source.file() {
+                let duplicates = resolver.duplicate_keys(path);
+                if !duplicates.is_empty() && !duplicate_keys.iter().any(|(known, _)| known == path)
+                {
+                    duplicate_keys.push((path.to_path_buf(), duplicates.to_vec()));
+                }
+            }
+        }
+
+        // A malfunction disables the whole registry for a runtime event
+        // (`CFG-012`, `SRC-006`), so the reported active count must reflect that.
+        let disabled = matches!(global, Load::Invalid(_))
+            || matches!(project, Load::Invalid(_))
+            || resolutions
+                .iter()
+                .any(|(_, resolution)| matches!(resolution, Resolution::Malfunction { .. }));
+        let redactor = if disabled {
+            Redactor::default()
+        } else {
+            Redactor::new(resolved)
+        };
+
+        let claude = home.as_deref().map(|home| {
+            claude::inspect(
+                environment,
+                home,
+                executable,
+                &state::load(&state::path(&global_path)),
+            )
+        });
+
+        Some(Self {
+            global_path,
+            global,
+            project_root,
+            project_path,
+            project,
+            resolutions,
+            duplicate_keys,
+            redactor,
+            claude,
+            executable: executable.map(Path::to_path_buf),
+            home,
+        })
+    }
+
+    fn enrolled(&self) -> usize {
+        self.resolutions.len()
+    }
+
+    fn unresolved(&self) -> usize {
+        self.resolutions
+            .iter()
+            .filter(|(_, resolution)| matches!(resolution, Resolution::Unresolved { .. }))
+            .count()
+    }
+
+    /// The registry facet (`DIA-002`).
+    fn render_registry(&self, out: &mut dyn Write) {
+        let _ = writeln!(out, "\nRegistry");
+        let _ = writeln!(
+            out,
+            "  global config   {} ({})",
+            sanitize::path(&self.global_path),
+            describe_load(&self.global)
+        );
+        match &self.project_path {
+            Some(path) => {
+                let _ = writeln!(
+                    out,
+                    "  project config  {} ({})",
+                    sanitize::path(path),
+                    describe_load(&self.project)
+                );
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "  project config  none under {}",
+                    sanitize::path(&self.project_root)
+                );
+            }
+        }
+        let _ = writeln!(out, "  enrolled        {} source(s)", self.enrolled());
+        let active = self.redactor.active_count();
+        if active == 0 {
+            // `DIA-002`: zero active values is shown as INACTIVE.
+            let _ = writeln!(out, "  active          0 value(s) - INACTIVE");
+        } else {
+            let _ = writeln!(out, "  active          {active} value(s)");
+        }
+        let _ = writeln!(out, "  unresolved      {} source(s)", self.unresolved());
+    }
+
+    /// The integration facet, kept independent of registry health (`DIA-002`).
+    fn render_integrations(&self, out: &mut dyn Write) {
+        let _ = writeln!(out, "\nIntegrations");
+        let Some(claude) = &self.claude else {
+            let _ = writeln!(out, "  unknown: the home directory could not be determined");
+            return;
+        };
+        let _ = writeln!(
+            out,
+            "  Claude Code (production)  {}, {}",
+            match claude.detection {
+                Detection::Detected => "detected",
+                Detection::NotDetected => "not detected",
+            },
+            describe_installed(&claude.installed)
+        );
+        let _ = writeln!(
+            out,
+            "                           settings {}",
+            sanitize::path(&claude.settings_path)
+        );
+        for conflict in &claude.conflicts {
+            let _ = writeln!(
+                out,
+                "                           other PostToolUse hook: {} ({})",
+                conflict.command,
+                if conflict.approved {
+                    "approved"
+                } else {
+                    "not approved"
+                }
+            );
+        }
+        // `SUP-003`: experimental integrations are labeled wherever they appear.
+        let _ = writeln!(
+            out,
+            "  Codex CLI, GitHub Copilot CLI, OpenCode  EXPERIMENTAL, not available in this build"
+        );
+    }
+
+    /// Configuration, source, permission, duplicate, and collision checks.
+    fn registry_findings(&self) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        for (label, load, path) in [
+            ("global", &self.global, Some(&self.global_path)),
+            ("project", &self.project, self.project_path.as_ref()),
+        ] {
+            match load {
+                Load::Valid(_) => {}
+                Load::Missing if label == "global" => {
+                    // `CFG-013`: incomplete machine setup, not malformed config.
+                    findings.push(Finding::warning(
+                        "global configuration is missing; run `secretsieve setup`",
+                    ));
+                }
+                Load::Missing => {}
+                Load::Invalid(error) => findings.push(Finding::failure(format!(
+                    "{label} configuration is unusable: {}",
+                    error.kind.reason()
+                ))),
+            }
+            if let Some(path) = path {
+                findings.extend(permission_finding(path, label));
+            }
+        }
+
+        for (source, resolution) in &self.resolutions {
+            match resolution {
+                Resolution::Resolved(_) => {}
+                Resolution::Unresolved { source: id, why } => {
+                    // `DIA-002`: individual unresolved sources are not failures.
+                    findings.push(Finding::warning(format!(
+                        "{} {}",
+                        describe_source(id),
+                        unresolved_text(*why)
+                    )));
+                }
+                Resolution::Malfunction {
+                    source: id, why, ..
+                } => {
+                    findings.push(Finding::failure(format!(
+                        "{} {}",
+                        describe_source(id),
+                        malfunction_text(*why)
+                    )));
+                }
+            }
+            let _ = source;
+        }
+
+        for (path, keys) in &self.duplicate_keys {
+            findings.push(Finding::warning(format!(
+                "{} assigns {} key(s) more than once; the last assignment wins",
+                sanitize::path(path),
+                keys.len()
+            )));
+        }
+
+        // `REG-002`: report aliases without values.
+        for (canonical, aliases) in self.redactor.aliases() {
+            findings.push(Finding::warning(format!(
+                "{} has {} alias(es) that resolve to the same value",
+                describe_source(canonical),
+                aliases.len()
+            )));
+        }
+
+        if self.redactor.is_empty() {
+            // `CLI-006`: a registry with zero currently resolved values is a
+            // health failure.
+            findings.push(Finding::failure(
+                "no enrolled source resolves to a value, so nothing would be redacted",
+            ));
+        } else {
+            findings.push(Finding::ok(format!(
+                "{} value(s) would be redacted right now",
+                self.redactor.active_count()
+            )));
+        }
+
+        findings.extend(self.collision_findings());
+        findings
+    }
+
+    /// Current project collisions, always advisory (`DIA-003`, `DIA-004`).
+    fn collision_findings(&self) -> Vec<Finding> {
+        let mut subjects = Vec::new();
+        let mut labels = Vec::new();
+        for (source, resolution) in &self.resolutions {
+            if let Resolution::Resolved(secrets) = resolution {
+                for secret in secrets {
+                    subjects.push(collision::Subject {
+                        value: &secret.value,
+                        source_file: source.file(),
+                    });
+                    labels.push(describe_source(&secret.source));
+                }
+            }
+        }
+        if subjects.is_empty() {
+            return Vec::new();
+        }
+        collision::analyze(&self.project_root, &subjects)
+            .into_iter()
+            .zip(labels)
+            .filter(|(collisions, _)| !collisions.is_empty())
+            .map(|(collisions, label)| {
+                Finding::warning(format!(
+                    "{label} also occurs in this project: {}",
+                    collisions.describe()
+                ))
+            })
+            .collect()
+    }
+
+    /// Ownership, policy, executable, timeout, and synthetic protocol checks.
+    fn integration_findings(&self) -> Vec<Finding> {
+        let Some(claude) = &self.claude else {
+            return vec![Finding::failure(
+                "integration state is unknown because the home directory could not be determined",
+            )];
+        };
+        let mut findings = Vec::new();
+
+        match &claude.installed {
+            Installed::Current => {
+                findings.push(Finding::ok("the Claude hook is installed and owned by SecretSieve"))
+            }
+            Installed::Outdated { .. } => findings.push(Finding::warning(
+                "the Claude hook points at a different SecretSieve binary; rerun `secretsieve setup`",
+            )),
+            Installed::Modified { command } => findings.push(Finding::warning(format!(
+                "the Claude hook was modified by hand ({command}); SecretSieve will not change it"
+            ))),
+            Installed::Absent => {
+                // `DIA-008`: no installed integration is a health failure.
+                findings.push(Finding::failure(
+                    "no coding-agent integration is installed; run `secretsieve setup`",
+                ));
+            }
+            Installed::SettingsUnreadable => findings.push(Finding::failure(
+                "the Claude settings file is not valid JSON, so the hook cannot be verified",
+            )),
+            Installed::SettingsUnexpected => findings.push(Finding::failure(
+                "the Claude settings file has an unexpected `hooks` shape",
+            )),
+        }
+
+        if claude.hooks_disabled_by_policy {
+            findings.push(Finding::failure(
+                "a managed policy on this machine disables all Claude hooks",
+            ));
+        }
+
+        if let Some(path) = &claude.hook_executable {
+            if path.is_file() {
+                findings.push(Finding::ok(format!(
+                    "the configured executable exists: {}",
+                    sanitize::path(path)
+                )));
+            } else {
+                findings.push(Finding::failure(format!(
+                    "the configured executable is missing: {}",
+                    sanitize::path(path)
+                )));
+            }
+        }
+
+        match claude.hook_timeout {
+            Some(timeout) if timeout == claude::TIMEOUT_SECONDS => findings.push(Finding::ok(
+                format!("the hook timeout is {timeout} seconds"),
+            )),
+            Some(timeout) => findings.push(Finding::warning(format!(
+                "the hook timeout is {timeout} seconds instead of {}",
+                claude::TIMEOUT_SECONDS
+            ))),
+            None if matches!(claude.installed, Installed::Absent) => {}
+            None => findings.push(Finding::warning(
+                "the hook has no timeout, so the host default applies",
+            )),
+        }
+
+        for conflict in &claude.conflicts {
+            if conflict.approved {
+                // `INT-005`: an approved conflict stays visible but healthy.
+                findings.push(Finding::warning(format!(
+                    "an approved hook can also change tool results: {}",
+                    conflict.command
+                )));
+            } else {
+                findings.push(Finding::failure(format!(
+                    "an unapproved hook can also change tool results: {}; rerun `secretsieve setup`",
+                    conflict.command
+                )));
+            }
+        }
+
+        // The synthetic protocol check runs the real hook path offline.
+        if !matches!(claude.installed, Installed::Absent) {
+            let candidate = claude
+                .hook_executable
+                .clone()
+                .or_else(|| self.executable.clone());
+            match candidate {
+                None => findings.push(Finding::warning(
+                    "the synthetic protocol check was skipped because no executable is known",
+                )),
+                Some(path) => match claude::verify_offline(&path) {
+                    claude::Verification::Passed => {
+                        findings.push(Finding::ok("the synthetic protocol check passed"))
+                    }
+                    claude::Verification::Failed(reason) => findings.push(Finding::failure(
+                        format!("the synthetic protocol check failed: {reason}"),
+                    )),
+                },
+            }
+        }
+
+        findings
+    }
+
+    /// The optional paid, networked Claude canary (`DIA-005`).
+    fn run_live_canary(&self, out: &mut dyn Write) -> Finding {
+        let Some(home) = &self.home else {
+            return Finding::failure("the live canary needs a known home directory");
+        };
+        let _ = writeln!(
+            out,
+            "\nRunning the live Claude canary. It starts one paid, networked Claude Code request \
+             that reads a generated non-credential value through the installed hook."
+        );
+        match claude::live_canary(home) {
+            Ok(()) => Finding::ok(
+                "the live canary value was absent from Claude's reply; this tested one successful \
+                 Bash PostToolUse result only",
+            ),
+            Err(reason) => Finding::failure(format!("the live canary failed: {reason}")),
+        }
+    }
+}
+
+fn sources_of(load: &Load) -> Vec<SourceRef> {
+    match load {
+        Load::Valid(config) => config.sources.clone(),
+        Load::Missing | Load::Invalid(_) => Vec::new(),
+    }
+}
+
+fn describe_load(load: &Load) -> String {
+    match load {
+        Load::Valid(config) => format!("{} entr(ies)", config.sources.len()),
+        Load::Missing => "missing".to_string(),
+        Load::Invalid(error) => format!("invalid: {}", error.kind.reason()),
+    }
+}
+
+fn describe_installed(installed: &Installed) -> &'static str {
+    match installed {
+        Installed::Absent => "not installed",
+        Installed::Current => "installed",
+        Installed::Outdated { .. } => "installed, pointing at another binary",
+        Installed::Modified { .. } => "installed entry modified by hand",
+        Installed::SettingsUnreadable => "settings file is not valid JSON",
+        Installed::SettingsUnexpected => "settings file has an unexpected shape",
+    }
+}
+
+/// Sanitized, value-free description of one source.
+fn describe_source(id: &SourceId) -> String {
+    match id {
+        SourceId::Env { name } => format!("env {}", sanitize::text(name)),
+        SourceId::DotenvKey { path, key } => {
+            format!(
+                "dotenv {} key {}",
+                sanitize::path(path),
+                sanitize::text(key)
+            )
+        }
+        SourceId::DotenvAll { path } => {
+            format!("dotenv {} (every key)", sanitize::path(path))
+        }
+    }
+}
+
+fn unresolved_text(why: Unresolved) -> String {
+    format!("is enrolled but {}", why.reason())
+}
+
+fn malfunction_text(why: SourceMalfunction) -> String {
+    format!(
+        "{}, which disables all redaction for every event",
+        why.reason()
+    )
+}
+
+/// Config permission check (`DIA-003`, `CFG-001`).
+fn permission_finding(path: &Path, label: &str) -> Option<Finding> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path).ok()?.permissions().mode() & 0o777;
+        if label == "global" && mode & 0o077 != 0 {
+            return Some(Finding::warning(format!(
+                "{} is readable by other users (mode {:o}); global configuration should be \
+                 user-only",
+                sanitize::path(path),
+                mode
+            )));
+        }
+        None
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, label);
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Canary;
+
+    struct Fixture {
+        root: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "secretsieve-diagnose-{}-{}",
+                std::process::id(),
+                Canary::generate("DIAG").token()
+            ));
+            std::fs::create_dir_all(root.join("home").join("project")).expect("project");
+            std::fs::create_dir_all(root.join("home").join(".config").join("secretsieve"))
+                .expect("config directory");
+            Self { root }
+        }
+
+        fn home(&self) -> PathBuf {
+            self.root.join("home")
+        }
+
+        fn project(&self) -> PathBuf {
+            self.home().join("project")
+        }
+
+        fn write_global(&self, contents: &str) {
+            std::fs::write(
+                self.home()
+                    .join(".config")
+                    .join("secretsieve")
+                    .join("config.toml"),
+                contents,
+            )
+            .expect("write global config");
+        }
+
+        fn write_project(&self, contents: &str) {
+            std::fs::write(self.project().join(".secretsieve.toml"), contents)
+                .expect("write project config");
+        }
+
+        fn environment(&self, pairs: &[(&str, &str)]) -> Environment {
+            let mut variables = vec![(
+                "HOME".to_string(),
+                self.home().to_string_lossy().into_owned(),
+            )];
+            variables.extend(
+                pairs
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string())),
+            );
+            Environment::from_pairs(variables)
+        }
+
+        fn status(&self, pairs: &[(&str, &str)]) -> (Exit, String) {
+            let mut out = Vec::new();
+            let exit = status(&mut out, &self.environment(pairs), &self.project());
+            (exit, String::from_utf8(out).expect("UTF-8 output"))
+        }
+
+        fn doctor(&self, pairs: &[(&str, &str)]) -> (Exit, String) {
+            let mut out = Vec::new();
+            let exit = doctor(
+                &mut out,
+                &self.environment(pairs),
+                &self.project(),
+                None,
+                LiveCanary::Skip,
+            );
+            (exit, String::from_utf8(out).expect("UTF-8 output"))
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn status_reports_counts_and_exits_zero() {
+        let canary = Canary::generate("GITHUB_TOKEN");
+        let fixture = Fixture::new();
+        fixture.write_global(
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"GITHUB_TOKEN\"\n\n[[secret]]\nsource = \"env\"\nname = \"ABSENT_TOKEN\"\n",
+        );
+
+        let (exit, output) = fixture.status(&[("GITHUB_TOKEN", canary.value())]);
+        assert_eq!(exit, Exit::Ok);
+        assert!(output.contains("enrolled        2 source(s)"));
+        assert!(output.contains("active          1 value(s)"));
+        assert!(output.contains("unresolved      1 source(s)"));
+        crate::testing::assert_canary_absent("status output", output.as_bytes(), &canary);
+    }
+
+    #[test]
+    fn status_shows_inactive_when_nothing_resolves() {
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"ABSENT\"\n");
+        let (exit, output) = fixture.status(&[]);
+        assert_eq!(exit, Exit::Ok);
+        assert!(output.contains("INACTIVE"));
+    }
+
+    #[test]
+    fn status_exits_zero_even_with_invalid_configuration() {
+        // `CLI-005`: inspection completed, so the exit code is zero.
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"nope\"\n");
+        let (exit, output) = fixture.status(&[]);
+        assert_eq!(exit, Exit::Ok);
+        assert!(output.contains("invalid:"));
+        assert!(output.contains("INACTIVE"));
+    }
+
+    #[test]
+    fn status_cannot_complete_without_a_configuration_location() {
+        let mut out = Vec::new();
+        let exit = status(
+            &mut out,
+            &Environment::from_pairs([("HOME", "")]),
+            Path::new("/tmp"),
+        );
+        assert_eq!(exit, Exit::Usage);
+    }
+
+    #[test]
+    fn status_facets_are_independent() {
+        // `DIA-002`: an unresolved source does not change integration state.
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"ABSENT\"\n");
+        let (_, output) = fixture.status(&[]);
+        let registry = output.find("Registry").expect("registry facet");
+        let integrations = output.find("Integrations").expect("integration facet");
+        assert!(registry < integrations);
+        assert!(output.contains("EXPERIMENTAL"));
+    }
+
+    #[test]
+    fn doctor_fails_when_no_value_resolves() {
+        // `CLI-006`: zero active values is a health failure.
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"ABSENT\"\n");
+        let (exit, output) = fixture.doctor(&[]);
+        assert_eq!(exit, Exit::Failure);
+        assert!(output.contains("no enrolled source resolves"));
+        assert!(output.contains("[warn] env ABSENT is enrolled but is not present"));
+    }
+
+    #[test]
+    fn doctor_fails_on_an_enrolled_source_malfunction() {
+        let fixture = Fixture::new();
+        std::fs::write(fixture.project().join(".env.broken"), "A=1\nbroken line\n")
+            .expect("write dotenv");
+        fixture.write_global("version = 1\n");
+        fixture.write_project(
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env.broken\"\nkey = \"A\"\n",
+        );
+
+        let (exit, output) = fixture.doctor(&[]);
+        assert_eq!(exit, Exit::Failure);
+        assert!(output.contains("disables all redaction"));
+        assert!(!output.contains("broken line"));
+    }
+
+    #[test]
+    fn doctor_reports_collisions_as_warnings_only() {
+        // `DIA-004`: collisions never change the exit status.
+        let canary = Canary::generate("SHARED_TOKEN");
+        let fixture = Fixture::new();
+        fixture
+            .write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"SHARED_TOKEN\"\n");
+        std::fs::write(fixture.project().join("notes.txt"), canary.value()).expect("write file");
+        std::fs::create_dir_all(fixture.home().join(".claude")).expect("claude directory");
+        std::fs::write(
+            fixture.home().join(".claude").join("settings.json"),
+            "{\"hooks\": {\"PostToolUse\": []}}",
+        )
+        .expect("write settings");
+
+        let (_, output) = fixture.doctor(&[("SHARED_TOKEN", canary.value())]);
+        assert!(output.contains("also occurs in this project"));
+        assert!(output.contains("notes.txt"));
+        crate::testing::assert_canary_absent("doctor output", output.as_bytes(), &canary);
+    }
+
+    #[test]
+    fn doctor_fails_when_no_integration_is_installed() {
+        let canary = Canary::generate("TOKEN");
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");
+        let (exit, output) = fixture.doctor(&[("TOKEN", canary.value())]);
+        assert_eq!(exit, Exit::Failure);
+        assert!(output.contains("no coding-agent integration is installed"));
+    }
+
+    #[test]
+    fn doctor_fails_on_an_unapproved_conflict_and_a_missing_executable() {
+        let canary = Canary::generate("TOKEN");
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");
+        std::fs::create_dir_all(fixture.home().join(".claude")).expect("claude directory");
+        std::fs::write(
+            fixture.home().join(".claude").join("settings.json"),
+            r#"{"hooks": {"PostToolUse": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": "/gone/secretsieve hook claude", "timeout": 5}]},
+                {"matcher": "*", "hooks": [{"type": "command", "command": "/other/mutator"}]}
+            ]}}"#,
+        )
+        .expect("write settings");
+
+        let (exit, output) = fixture.doctor(&[("TOKEN", canary.value())]);
+        assert_eq!(exit, Exit::Failure);
+        assert!(output.contains("the configured executable is missing"));
+        assert!(output.contains("an unapproved hook can also change tool results"));
+    }
+
+    #[test]
+    fn doctor_warns_about_a_wrong_timeout_without_failing_on_it_alone() {
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n");
+        std::fs::create_dir_all(fixture.home().join(".claude")).expect("claude directory");
+        std::fs::write(
+            fixture.home().join(".claude").join("settings.json"),
+            r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/gone/secretsieve hook claude", "timeout": 30}]}]}}"#,
+        )
+        .expect("write settings");
+
+        let (_, output) = fixture.doctor(&[]);
+        assert!(output.contains("the hook timeout is 30 seconds instead of 5"));
+    }
+
+    #[test]
+    fn doctor_warns_about_duplicate_keys_and_aliases_without_values() {
+        let canary = Canary::generate("DOUBLE");
+        let fixture = Fixture::new();
+        std::fs::write(
+            fixture.project().join(".env"),
+            format!("DOUBLE=first\nDOUBLE={}\n", canary.value()),
+        )
+        .expect("write dotenv");
+        fixture
+            .write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"ALSO_DOUBLE\"\n");
+        fixture.write_project(
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nkey = \"DOUBLE\"\n",
+        );
+
+        let (_, output) = fixture.doctor(&[("ALSO_DOUBLE", canary.value())]);
+        assert!(output.contains("more than once"));
+        assert!(output.contains("alias(es)"));
+        crate::testing::assert_canary_absent("doctor output", output.as_bytes(), &canary);
+    }
+
+    #[test]
+    fn doctor_performs_no_network_call_unless_the_canary_is_selected() {
+        // The default is `LiveCanary::Skip`, and nothing else in doctor reaches
+        // the network (`SEC-003`, `DIA-005`).
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n");
+        let (_, output) = fixture.doctor(&[]);
+        assert!(!output.contains("live canary"));
+    }
+
+    #[test]
+    fn diagnostics_sanitize_untrusted_names_and_paths() {
+        let fixture = Fixture::new();
+        fixture.write_global(
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"\\u001b[31mEVIL_TOKEN\"\n",
+        );
+        let (_, output) = fixture.doctor(&[]);
+        assert!(!output.contains('\u{1b}'));
+        assert!(output.contains("\\e[31mEVIL_TOKEN"));
+    }
+}

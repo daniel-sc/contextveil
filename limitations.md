@@ -337,7 +337,30 @@ assert it is safely reported, not parsed or persisted.
 
 ## Implementation Deviations
 
-No implementation deviations exist yet because implementation has not started.
+### DEV-001: The Live Claude Canary Has No Automated Coverage
+
+Contract: `DIA-005`, `TST-008`, `REL-008`
+
+**Observed behavior:** `secretsieve doctor` offers the optional Claude live
+canary, and the code path that runs it is shipped, but no automated test
+executes it. Every other doctor check, including the offline synthetic protocol
+check, is covered by tests.
+
+**Reason:** The canary starts a paid, networked Claude Code request and needs
+host credentials. `TST-008` forbids gating routine CI on paid or networked tests,
+so covering it automatically is not permitted.
+
+**Impact:** A regression in the live-canary invocation itself, for example a host
+CLI flag changing, would be caught by the manual release qualification rather
+than by CI. The check fails loudly rather than silently passing: a host that
+cannot be started, a non-zero exit, a timeout, or a disclosed value are all
+reported as a failure.
+
+**Workaround:** Run `secretsieve doctor` on a terminal and confirm the canary
+before relying on it, and treat `REL-008` as the gate for release.
+
+**Verification:** The manual live qualification in `REL-008` exercises this path
+against the tested host version, and its result is recorded as release evidence.
 
 Add future deviations using this template:
 

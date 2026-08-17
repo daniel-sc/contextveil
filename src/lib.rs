@@ -8,6 +8,7 @@
 pub mod adapter;
 pub mod cli;
 pub mod config;
+pub mod diagnose;
 pub mod dotenv;
 pub mod integration;
 pub mod matcher;

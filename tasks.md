@@ -421,7 +421,7 @@ resolver framework yet.
   enforce, and the exposure is recorded in `LIM-013`;
 - `mise run check` passes.
 
-### [ ] T060: Implement Status And Doctor
+### [x] T060: Implement Status And Doctor
 
 **Depends on:** `T040`, `T050`
 
@@ -448,6 +448,37 @@ resolver framework yet.
 
 **Contributes to:** `CLI-005` through `CLI-007`, `DIA-001` through `DIA-005`,
 `DIA-007`, `DIA-008`, `SEC-004` through `SEC-006`.
+
+**Evidence:**
+
+- `src/diagnose.rs` reports the registry and integration facets independently,
+  shows `INACTIVE` for zero active values, and selects its project root with
+  `CFG-003` from the working directory (`DIA-001`, `DIA-002`);
+- status runs no adapter protocol test and returns zero whenever inspection
+  completes, including for invalid configuration; both commands return two only
+  when no configuration location can be determined (`CLI-005`, `CLI-006`);
+- doctor adds config permission checks, per-source unresolved and malfunction
+  classification, duplicate dotenv keys, duplicate value aliases, current
+  project collisions as warnings only (`DIA-004`), installer ownership,
+  managed-policy hook disabling, configured-executable existence, the hook
+  timeout, per-conflict approval state, and the offline synthetic protocol check;
+- exit codes follow `DIA-008`: failure for invalid config, a source malfunction,
+  zero active values, no installed integration, a policy-disabled hook, a missing
+  executable, an unapproved conflict, or a failed synthetic check; individual
+  unresolved sources, collisions, an approved conflict, and a wrong timeout are
+  warnings;
+- the optional Claude live canary is offered only on a terminal, defaults to off,
+  requires confirmation, uses a generated non-credential value through a
+  temporary source configuration, and describes the single path it tested
+  (`DIA-005`); it has no automated coverage by design, recorded as `DEV-001`;
+- `tests/diagnose.rs` covers the exit-code matrix end to end through the binary:
+  healthy, partially unresolved, fully inactive, malformed config, approved and
+  unapproved conflict, missing integration, inspection failure, status running no
+  protocol test, no canary without a terminal, no source content in output, and
+  working-directory project selection;
+- every untrusted name, path, and hook command is sanitized before output, and
+  canary-absence assertions cover both stdout and stderr;
+- `mise run check` passes.
 
 ## Experimental Integrations
 

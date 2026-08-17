@@ -32,6 +32,10 @@ required-features = ["testing"]
 name = "setup"
 required-features = ["testing"]
 
+[[test]]
+name = "diagnose"
+required-features = ["testing"]
+
 [[bench]]
 name = "redaction"
 harness = false

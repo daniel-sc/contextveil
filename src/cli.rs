@@ -140,8 +140,10 @@ pub fn run(
             Exit::Ok
         }
         Ok(Command::Setup) => run_setup(err),
-        Ok(Command::Status) => unimplemented_command("status", err),
-        Ok(Command::Doctor) => unimplemented_command("doctor", err),
+        Ok(Command::Status) => {
+            crate::diagnose::status(out, &Environment::from_process(), &current_directory())
+        }
+        Ok(Command::Doctor) => run_doctor(out),
         Ok(Command::Hook(Harness::Claude)) => run_claude_hook(input, out),
         Ok(Command::Hook(harness)) => {
             unimplemented_command(&format!("hook {}", harness.as_str()), err)
@@ -152,6 +154,40 @@ pub fn run(
             Exit::Usage
         }
     }
+}
+
+fn current_directory() -> std::path::PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Runs `doctor`, offering the optional live canary on a terminal.
+///
+/// `DIA-005`: the paid, networked canary is disabled by default and requires
+/// confirmation, so it is offered only when a terminal can answer.
+fn run_doctor(out: &mut dyn Write) -> Exit {
+    use std::io::IsTerminal;
+
+    let live = if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        let mut terminal = crate::setup::ui::Terminal::new(std::io::stdin(), std::io::stdout());
+        terminal.line(
+            "The optional live Claude canary starts one paid, networked Claude Code request. It \
+             is off by default.",
+        );
+        match terminal.confirm("Run the live Claude canary?", false) {
+            Ok(true) => crate::diagnose::LiveCanary::Run,
+            _ => crate::diagnose::LiveCanary::Skip,
+        }
+    } else {
+        crate::diagnose::LiveCanary::Skip
+    };
+
+    crate::diagnose::doctor(
+        out,
+        &Environment::from_process(),
+        &current_directory(),
+        crate::integration::claude::current_executable().as_deref(),
+        live,
+    )
 }
 
 /// Runs the interactive setup workflow.

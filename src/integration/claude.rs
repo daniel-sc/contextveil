@@ -38,6 +38,14 @@ pub struct Inspection {
     pub installed: Installed,
     /// Other `PostToolUse` command hooks that could also mutate results.
     pub conflicts: Vec<Conflict>,
+    /// The executable path of the SecretSieve hook found in the settings file,
+    /// whatever shape the entry has. Doctor checks that it still exists.
+    pub hook_executable: Option<PathBuf>,
+    /// The timeout recorded on that entry, which doctor checks against
+    /// `RUN-004`.
+    pub hook_timeout: Option<u64>,
+    /// True when a managed-policy file disables all hooks for this host.
+    pub hooks_disabled_by_policy: bool,
 }
 
 /// State of the managed hook inside the settings file.
@@ -138,18 +146,82 @@ pub fn inspect(
     };
 
     let current = executable.map(managed_command);
-    let (installed, conflicts) = match read_settings(&settings_path) {
-        Err(error) => (error, Vec::new()),
+    let settings = read_settings(&settings_path);
+    let (installed, conflicts) = match &settings {
+        Err(error) => (error.clone(), Vec::new()),
         Ok(None) => (Installed::Absent, Vec::new()),
-        Ok(Some(settings)) => classify(&settings, current.as_deref(), state),
+        Ok(Some(settings)) => classify(settings, current.as_deref(), state),
     };
+    let entry = settings
+        .as_ref()
+        .ok()
+        .and_then(|settings| settings.as_ref())
+        .and_then(managed_entry);
 
     Inspection {
         settings_path,
         detection,
         installed,
         conflicts,
+        hook_executable: entry.as_ref().and_then(|(command, _)| {
+            command
+                .strip_suffix(" hook claude")
+                .map(|path| PathBuf::from(path.trim_matches('\'')))
+        }),
+        hook_timeout: entry.and_then(|(_, timeout)| timeout),
+        hooks_disabled_by_policy: hooks_disabled_by_policy(),
     }
+}
+
+/// The SecretSieve hook entry in the settings file, with its timeout.
+fn managed_entry(settings: &Map<String, Value>) -> Option<(String, Option<u64>)> {
+    for group in post_tool_use_groups(settings)? {
+        let Some(hooks) = group.get("hooks").and_then(Value::as_array) else {
+            continue;
+        };
+        for hook in hooks {
+            let Some(command) = hook.get("command").and_then(Value::as_str) else {
+                continue;
+            };
+            if is_managed_command(command) {
+                return Some((
+                    command.to_string(),
+                    hook.get("timeout").and_then(Value::as_u64),
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// True when a managed-policy file turns every hook off for this host.
+///
+/// Verified against Claude Code 2.1.233: policy settings carry a
+/// `disableAllHooks` kill switch. The documented managed-settings locations are
+/// checked for it, and both the top-level and nested spellings are accepted
+/// because only the policy-settings shape is confirmed, not the file layout.
+fn hooks_disabled_by_policy() -> bool {
+    for path in [
+        "/etc/claude-code/managed-settings.json",
+        "/Library/Application Support/ClaudeCode/managed-settings.json",
+    ] {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let disabled = value.get("disableAllHooks").and_then(Value::as_bool) == Some(true)
+            || value
+                .get("policySettings")
+                .and_then(|policy| policy.get("disableAllHooks"))
+                .and_then(Value::as_bool)
+                == Some(true);
+        if disabled {
+            return true;
+        }
+    }
+    false
 }
 
 /// Installs or updates the managed hook.
@@ -333,6 +405,102 @@ fn run_hook(executable: &Path, config_root: &Path, canary: &str, payload: &str) 
         Some("<SECRET:SECRETSIEVE_VERIFY>") => Verification::Passed,
         _ => Verification::Failed("the hook did not return the expected replacement"),
     }
+}
+
+/// Runs the optional paid, networked Claude canary (`DIA-005`).
+///
+/// It enrolls a conspicuous random non-credential value through a temporary
+/// source configuration, asks Claude Code once to print that value with a
+/// narrowly allowed `Bash` tool, and requires the value to be absent from
+/// Claude's reply. It therefore tests exactly one path: a successful `Bash`
+/// `PostToolUse` result flowing through the installed hook.
+///
+/// This is the only network-capable runtime workflow besides installation
+/// (`SEC-003`), it is never enabled by default, and it has no automated coverage
+/// by design (`TST-008`, `DEV-001`): running it costs money and requires host
+/// credentials, so it is exercised by the manual release qualification
+/// (`REL-008`).
+pub fn live_canary(home: &Path) -> Result<(), String> {
+    let canary = format!("SSCANARY-LIVE-{}-{}", std::process::id(), verify_nonce());
+    let root = std::env::temp_dir().join(format!("secretsieve-live-{canary}"));
+    let configuration = root.join("secretsieve");
+    std::fs::create_dir_all(&configuration)
+        .map_err(|_| "a temporary configuration could not be created".to_string())?;
+    let cleanup = || {
+        let _ = std::fs::remove_dir_all(&root);
+    };
+    if std::fs::write(
+        configuration.join("config.toml"),
+        "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"SECRETSIEVE_LIVE_CANARY\"\n",
+    )
+    .is_err()
+    {
+        cleanup();
+        return Err("a temporary configuration could not be written".to_string());
+    }
+
+    let prompt = "Run exactly this shell command and reply with its output verbatim, nothing \
+                  else: printenv SECRETSIEVE_LIVE_CANARY";
+    let spawned = Command::new("claude")
+        .args(["-p", prompt, "--allowedTools", "Bash(printenv *)"])
+        .current_dir(home)
+        .env("XDG_CONFIG_HOME", &root)
+        .env("SECRETSIEVE_LIVE_CANARY", &canary)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(_) => {
+            cleanup();
+            return Err("`claude` could not be run".to_string());
+        }
+    };
+
+    // One model request can take a while; this bound is unrelated to the
+    // 5-second hook timeout in `RUN-004`.
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                cleanup();
+                return Err("Claude did not answer within three minutes".to_string());
+            }
+            Err(_) => {
+                cleanup();
+                return Err("the Claude process could not be waited for".to_string());
+            }
+        }
+    }
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(_) => {
+            cleanup();
+            return Err("Claude's output could not be read".to_string());
+        }
+    };
+    cleanup();
+
+    if !output.status.success() {
+        return Err("Claude exited with a failure status".to_string());
+    }
+    let disclosed = output
+        .stdout
+        .windows(canary.len())
+        .any(|window| window == canary.as_bytes());
+    if disclosed {
+        return Err(
+            "the generated value reached Claude's reply, so the covered path did not redact it"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn verify_nonce() -> String {
