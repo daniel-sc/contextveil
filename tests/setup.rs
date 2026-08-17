@@ -405,7 +405,11 @@ fn a_non_utf8_path_is_reported_and_never_persisted() {
 
     let fixture = Fixture::new();
     let name = OsString::from_vec(vec![b'.', b'e', b'n', b'v', b'.', 0xff]);
-    std::fs::write(fixture.project().join(&name), "API_TOKEN=value\n").expect("write file");
+    if std::fs::write(fixture.project().join(&name), "API_TOKEN=value\n").is_err() {
+        // `LIM-022`: APFS rejects file names that are not valid UTF-8, so the
+        // scenario cannot be built on every supported platform.
+        return;
+    }
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");

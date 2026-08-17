@@ -373,7 +373,23 @@ mod tests {
 
         let tree = Tree::new();
         let name = OsString::from_vec(vec![b'.', b'e', b'n', b'v', b'.', 0xff]);
-        std::fs::write(tree.root.join(&name), "A=1\n").expect("write non-UTF-8 file");
+        let path = tree.root.join(&name);
+
+        // Reporting such a path never reads it, so this half holds even where the
+        // filesystem cannot hold the name at all.
+        let inspected = inspect(&path, None);
+        assert_eq!(
+            inspected.state,
+            State::Unavailable(Unavailable::NonUtf8Path)
+        );
+        assert!(inspected.display.contains("\\xff"));
+        assert!(!inspected.display.contains('\u{fffd}'));
+
+        // `LIM-022`: APFS rejects file names that are not valid UTF-8, so the
+        // discovery half only runs on a filesystem that accepts one.
+        if std::fs::write(&path, "A=1\n").is_err() {
+            return;
+        }
 
         let found = project_dotenv_files(&tree.root);
         assert_eq!(found.len(), 1);
