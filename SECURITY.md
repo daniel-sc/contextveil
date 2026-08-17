@@ -8,7 +8,7 @@ documented parts of the V1 boundary rather than vulnerabilities.
 
 Report suspected vulnerabilities privately through GitHub Security Advisories:
 
-<https://github.com/secretsieve/secretsieve/security/advisories/new>
+<https://github.com/daniel-sc/secretsieve/security/advisories/new>
 
 Please do not open a public issue for an unfixed vulnerability.
 

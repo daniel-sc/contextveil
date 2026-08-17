@@ -7,7 +7,7 @@ network calls, and no value is ever written into SecretSieve configuration.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/secretsieve/secretsieve/v__VERSION__/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/v__VERSION__/install.sh | bash
 ```
 
 The installer verifies the release checksum before replacing anything, installs

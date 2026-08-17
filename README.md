@@ -114,8 +114,12 @@ without reviewing each value.
 
 ## Installation
 
+Download the latest release from [GitHub releases](https://github.com/daniel-sc/secretsieve/releases) and place it in `~/.local/bin/secretsieve`.
+
+Alternatively, use the script below:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/secretsieve/secretsieve/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/main/install.sh | bash
 ```
 
 The installer detects the platform and architecture, downloads the matching

@@ -22,7 +22,7 @@
 #   SECRETSIEVE_RELEASE_BASE   URL prefix that holds the release assets
 set -euo pipefail
 
-REPOSITORY="secretsieve/secretsieve"
+REPOSITORY="daniel-sc/secretsieve"
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
 RELEASE_INDEX="${SECRETSIEVE_RELEASE_INDEX:-https://api.github.com/repos/${REPOSITORY}/releases?per_page=100}"
 RELEASE_BASE="${SECRETSIEVE_RELEASE_BASE:-https://github.com/${REPOSITORY}/releases/download}"
