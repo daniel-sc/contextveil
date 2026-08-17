@@ -16,7 +16,7 @@ version it ran against, never a permanent certificate (`DIA-007`, `SUP-004`).
 | Platform | `x86_64-unknown-linux-gnu`, Linux 7.0.0-1008-gcp |
 | Binary | `target/release/secretsieve` built from the qualified tree |
 | Session id | `11111111-2222-4333-8444-555555555555`, pinned with `--session-id` |
-| Billed requests | 5: one auth smoke test, two qualification turns, three `doctor` canaries |
+| Billed requests | 6: one auth smoke test, two qualification turns, three `doctor` canaries |
 | Result | **Passed**: intervention redacted, and the redaction survived resume |
 
 ### Attestation
