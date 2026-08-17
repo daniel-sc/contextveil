@@ -428,7 +428,10 @@ mod tests {
             "the plugin no longer bounds the subprocess at {expected} ms"
         );
         assert!(source.contains("setTimeout"), "the bound is never armed");
-        assert!(source.contains("kill()"), "the bound never kills the subprocess");
+        assert!(
+            source.contains("kill()"),
+            "the bound never kills the subprocess"
+        );
     }
 
     #[test]
