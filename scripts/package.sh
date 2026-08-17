@@ -36,17 +36,42 @@ cp "target/${target}/release/secretsieve" "${staging}/secretsieve"
 chmod 755 "${staging}/secretsieve"
 cp LICENSE-MIT LICENSE-APACHE README.md "${staging}/"
 
-# Deterministic archive: fixed order, owner, and timestamp.
-tar --create \
-  --gzip \
-  --sort=name \
-  --mtime='UTC 2020-01-01' \
-  --owner=0 \
-  --group=0 \
-  --numeric-owner \
-  --directory "${staging}" \
-  --file "${archive}" \
-  secretsieve LICENSE-MIT LICENSE-APACHE README.md
+# Deterministic archive: fixed member order, owner, and timestamp. Members are
+# always listed explicitly, so their order in the archive is the order below.
+#
+# GNU tar and bsdtar spell the metadata options differently and macOS ships
+# bsdtar, which rejects `--sort` and `--owner` outright. Determinism is required
+# per platform, not across them, so each implementation gets its own invocation.
+members="secretsieve LICENSE-MIT LICENSE-APACHE README.md"
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then
+  # shellcheck disable=SC2086
+  tar --create \
+    --gzip \
+    --sort=name \
+    --mtime='UTC 2020-01-01' \
+    --owner=0 \
+    --group=0 \
+    --numeric-owner \
+    --directory "${staging}" \
+    --file "${archive}" \
+    ${members}
+else
+  # bsdtar has no `--mtime`, so the staged files carry the fixed timestamp, and
+  # `gzip -n` keeps the original name and timestamp out of the compressed stream.
+  # shellcheck disable=SC2086
+  (cd "${staging}" && TZ=UTC touch -t 202001010000 ${members})
+  # shellcheck disable=SC2086
+  tar --create \
+    --numeric-owner \
+    --uid 0 \
+    --gid 0 \
+    --uname '' \
+    --gname '' \
+    --directory "${staging}" \
+    --file "${archive%.gz}" \
+    ${members}
+  gzip -n -f "${archive%.gz}"
+fi
 
 checksums="${output}/secretsieve-${version}-SHA256SUMS"
 (

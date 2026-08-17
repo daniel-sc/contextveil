@@ -86,6 +86,7 @@ installer_with() {
   env \
     HOME="${work}/home" \
     PATH="${PATH}" \
+    XDG_CONFIG_HOME="${work}/home/.config" \
     SECRETSIEVE_RELEASE_INDEX="file://${index}" \
     SECRETSIEVE_RELEASE_BASE="file://${work}/releases" \
     bash "${root}/install.sh" "$@"
@@ -173,7 +174,11 @@ check "an older install upgrades within the same major version"
 
 after="$(cat "${work}/home/.config/secretsieve/config.toml")"
 [ "${before}" = "${after}" ] || fail "the upgrade changed the configuration file"
-if ! env HOME="${work}/home" RELEASE_CHECK_TOKEN="release-check-value" \
+# `XDG_CONFIG_HOME` is set explicitly because an ambient one, which CI runners do
+# export, would send the lookup away from the configuration written above and the
+# check would fail for the wrong reason.
+if ! env HOME="${work}/home" XDG_CONFIG_HOME="${work}/home/.config" \
+  RELEASE_CHECK_TOKEN="release-check-value" \
   sh -c "cd '${work}/home/project' && '${binary}' status" | grep -q "active          1 value"; then
   fail "the existing V1 configuration is not runtime-readable after the upgrade"
 fi

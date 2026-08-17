@@ -46,8 +46,14 @@ jobs:
           path: dist/
 
   verify:
-    name: verify artifacts
-    runs-on: ubuntu-latest
+    name: verify artifacts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # `SUP-001`: packaging and installing differ per platform, and macOS
+        # ships bsdtar rather than GNU tar, so both are verified.
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 

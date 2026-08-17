@@ -53,12 +53,19 @@ impl Home {
         }
 
         let mut child = command.spawn().expect("the secretsieve binary runs");
-        child
+        // A usage error exits before the payload is read, so the pipe may already
+        // be closed here. That is the child's answer, which the assertions below
+        // check, rather than a harness failure.
+        match child
             .stdin
             .as_mut()
             .expect("stdin is piped")
             .write_all(payload.as_bytes())
-            .expect("write the hook payload");
+        {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("write the hook payload: {error}"),
+        }
         child.wait_with_output().expect("the hook finishes")
     }
 }
