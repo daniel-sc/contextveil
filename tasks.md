@@ -844,14 +844,20 @@ through `TST-007`.
 **Closes:** all V1 requirements, including `SEC-002`, `SUP-002` through `SUP-005`,
 `REL-008`, and `TST-008`.
 
-**Blocked on:** three items that cannot be completed from this environment. Every
-other part of this task is done and listed below.
+**Blocked on:** one item. The two that were environment-bound are now done, and
+every other part of this task is listed below.
 
-1. **Automated gates on the other three release targets.** Only
-   `x86_64-unknown-linux-gnu` can be built and exercised here. The release
-   workflow builds and packages all four, but that requires CI runners.
-2. **Publishing.** Tagging, pushing, and creating the GitHub Release are outside
-   what may be done here, and the repository has no remote release yet.
+1. ~~**Automated gates on the other three release targets.**~~ Done in CI on
+   2026-08-17: the release workflow packaged all four `SUP-001` targets and ran
+   `release-check` on Linux and macOS. That run also caught two failures no
+   local Linux run could reach, both since fixed: `package.sh` used GNU tar
+   options that the bsdtar macOS ships rejects, and `release-check` read the
+   runner's ambient `XDG_CONFIG_HOME` instead of the test home.
+2. ~~**Publishing.**~~ Done on 2026-08-17: `v1.0.0-alpha.1` is published as a
+   GitHub prerelease with four checksummed artifacts, and the real `install.sh`
+   was driven against it over the network. A default run refuses it with
+   `no stable release was found`; `--version 1.0.0-alpha.1` verifies the
+   checksum and installs. Stable 1.0.0 remains unpublished, gated on item 3.
 3. **Human sign-off on the live qualification.** The `REL-008` run below was
    performed and passed, but by an automated session rather than by a human at
    the terminal. `REL-008` is a manual gate so that a human judges the result, so
@@ -859,7 +865,7 @@ other part of this task is done and listed below.
    `docs/qualification.md` records it as a reproducible test report with the
    host's own transcript records attached, not as a signed-off gate.
 
-**Prerelease track:** `1.0.0-alpha.1` is prepared as a GitHub prerelease ahead of
+**Prerelease track:** `1.0.0-alpha.1` is published as a GitHub prerelease ahead of
 stable 1.0.0, so the four-target packaging and installer paths are exercised
 against real published artifacts before the stable release. `install.sh` never
 selects a prerelease automatically and installs one only when `--version` names it
