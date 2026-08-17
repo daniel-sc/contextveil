@@ -4,8 +4,9 @@ SecretSieve is designed to help keep enrolled local credentials out of model
 context through covered paths of installed, functioning coding-agent
 integrations using deterministic exact-value redaction.
 
-> **Status:** Pre-release. This README describes the intended V1 behavior; the
-> binary and installer are not available yet.
+> **Status:** Pre-release. Every documented behavior is implemented and tested,
+> but no release has been published yet, so the install command below only works
+> once V1 is tagged. Build from source with `mise run build` in the meantime.
 
 Local operations still happen; SecretSieve changes only covered text before it
 reaches the model:
@@ -109,10 +110,22 @@ without reviewing each value.
 
 ## Installation
 
-V1 provides checksummed standalone GitHub Release binaries and an `install.sh`
-installer that verifies release checksums. The default install location is
-`~/.local/bin/secretsieve`. Installation does not run setup or alter agent
-configuration automatically.
+```bash
+curl -fsSL https://raw.githubusercontent.com/secretsieve/secretsieve/main/install.sh | bash
+```
+
+The installer detects the platform and architecture, downloads the matching
+checksummed GitHub Release asset, verifies its SHA-256 before replacing anything,
+and installs atomically into `~/.local/bin/secretsieve`.
+
+```text
+install.sh [--install-dir DIR] [--version VERSION] [--allow-major-upgrade]
+```
+
+Rerunning it upgrades to the latest release inside the installed major version;
+crossing a major version requires `--allow-major-upgrade`. The installer only
+installs or upgrades the binary: it never runs setup, never edits SecretSieve
+configuration, and never touches coding-agent configuration.
 
 ## Development
 
@@ -126,6 +139,8 @@ mise install         # install the pinned toolchain
 mise run check       # format check, Clippy with warnings denied, tests
 mise run build       # release binary
 mise run fuzz-smoke  # bounded fuzz smoke run
+mise run bench       # the RUN-005 representative workload
+mise run package     # build and package a release artifact
 mise run release-check
 ```
 

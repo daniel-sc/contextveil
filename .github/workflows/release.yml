@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # `REL-001`: one checksummed artifact per supported platform and architecture.
+  package:
+    name: package (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@v2
+        with:
+          version: 2026.8.6
+          experimental: true
+
+      # Each runner builds natively except x86_64 macOS, which cross-compiles
+      # from the arm64 runner using the SDK that ships with it.
+      - run: mise run package ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: dist/
+
+  verify:
+    name: verify artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@v2
+        with:
+          version: 2026.8.6
+          experimental: true
+
+      # `TST-007`: release checks exercise built artifacts, checksums, clean
+      # installation, and upgrade behavior.
+      - run: mise run release-check
+
+  publish:
+    name: publish
+    needs: [package, verify]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: incoming
+          pattern: artifacts-*
+          merge-multiple: false
+
+      - name: Collect artifacts and merge checksums
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find incoming -name '*.tar.gz' -exec cp {} dist/ \;
+          version="${GITHUB_REF_NAME#v}"
+          cat incoming/*/secretsieve-"${version}"-SHA256SUMS | sort -k2 > "dist/secretsieve-${version}-SHA256SUMS"
+          cd dist && sha256sum --check --status "secretsieve-${version}-SHA256SUMS"
+          ls -l
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          notes="$(mktemp)"
+          sed "s/__VERSION__/${version}/g" docs/release-notes-template.md > "${notes}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "SecretSieve ${version}" \
+            --notes-file "${notes}" \
+            dist/*

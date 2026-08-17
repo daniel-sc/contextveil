@@ -746,7 +746,7 @@ through `TST-007`.
   `DEV-002`;
 - `mise run check` and `mise run fuzz-smoke` pass.
 
-### [ ] T110: Build Release And Installer Pipeline
+### [x] T110: Build Release And Installer Pipeline
 
 **Depends on:** `T100`
 
@@ -771,6 +771,43 @@ through `TST-007`.
 - `mise run release-check` passes.
 
 **Contributes to:** `REL-001` through `REL-007`, `TST-007`.
+
+**Evidence:**
+
+- `scripts/package.sh` builds one release artifact per target with the pinned
+  toolchain, a locked dependency set, stripped symbols, and deterministic tar
+  metadata, then writes its SHA-256 into
+  `secretsieve-<version>-SHA256SUMS`. `mise run package [TARGET]` is the entry
+  point, and only the four `SUP-001` targets are accepted;
+- `install.sh` implements the `REL-002` interface exactly: platform and
+  architecture detection for Linux and macOS on x86_64 and arm64, checksum
+  verification before anything is replaced, atomic replacement through a staged
+  file beside the target, `--install-dir`, `--version`,
+  `--allow-major-upgrade`, and same-major default upgrade. It installs only the
+  binary and says so (`REL-003`);
+- `scripts/release-check.sh` packages a real artifact and drives the real
+  installer against it over `file://`, so it needs no network and no published
+  release. Fifteen checks pass: artifact and checksum existence, checksum
+  verification, byte-identical repackaging, clean install, running `--version`
+  and `--help` from the artifact, no configuration or harness file created,
+  no-op repeat install, upgrade from an older release in the same major, an
+  existing V1 configuration still runtime-readable afterwards, a corrupt download
+  that installs nothing and leaves no temporary file, major-version gating,
+  explicit major upgrade, `--install-dir`, and rejection of an unknown option;
+- writing those checks caught two flaws in the checks themselves, both fixed: the
+  stub versions were hardcoded to major 1 while the crate is pre-1.0, and the
+  corrupt-download case never downloaded because the target version was already
+  installed;
+- `.github/workflows/release.yml` packages all four targets on a version tag,
+  runs `mise run release-check`, merges and verifies the checksum files, and
+  publishes the GitHub Release with notes generated from
+  `docs/release-notes-template.md`, which carries the support matrix and links to
+  the governing limitations (`REL-001`, `TST-007`);
+- `REL-005` needs no code: no hook or plugin downloads or updates the binary, and
+  the installer is the only component that fetches anything;
+- `REL-007` is exercised by the upgrade check, which reads a V1 configuration
+  written before the upgrade with the newly installed binary;
+- `mise run check` and `mise run release-check` pass.
 
 ### [ ] T120: Qualify And Publish V1
 

@@ -1,6 +1,9 @@
 # Rust build output
 /target/
 
+# Release artifacts produced by `mise run package`
+/dist/
+
 # Local mise configuration
 .mise.local.toml
 

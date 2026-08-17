@@ -49,6 +49,10 @@ depends = ["format-check", "lint", "test", "test-plugin"]
 description = "Bounded fuzz smoke run over untrusted input surfaces"
 run = "bash scripts/fuzz-smoke.sh"
 
+[tasks.package]
+description = "Build and package one release artifact for a target"
+run = "bash scripts/package.sh"
+
 [tasks.release-check]
 description = "Verify release artifacts, checksums, and installer behavior"
 run = "bash scripts/release-check.sh"
