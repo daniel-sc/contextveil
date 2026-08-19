@@ -156,7 +156,7 @@ finds a problem the coding agent can show.
 - **Staying small and local.** Runtime has no network calls, telemetry, account,
   subscription, or persistent logging. Safe and fast by design.
 
-## Supported Coding Agents
+## Support and Security Limits
 
 V1 supports Linux (including WSL on Windows) and macOS on x86_64 and arm64.
 
@@ -170,11 +170,24 @@ V1 supports Linux (including WSL on Windows) and macOS on x86_64 and arm64.
 Experimental integrations are functional and fixture-tested, but they are not
 part of the production support promise. 
 
-Coverage applies only when the coding-agent application runs locally, loads, and
-honors the installed integration. Cloud, remote, container, and company-managed
-(managed-policy) setups need SecretSieve installed there as well, and that
-environment must support the configured integration. See
-[limitations.md](limitations.md) for exact gaps in each coding agent.
+SecretSieve is a guardrail for accidental exposure, not a general security
+boundary:
+
+- It protects only current, exact values from sources you enroll. Unknown,
+  encoded, split, normalized, hashed, or otherwise transformed values are not
+  detected.
+- Coverage applies only when the coding-agent application loads and honors the
+  installed integration. Cloud, remote, container, and company-managed setups
+  need their own working installation.
+- Claude, Codex, and Copilot fail open. If their hook crashes, times out, is
+  disabled, or is bypassed, the coding agent may continue with the original text.
+  OpenCode can stop a covered operation only after its plugin has loaded.
+- SecretSieve does not stop local processes from reading or using credentials,
+  and other coding-agent hooks may see the original content before redaction.
+- Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warngin.)
+
+See [limitations.md](limitations.md) for the complete security boundary and
+coding-agent-specific gaps.
 
 ## Commands
 
@@ -191,34 +204,6 @@ secretsieve doctor
 secretsieve --help
 secretsieve --version
 ```
-
-## Practical Limits
-
-SecretSieve is a guardrail for accidental exposure, not a general security
-boundary.
-
-- It protects only current, exact values from sources you enroll. Unknown,
-  encoded, split, normalized, hashed, or otherwise transformed values are not
-  detected.
-- It handles selected text fields independently. It does not match object keys,
-  binary data, images, attachments, or text split across fields.
-- It is not a vault, sandbox, network firewall, DLP system, secret scanner, or
-  control over what a local process can do with a credential.
-- Claude, Codex, and Copilot fail open. If their hook crashes, times out, is
-  disabled, or is bypassed, the coding agent may continue with the original text.
-- OpenCode stops a covered operation only when its plugin has loaded and detects
-  the problem. A plugin that does not load cannot intervene.
-- Other coding-agent hooks may see the original content first or replace
-  SecretSieve's cleaned result.
-- Current values briefly exist in ordinary process memory. SecretSieve does not
-  save them or put them in diagnostics.
-- Placeholders are display markers. SecretSieve never turns them back into secret
-  values for a later command.
-- Short or common values can also match ordinary text. Pay attention to setup and
-  doctor warnings, especially before enrolling every entry in an `.env` file.
-
-For the full boundary and coding-agent-specific details, read
-[limitations.md](limitations.md).
 
 ## Configuration
 
