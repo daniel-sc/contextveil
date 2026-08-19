@@ -1,25 +1,25 @@
-# SecretSieve Vision
+# ContextVeil Vision
 
-This document describes why SecretSieve exists and the product direction. It is
+This document describes why ContextVeil exists and the product direction. It is
 not the normative behavior contract. See [specification.md](specification.md) for
 requirements and [architecture.md](architecture.md) for technical boundaries.
 
 ## Product Promise
 
-SecretSieve helps keep enrolled local credentials out of supported coding-agent
-model context by replacing exact, locally resolved values before the model sees
-them.
+ContextVeil keeps enrolled local secrets out of supported coding-agent model
+context by deterministically redacting exact, locally resolved values before the
+model sees them.
 
 The concise positioning is:
 
-> SecretSieve keeps local credentials out of coding-agent context using
-> deterministic exact-value redaction.
+> ContextVeil keeps enrolled local secrets out of coding-agent model context
+> through deterministic local redaction.
 
 This statement is always accompanied by the current support matrix and its
-host-specific limits. SecretSieve is a safety primitive, not a claim that
+host-specific limits. ContextVeil is a safety primitive, not a claim that
 credentials can never leave the machine.
 
-SecretSieve is free and open source under MIT OR Apache-2.0. It requires no
+ContextVeil is free and open source under MIT OR Apache-2.0. It requires no
 account, subscription, hosted service, or paid runtime component.
 
 ## Problem
@@ -30,7 +30,7 @@ configuration inspection, debugging, stack traces, and MCP tools can place a
 local credential into the next remote model request even when neither the user
 nor agent intended to disclose it.
 
-SecretSieve changes the model-bound result:
+ContextVeil changes the model-bound result:
 
 ```text
 GITHUB_TOKEN=ghp_example
@@ -42,15 +42,15 @@ into:
 GITHUB_TOKEN=<SECRET:GITHUB_TOKEN>
 ```
 
-The local operation has still happened. SecretSieve intervenes only at a
+The local operation has still happened. ContextVeil intervenes only at a
 supported model-context boundary.
 
 ## Defining Choice
 
 Most secret scanners ask at runtime whether arbitrary text looks secret.
-SecretSieve instead asks the user during setup which local sources should be
-protected, then performs literal matching against their current values at
-runtime.
+ContextVeil instead asks the user during setup which local sources should be
+enrolled, then performs literal matching against their current values at
+runtime and redacts matches before covered content enters model context.
 
 ```text
 smart enrollment
@@ -62,21 +62,21 @@ This choice favors predictability, arbitrary private credential formats, low
 false-positive rates, auditability, and a small implementation. It deliberately
 gives up automatic protection for unknown or transformed secrets.
 
-## Why SecretSieve
+## Why ContextVeil
 
-- **Less disruptive protection.** SecretSieve does not broadly block file reads,
+- **Less disruptive redaction.** ContextVeil does not broadly block file reads,
   tool execution, or access to configuration files. Covered operations continue
-  normally; only enrolled values in model-bound content are replaced.
+  normally; only enrolled values in model-bound content are redacted.
 - **Predictable behavior.** The user decides which sources are sensitive, and
   runtime matching is literal and deterministic. There is no changing classifier
   deciding whether arbitrary text looks secret on every event.
 - **Low runtime overhead.** After initial setup, runtime performs local
   exact-value matching without network calls, provider lookups, or LLM
   classification. Clean events remain silent.
-- **Private formats work.** Protection does not depend on a provider-specific
+- **Private formats work.** Redaction does not depend on a provider-specific
   regex or recognizable token format. Any enrolled textual credential can be
   protected.
-- **Rotation without re-enrollment.** SecretSieve stores source references rather
+- **Rotation without re-enrollment.** ContextVeil stores source references rather
   than copied values, so dotenv changes are picked up on subsequent events and
   environment changes after restarting the harness.
 - **Inspectable and independently useful.** The small shared Rust core, explicit
@@ -84,7 +84,7 @@ gives up automatic protection for unknown or transformed secrets.
   make behavior independently auditable.
 
 Unlike controls that block access to sensitive files or classify every result
-heuristically, SecretSieve preserves useful tool output and changes only exact
+heuristically, ContextVeil preserves useful tool output and redacts only exact
 enrolled values at covered model boundaries.
 
 ## User Experience
@@ -92,13 +92,13 @@ enrolled values at covered model boundaries.
 The normal journey is:
 
 1. Install the standalone binary.
-2. Run `secretsieve setup` from a project directory.
+2. Run `contextveil setup` from a project directory.
 3. Review global and project candidates without exposing complete plaintext
    values.
 4. Select supported coding-agent integrations.
 5. Work normally; clean events are silent.
-6. See a concise notification only when SecretSieve intervenes.
-7. Use `secretsieve status` or `secretsieve doctor` when inspecting protection.
+6. See a concise notification only when ContextVeil redacts a value.
+7. Use `contextveil status` or `contextveil doctor` when inspecting coverage.
 
 The same setup command is safe to rerun as sources, projects, or integrations
 change.
@@ -109,7 +109,7 @@ change.
 - **User-authorized enrollment.** Heuristics suggest; the user decides.
 - **Boring runtime.** Matching is literal, case-sensitive, and deterministic.
 - **Source references over snapshots.** Values are resolved from environment or
-  dotenv sources rather than copied into SecretSieve configuration.
+  dotenv sources rather than copied into ContextVeil configuration.
 - **One security core.** Harness adapters translate protocols but do not
   reimplement source resolution or matching.
 - **Silent success.** Runtime produces UI only for intervention or malfunction.
@@ -152,7 +152,7 @@ V1 succeeds when:
 
 ## Non-Goals
 
-SecretSieve V1 is not a:
+ContextVeil V1 is not a:
 
 - secret manager or vault;
 - sandbox, capability system, or environment isolator;

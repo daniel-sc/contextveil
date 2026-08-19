@@ -14,7 +14,7 @@ version it ran against, never a permanent certificate (`DIA-007`, `SUP-004`).
 | --- | --- |
 | Host | Claude Code 2.1.233 |
 | Platform | `x86_64-unknown-linux-gnu`, Linux 7.0.0-1008-gcp |
-| Binary | `target/release/secretsieve` built from the qualified tree |
+| Binary | `target/release/contextveil` built from the qualified tree |
 | Session id | `11111111-2222-4333-8444-555555555555`, pinned with `--session-id` |
 | Billed requests | 6: one auth smoke test, two qualification turns, three `doctor` canaries |
 | Result | **Passed**: intervention redacted, and the redaction survived resume |
@@ -42,7 +42,7 @@ copied, so no second copy of it was written to disk.
 
 ### What was done
 
-1. `secretsieve setup` was driven over a real pty in the isolated home. It
+1. `contextveil setup` was driven over a real pty in the isolated home. It
    discovered sources, masked every value it displayed (`SET-010`), wrote a
    configuration holding only source references, and installed the Claude
    `PostToolUse` hook with a 5-second timeout (`CLA-001`, `RUN-004`).
@@ -74,8 +74,8 @@ protocol response, its exit code, and its duration:
 ```json
 {"type": "hook_success", "hookName": "PostToolUse:Bash", "exitCode": 0,
  "durationMs": 7,
- "command": "…/secretsieve hook claude",
- "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"updatedToolOutput\":{\"stdout\":\"<SECRET:VARIABLE>\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}},\"systemMessage\":\"SecretSieve replaced 1 value (VARIABLE)\"}"}
+ "command": "…/contextveil hook claude",
+ "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"updatedToolOutput\":{\"stdout\":\"<SECRET:VARIABLE>\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}},\"systemMessage\":\"ContextVeil redacted 1 value (VARIABLE)\"}"}
 ```
 
 The stored tool result, the reply in the original turn, and the reply after the

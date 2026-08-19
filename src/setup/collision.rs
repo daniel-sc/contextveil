@@ -163,7 +163,7 @@ mod tests {
     impl Tree {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-collision-{}-{}",
+                "contextveil-collision-{}-{}",
                 std::process::id(),
                 Canary::generate("TREE").token()
             ));

@@ -20,7 +20,7 @@ write_stub() {
   cat >"$1" <<STUB
 #!/bin/sh
 # Stands in for another release during the release check.
-[ "\$1" = "--version" ] && echo "secretsieve ${stub_version}"
+[ "\$1" = "--version" ] && echo "contextveil ${stub_version}"
 exit 0
 STUB
   chmod 755 "$1"
@@ -35,7 +35,7 @@ fail() {
   exit 1
 }
 
-printf 'SecretSieve release check\n'
+printf 'ContextVeil release check\n'
 printf '  version     %s\n' "${version}"
 printf '  target      %s\n' "${target}"
 
@@ -44,8 +44,8 @@ printf '  target      %s\n' "${target}"
 releases="${work}/releases/v${version}"
 mkdir -p "${releases}"
 bash scripts/package.sh "${target}" "${releases}" >/dev/null
-archive="${releases}/secretsieve-${version}-${target}.tar.gz"
-checksums="${releases}/secretsieve-${version}-SHA256SUMS"
+archive="${releases}/contextveil-${version}-${target}.tar.gz"
+checksums="${releases}/contextveil-${version}-SHA256SUMS"
 
 [ -f "${archive}" ] || fail "the release archive was not produced"
 [ -f "${checksums}" ] || fail "the checksum file was not produced"
@@ -65,7 +65,7 @@ check "checksum matches the artifact"
 second="${work}/second"
 mkdir -p "${second}"
 bash scripts/package.sh "${target}" "${second}" >/dev/null
-if ! cmp -s "${archive}" "${second}/secretsieve-${version}-${target}.tar.gz"; then
+if ! cmp -s "${archive}" "${second}/contextveil-${version}-${target}.tar.gz"; then
   fail "packaging is not reproducible on this platform"
 fi
 check "packaging the same commit twice produces identical bytes"
@@ -87,8 +87,8 @@ installer_with() {
     HOME="${work}/home" \
     PATH="${PATH}" \
     XDG_CONFIG_HOME="${work}/home/.config" \
-    SECRETSIEVE_RELEASE_INDEX="file://${index}" \
-    SECRETSIEVE_RELEASE_BASE="file://${work}/releases" \
+    CONTEXTVEIL_RELEASE_INDEX="file://${index}" \
+    CONTEXTVEIL_RELEASE_BASE="file://${work}/releases" \
     bash "${root}/install.sh" "$@"
 }
 
@@ -100,7 +100,7 @@ installer() {
 
 mkdir -p "${work}/home"
 installer >"${work}/clean.log" 2>&1 || fail "a clean install failed"
-binary="${work}/home/.local/bin/secretsieve"
+binary="${work}/home/.local/bin/contextveil"
 [ -x "${binary}" ] || fail "the binary was not installed to the default location"
 check "clean install placed the binary in ~/.local/bin"
 
@@ -113,7 +113,7 @@ grep -q "checksum verified" "${work}/clean.log" || fail "the installer did not v
 check "the installer verified the checksum before installing"
 
 # `REL-003`: the installer must not run setup or touch any configuration.
-if [ -e "${work}/home/.config/secretsieve" ] ||
+if [ -e "${work}/home/.config/contextveil" ] ||
   [ -e "${work}/home/.claude" ] ||
   [ -e "${work}/home/.codex" ] ||
   [ -e "${work}/home/.copilot" ] ||
@@ -153,26 +153,26 @@ older_version="${major}.0.0"
 if [ "${older_version}" = "${version}" ]; then
   printf '  [skip] no older release exists inside major %s to upgrade from\n' "${major}"
 else
-  stub_version="${older_version}" write_stub "${work}/home/.local/bin/secretsieve"
+  stub_version="${older_version}" write_stub "${work}/home/.local/bin/contextveil"
 fi
 
 # A V1 configuration written before the upgrade must still be readable after it.
-mkdir -p "${work}/home/.config/secretsieve" "${work}/home/project"
-cat >"${work}/home/.config/secretsieve/config.toml" <<'CONFIG'
+mkdir -p "${work}/home/.config/contextveil" "${work}/home/project"
+cat >"${work}/home/.config/contextveil/config.toml" <<'CONFIG'
 version = 1
 
 [[secret]]
 source = "env"
 name = "RELEASE_CHECK_TOKEN"
 CONFIG
-before="$(cat "${work}/home/.config/secretsieve/config.toml")"
+before="$(cat "${work}/home/.config/contextveil/config.toml")"
 
 installer >"${work}/upgrade.log" 2>&1 || fail "an upgrade from ${older_version} failed"
 reported="$("${binary}" --version | awk '{print $2}')"
 [ "${reported}" = "${version}" ] || fail "the upgrade did not replace the older binary"
 check "an older install upgrades within the same major version"
 
-after="$(cat "${work}/home/.config/secretsieve/config.toml")"
+after="$(cat "${work}/home/.config/contextveil/config.toml")"
 [ "${before}" = "${after}" ] || fail "the upgrade changed the configuration file"
 # `XDG_CONFIG_HOME` is set explicitly because an ambient one, which CI runners do
 # export, would send the lookup away from the configuration written above and the
@@ -198,7 +198,7 @@ grep -q "checksum mismatch" "${work}/corrupt.log" ||
   fail "the corrupt download was rejected for the wrong reason"
 [ ! -e "${binary}" ] || fail "the corrupt download left a binary behind"
 # No staged temporary file may be left behind either.
-if [ -n "$(find "${work}/home/.local/bin" -name '.secretsieve.install.*' 2>/dev/null)" ]; then
+if [ -n "$(find "${work}/home/.local/bin" -name '.contextveil.install.*' 2>/dev/null)" ]; then
   fail "the corrupt download left a staged temporary file behind"
 fi
 cp "${work}/archive.good" "${archive}"
@@ -207,33 +207,33 @@ check "a corrupt download is rejected, installs nothing, and leaves no temporary
 
 # --- hostile archive contents ------------------------------------------------
 
-# An archive whose `secretsieve` member is a symlink must be refused rather than
+# An archive whose `contextveil` member is a symlink must be refused rather than
 # followed, and an archive carrying extra paths must not have them extracted.
 hostile="${work}/hostile"
 mkdir -p "${hostile}/v${version}"
 staging="$(mktemp -d)"
-ln -s /etc/passwd "${staging}/secretsieve"
+ln -s /etc/passwd "${staging}/contextveil"
 mkdir -p "${staging}/extra"
 printf 'unwanted\n' >"${staging}/extra/payload"
 # No --dereference, so the symlink is archived as a symlink.
 tar --create --gzip \
   --directory "${staging}" \
-  --file "${hostile}/v${version}/secretsieve-${version}-${target}.tar.gz" \
-  secretsieve extra
+  --file "${hostile}/v${version}/contextveil-${version}-${target}.tar.gz" \
+  contextveil extra
 (
   cd "${hostile}/v${version}"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "secretsieve-${version}-${target}.tar.gz" >"secretsieve-${version}-SHA256SUMS"
+    sha256sum "contextveil-${version}-${target}.tar.gz" >"contextveil-${version}-SHA256SUMS"
   else
-    shasum -a 256 "secretsieve-${version}-${target}.tar.gz" >"secretsieve-${version}-SHA256SUMS"
+    shasum -a 256 "contextveil-${version}-${target}.tar.gz" >"contextveil-${version}-SHA256SUMS"
   fi
 )
 rm -rf "${staging}"
 
 rm -f "${binary}"
 if env HOME="${work}/home" \
-  SECRETSIEVE_RELEASE_INDEX="file://${index}" \
-  SECRETSIEVE_RELEASE_BASE="file://${hostile}" \
+  CONTEXTVEIL_RELEASE_INDEX="file://${index}" \
+  CONTEXTVEIL_RELEASE_BASE="file://${hostile}" \
   bash "${root}/install.sh" ${select[@]+"${select[@]}"} >"${work}/hostile.log" 2>&1; then
   fail "an archive whose binary member is a symlink was installed"
 fi
@@ -252,8 +252,8 @@ majorindex="${work}/major.json"
 printf '[{"tag_name": "v%s"}]\n' "${version}" >"${majorindex}"
 
 if env HOME="${work}/home" \
-  SECRETSIEVE_RELEASE_INDEX="file://${majorindex}" \
-  SECRETSIEVE_RELEASE_BASE="file://${work}/releases" \
+  CONTEXTVEIL_RELEASE_INDEX="file://${majorindex}" \
+  CONTEXTVEIL_RELEASE_BASE="file://${work}/releases" \
   bash "${root}/install.sh" --version "${version}" >"${work}/major.log" 2>&1; then
   fail "crossing a major version was allowed without the flag"
 fi
@@ -262,8 +262,8 @@ grep -q "allow-major-upgrade" "${work}/major.log" ||
 check "crossing a major version requires an explicit opt-in"
 
 env HOME="${work}/home" \
-  SECRETSIEVE_RELEASE_INDEX="file://${majorindex}" \
-  SECRETSIEVE_RELEASE_BASE="file://${work}/releases" \
+  CONTEXTVEIL_RELEASE_INDEX="file://${majorindex}" \
+  CONTEXTVEIL_RELEASE_BASE="file://${work}/releases" \
   bash "${root}/install.sh" --allow-major-upgrade ${select[@]+"${select[@]}"} \
   >"${work}/major-ok.log" 2>&1 ||
   fail "an explicit major upgrade failed"
@@ -275,7 +275,7 @@ check "an explicit major upgrade installs the selected release"
 
 installer --install-dir "${work}/custom/bin" >/dev/null 2>&1 ||
   fail "--install-dir failed"
-[ -x "${work}/custom/bin/secretsieve" ] || fail "--install-dir did not place the binary"
+[ -x "${work}/custom/bin/contextveil" ] || fail "--install-dir did not place the binary"
 check "--install-dir installs elsewhere"
 
 # --- unknown usage ---------------------------------------------------------

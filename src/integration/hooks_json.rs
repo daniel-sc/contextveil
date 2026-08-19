@@ -6,7 +6,7 @@
 //! implementation those two installers reuse; it was extracted only after the
 //! second concrete use (`architecture.md`).
 //!
-//! `INT-003`: the installed command is the absolute binary path plus SecretSieve's
+//! `INT-003`: the installed command is the absolute binary path plus ContextVeil's
 //! own hidden arguments, shell-quoted so a host that runs it through a shell
 //! cannot re-split or expand it. `INT-004`: unrelated hooks and unrelated keys
 //! are preserved, and only an artifact whose ownership and unchanged identity can
@@ -24,7 +24,7 @@ use crate::sanitize;
 pub struct Spec {
     /// Event key under the top-level `hooks` object, for example `PostToolUse`.
     pub event: &'static str,
-    /// SecretSieve's hidden arguments, for example `hook claude`.
+    /// ContextVeil's hidden arguments, for example `hook claude`.
     pub arguments: &'static str,
     /// Timeout in seconds (`RUN-004`).
     pub timeout: u64,
@@ -72,7 +72,7 @@ pub enum Problem {
     Write,
 }
 
-/// The command string SecretSieve installs for `executable`.
+/// The command string ContextVeil installs for `executable`.
 pub fn managed_command(executable: &Path, spec: Spec) -> String {
     format!(
         "{} {}",
@@ -81,12 +81,12 @@ pub fn managed_command(executable: &Path, spec: Spec) -> String {
     )
 }
 
-/// True when `command` is SecretSieve's hook command for some binary path.
+/// True when `command` is ContextVeil's hook command for some binary path.
 ///
 /// Ownership is established by shape as well as by the recorded command, so a
 /// lost state file cannot orphan an installed hook and moving the binary does not
 /// either. The shape is narrow: an absolute path followed by exactly
-/// SecretSieve's own hidden entry point.
+/// ContextVeil's own hidden entry point.
 pub fn is_managed_command(command: &str, spec: Spec) -> bool {
     let suffix = format!(" {}", spec.arguments);
     let Some(executable) = command.strip_suffix(&suffix) else {
@@ -140,7 +140,7 @@ pub fn install(path: &Path, executable: &Path, spec: Spec) -> Result<(), Problem
 
 /// Removes the managed hook.
 ///
-/// Returns `Ok(false)` when a SecretSieve hook was left in place because it had
+/// Returns `Ok(false)` when a ContextVeil hook was left in place because it had
 /// been modified by hand (`INT-004`).
 pub fn remove(path: &Path, spec: Spec) -> Result<bool, Problem> {
     let mut file = match read(path) {
@@ -206,7 +206,7 @@ pub fn classify(
     (installed, conflicts)
 }
 
-/// The SecretSieve hook entry in the file, with its configured timeout.
+/// The ContextVeil hook entry in the file, with its configured timeout.
 pub fn managed_entry(file: &Map<String, Value>, spec: Spec) -> Option<(String, Option<u64>)> {
     for group in groups(file, spec)? {
         let Some(hooks) = group.get("hooks").and_then(Value::as_array) else {
@@ -234,7 +234,7 @@ pub fn command_executable(command: &str, spec: Spec) -> Option<std::path::PathBu
         .map(|path| std::path::PathBuf::from(path.trim_matches('\'')))
 }
 
-/// True when a group is exactly the artifact SecretSieve installs.
+/// True when a group is exactly the artifact ContextVeil installs.
 fn is_exactly_managed(group: &Value, spec: Spec) -> bool {
     let Some(object) = group.as_object() else {
         return false;
@@ -265,7 +265,7 @@ fn is_exactly_managed(group: &Value, spec: Spec) -> bool {
             .is_some_and(|command| is_managed_command(command, spec))
 }
 
-/// True when a group mentions a SecretSieve command in any shape.
+/// True when a group mentions a ContextVeil command in any shape.
 fn mentions_managed(group: &Value, spec: Spec) -> bool {
     group
         .get("hooks")
@@ -360,7 +360,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-hooks-json-{}-{}",
+                "contextveil-hooks-json-{}-{}",
                 std::process::id(),
                 Canary::generate("HOOKS").token()
             ));
@@ -373,7 +373,7 @@ mod tests {
         }
 
         fn executable(&self) -> std::path::PathBuf {
-            self.root.join("bin").join("secretsieve")
+            self.root.join("bin").join("contextveil")
         }
 
         fn write(&self, contents: &str) {
@@ -459,7 +459,7 @@ mod tests {
     fn a_modified_entry_is_preserved() {
         let fixture = Fixture::new();
         fixture.write(
-            r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/opt/secretsieve hook test", "timeout": 30}]}]}}"#,
+            r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/opt/contextveil hook test", "timeout": 30}]}]}}"#,
         );
         let file = read(&fixture.path()).expect("readable").expect("present");
         let (installed, conflicts) = classify(&file, SPEC, None, &[]);
@@ -533,7 +533,7 @@ mod tests {
             Installed::Current
         );
         assert!(matches!(
-            classify(&file, SPEC, Some("/elsewhere/secretsieve hook test"), &[]).0,
+            classify(&file, SPEC, Some("/elsewhere/contextveil hook test"), &[]).0,
             Installed::Outdated { .. }
         ));
     }
@@ -553,13 +553,13 @@ mod tests {
 
     #[test]
     fn managed_commands_are_recognized_only_in_their_exact_shape() {
-        assert!(is_managed_command("/opt/secretsieve hook test", SPEC));
+        assert!(is_managed_command("/opt/contextveil hook test", SPEC));
         assert!(is_managed_command(
-            "'/opt/my bin/secretsieve' hook test",
+            "'/opt/my bin/contextveil' hook test",
             SPEC
         ));
-        assert!(!is_managed_command("/opt/secretsieve hook other", SPEC));
-        assert!(!is_managed_command("relative/secretsieve hook test", SPEC));
+        assert!(!is_managed_command("/opt/contextveil hook other", SPEC));
+        assert!(!is_managed_command("relative/contextveil hook test", SPEC));
         assert!(!is_managed_command(" hook test", SPEC));
     }
 

@@ -2,7 +2,7 @@
 //!
 //! `architecture.md`: integration ownership metadata lives beside the global
 //! policy file so the policy TOML stays comprehensible. It records only what
-//! SecretSieve installed and what the user approved. It never contains a
+//! ContextVeil installed and what the user approved. It never contains a
 //! resolved value and is never treated as proof of health (`INT-006`).
 
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::integration::Harness;
 
-/// File name inside the global SecretSieve configuration directory.
+/// File name inside the global ContextVeil configuration directory.
 pub const STATE_FILENAME: &str = "integrations.toml";
 
 /// Recorded state for every integration.
@@ -33,7 +33,7 @@ fn one() -> i64 {
     1
 }
 
-/// What SecretSieve installed for one harness, and what the user approved.
+/// What ContextVeil installed for one harness, and what the user approved.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Managed {
     /// The exact command or artifact identity that was installed.
@@ -112,7 +112,7 @@ mod tests {
 
     fn temporary() -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-state-{}-{}",
+            "contextveil-state-{}-{}",
             std::process::id(),
             Canary::generate("STATE").token()
         ));
@@ -131,7 +131,7 @@ mod tests {
             state.set(
                 harness,
                 Some(Managed {
-                    command: format!("/opt/secretsieve hook {harness:?}"),
+                    command: format!("/opt/contextveil hook {harness:?}"),
                     approved_conflicts: vec!["/other/hook".to_string()],
                 }),
             );

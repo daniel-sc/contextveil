@@ -164,7 +164,7 @@ fn temporary_path(path: &Path) -> PathBuf {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "config.toml".to_string());
     path.with_file_name(format!(
-        ".{name}.secretsieve-{}-{sequence}.tmp",
+        ".{name}.contextveil-{}-{sequence}.tmp",
         std::process::id()
     ))
 }
@@ -177,7 +177,7 @@ mod tests {
 
     fn temporary_root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-write-{name}-{}-{}",
+            "contextveil-write-{name}-{}-{}",
             std::process::id(),
             Canary::generate("WRITE").token()
         ));
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn writing_is_idempotent() {
         let root = temporary_root("idempotent");
-        let path = root.join("secretsieve").join("config.toml");
+        let path = root.join("contextveil").join("config.toml");
         assert!(write(&path, &sources(), true).expect("first write"));
         let first = std::fs::read_to_string(&path).expect("read back");
         assert!(!write(&path, &sources(), true).expect("second write"));
@@ -276,7 +276,7 @@ mod tests {
     fn global_files_and_directories_are_user_only() {
         use std::os::unix::fs::PermissionsExt;
         let root = temporary_root("permissions");
-        let path = root.join("secretsieve").join("config.toml");
+        let path = root.join("contextveil").join("config.toml");
         write(&path, &sources(), true).expect("write");
 
         let file_mode = std::fs::metadata(&path)
@@ -284,7 +284,7 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(file_mode & 0o777, 0o600, "file mode {file_mode:o}");
-        let directory_mode = std::fs::metadata(root.join("secretsieve"))
+        let directory_mode = std::fs::metadata(root.join("contextveil"))
             .expect("directory metadata")
             .permissions()
             .mode();

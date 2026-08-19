@@ -1,6 +1,6 @@
 //! Large-input and recursion behavior (`SRC-008`, `LIM-010`, `RUN-004`).
 //!
-//! V1 imposes no SecretSieve-specific size cap, so these tests measure what large
+//! V1 imposes no ContextVeil-specific size cap, so these tests measure what large
 //! input actually does instead of asserting a maximum. They also prove that deeply
 //! nested payloads cannot exhaust the stack.
 
@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use secretsieve::testing::{Canary, assert_canary_absent};
+use contextveil::testing::{Canary, assert_canary_absent};
 use serde_json::{Value, json};
 
 struct Machine {
@@ -19,12 +19,12 @@ struct Machine {
 impl Machine {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-limits-{}-{}",
+            "contextveil-limits-{}-{}",
             std::process::id(),
             Canary::generate("FIXTURE").token()
         ));
         std::fs::create_dir_all(root.join("home").join("project")).expect("project");
-        std::fs::create_dir_all(root.join("home").join(".config").join("secretsieve"))
+        std::fs::create_dir_all(root.join("home").join(".config").join("contextveil"))
             .expect("config directory");
         Self { root }
     }
@@ -41,7 +41,7 @@ impl Machine {
         std::fs::write(
             self.home()
                 .join(".config")
-                .join("secretsieve")
+                .join("contextveil")
                 .join("config.toml"),
             contents,
         )
@@ -49,7 +49,7 @@ impl Machine {
     }
 
     fn run_hook(&self, payload: &str, variables: &[(&str, &str)]) -> (Output, Duration) {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_secretsieve"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_contextveil"));
         command
             .args(["hook", "claude"])
             .current_dir(self.project())
@@ -84,7 +84,7 @@ impl Drop for Machine {
 
 #[test]
 fn a_large_wildcard_dotenv_file_is_resolved_without_a_cap() {
-    // `SRC-008`: no SecretSieve-specific dotenv size cap.
+    // `SRC-008`: no ContextVeil-specific dotenv size cap.
     let canary = Canary::generate("BIG_TOKEN");
     let machine = Machine::new();
     machine.write_global("version = 1\n");
@@ -98,7 +98,7 @@ fn a_large_wildcard_dotenv_file_is_resolved_without_a_cap() {
     dotenv.push_str(&format!("BIG_TOKEN={}\n", canary.value()));
     std::fs::write(machine.project().join(".env"), &dotenv).expect("write dotenv");
     std::fs::write(
-        machine.project().join(".secretsieve.toml"),
+        machine.project().join(".contextveil.toml"),
         "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n",
     )
     .expect("write project config");

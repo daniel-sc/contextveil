@@ -1,11 +1,11 @@
 [package]
-name = "secretsieve"
+name = "contextveil"
 version = "1.0.0-alpha.1"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
-description = "Keep enrolled local credentials out of coding-agent model context using deterministic exact-value redaction."
-repository = "https://github.com/daniel-sc/secretsieve"
+description = "Keep enrolled local secrets out of coding-agent model context through deterministic local redaction."
+repository = "https://github.com/daniel-sc/contextveil"
 readme = "README.md"
 keywords = ["secrets", "redaction", "coding-agent", "security"]
 categories = ["command-line-utilities"]
@@ -17,11 +17,11 @@ publish = false
 testing = []
 
 [lib]
-name = "secretsieve"
+name = "contextveil"
 path = "src/lib.rs"
 
 [[bin]]
-name = "secretsieve"
+name = "contextveil"
 path = "src/main.rs"
 
 [[bin]]

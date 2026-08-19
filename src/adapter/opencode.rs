@@ -2,7 +2,7 @@
 //!
 //! `OCO-001`: the managed TypeScript plugin invokes this binary with one JSON
 //! request on stdin and reads one JSON response from stdout. The request and
-//! response shapes below are SecretSieve's own contract, not OpenCode's, so the
+//! response shapes below are ContextVeil's own contract, not OpenCode's, so the
 //! plugin stays a thin translator with no matcher or resolver semantics
 //! (`architecture.md`, `OCO-004`).
 //!
@@ -168,17 +168,17 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-opencode-{}-{}",
+                "contextveil-opencode-{}-{}",
                 std::process::id(),
                 Canary::generate("OPENCODE").token()
             ));
-            std::fs::create_dir_all(root.join("secretsieve")).expect("config directory");
+            std::fs::create_dir_all(root.join("contextveil")).expect("config directory");
             Self { root }
         }
 
         fn enroll(&self, name: &str) {
             std::fs::write(
-                self.root.join("secretsieve").join("config.toml"),
+                self.root.join("contextveil").join("config.toml"),
                 format!("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"{name}\"\n"),
             )
             .expect("write global config");
@@ -299,7 +299,7 @@ mod tests {
         let canary = Canary::generate("API_TOKEN");
         let fixture = Fixture::new();
         std::fs::write(
-            fixture.root.join("secretsieve").join("config.toml"),
+            fixture.root.join("contextveil").join("config.toml"),
             "version = 1\n\n[[secret]]\nsource = \"nope\"\n",
         )
         .expect("write invalid config");

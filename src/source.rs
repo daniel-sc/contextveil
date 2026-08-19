@@ -334,7 +334,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-source-{}-{}",
+                "contextveil-source-{}-{}",
                 std::process::id(),
                 Canary::generate("SOURCE").token()
             ));

@@ -36,16 +36,16 @@ impl Context {
                 .map(|elapsed| elapsed.as_nanos())
                 .unwrap_or_default()
         );
-        let root = std::env::temp_dir().join(format!("secretsieve-fuzz-{canary}"));
-        std::fs::create_dir_all(root.join("secretsieve")).ok()?;
+        let root = std::env::temp_dir().join(format!("contextveil-fuzz-{canary}"));
+        std::fs::create_dir_all(root.join("contextveil")).ok()?;
         std::fs::write(
-            root.join("secretsieve").join("config.toml"),
-            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"SECRETSIEVE_FUZZ\"\n",
+            root.join("contextveil").join("config.toml"),
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"CONTEXTVEIL_FUZZ\"\n",
         )
         .ok()?;
         let environment = Environment::from_pairs([
             ("XDG_CONFIG_HOME", root.to_string_lossy().into_owned()),
-            ("SECRETSIEVE_FUZZ", canary.clone()),
+            ("CONTEXTVEIL_FUZZ", canary.clone()),
         ]);
         Some(Self {
             root,

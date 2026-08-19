@@ -6,14 +6,14 @@
 //! `fuzz/regressions/<target>/` so it can be committed as a permanent seed.
 //!
 //! Determinism is deliberate: the same command reproduces the same inputs, so a
-//! failure is investigable and CI never depends on luck. Raise `SECRETSIEVE_FUZZ_
-//! ITERATIONS` or `SECRETSIEVE_FUZZ_SECONDS` for a longer run.
+//! failure is investigable and CI never depends on luck. Raise `CONTEXTVEIL_FUZZ_
+//! ITERATIONS` or `CONTEXTVEIL_FUZZ_SECONDS` for a longer run.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use secretsieve::fuzz;
+use contextveil::fuzz;
 
 /// Seed inputs per target, chosen to be valid or nearly valid so mutation
 /// explores interesting states rather than mostly rejecting garbage.
@@ -88,12 +88,12 @@ const SEEDS: [(&str, &[&str]); 8] = [
 ];
 
 fn main() {
-    let iterations: usize = read_budget("SECRETSIEVE_FUZZ_ITERATIONS", 4000);
-    let seconds = read_budget("SECRETSIEVE_FUZZ_SECONDS", 30) as u64;
+    let iterations: usize = read_budget("CONTEXTVEIL_FUZZ_ITERATIONS", 4000);
+    let seconds = read_budget("CONTEXTVEIL_FUZZ_SECONDS", 30) as u64;
     let deadline = Instant::now() + Duration::from_secs(seconds);
     let regressions = PathBuf::from("fuzz/regressions");
 
-    println!("SecretSieve fuzz smoke");
+    println!("ContextVeil fuzz smoke");
     println!("  targets     {}", fuzz::TARGETS.len());
     println!("  iterations  {iterations} per target (budget {seconds}s)");
     if fuzz::context().is_none() {

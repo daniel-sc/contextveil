@@ -12,7 +12,7 @@
 use std::path::{Component, Path, PathBuf};
 
 /// The project configuration filename (`CFG-002`).
-pub const PROJECT_CONFIG_FILENAME: &str = ".secretsieve.toml";
+pub const PROJECT_CONFIG_FILENAME: &str = ".contextveil.toml";
 
 /// Why an entered path cannot be turned into an absolute path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +92,7 @@ pub fn normalize(path: &Path) -> PathBuf {
 
 /// Selects the project root for setup (`CFG-003`).
 ///
-/// 1. the nearest ancestor containing `.secretsieve.toml`;
+/// 1. the nearest ancestor containing `.contextveil.toml`;
 /// 2. otherwise the enclosing Git worktree root;
 /// 3. otherwise the current directory.
 pub fn setup_project_root(current_directory: &Path) -> PathBuf {
@@ -216,10 +216,10 @@ mod tests {
         let nested = fixture.join("repo/packages/app");
         std::fs::create_dir_all(&nested).expect("fixture directories");
         std::fs::create_dir_all(fixture.join("repo/.git")).expect("git directory");
-        std::fs::write(fixture.join("repo/.secretsieve.toml"), "version = 1\n")
+        std::fs::write(fixture.join("repo/.contextveil.toml"), "version = 1\n")
             .expect("project config");
         std::fs::write(
-            fixture.join("repo/packages/app/.secretsieve.toml"),
+            fixture.join("repo/packages/app/.contextveil.toml"),
             "version = 1\n",
         )
         .expect("nested project config");
@@ -263,7 +263,7 @@ mod tests {
 
     fn tempdir(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-paths-{name}-{}-{}",
+            "contextveil-paths-{name}-{}-{}",
             std::process::id(),
             crate::testing::Canary::generate("PATH").token()
         ));

@@ -8,7 +8,7 @@
 //! is `{"hooks": {"PostToolUse": [ matcher groups ]}}`, `timeout` is seconds, an
 //! omitted/empty/`*` matcher matches every tool, and a newly added or changed
 //! hook stays `Untrusted` — and therefore does not run — until the user trusts
-//! it. Codex also accepts hooks inline in `config.toml`; SecretSieve neither
+//! it. Codex also accepts hooks inline in `config.toml`; ContextVeil neither
 //! writes nor inspects that form (`LIM-014`).
 
 use std::path::{Path, PathBuf};
@@ -74,7 +74,7 @@ pub fn inspect(
             .and_then(|(command, _)| hooks_json::command_executable(command, SPEC)),
         hook_timeout: entry.and_then(|(_, timeout)| timeout),
         // Codex has an administrator switch (`allow_managed_hooks_only`) that can
-        // ignore user hooks, but it lives in a requirements file SecretSieve does
+        // ignore user hooks, but it lives in a requirements file ContextVeil does
         // not read; nothing is claimed here rather than guessing.
         disabled_by_policy: false,
     }
@@ -115,7 +115,7 @@ pub fn verify_offline(executable: &Path) -> Verification {
         "session_id": "synthetic",
         "cwd": "/nonexistent-synthetic-project",
         "tool_name": "shell",
-        "tool_input": {"command": ["printenv", "SECRETSIEVE_VERIFY"]},
+        "tool_input": {"command": ["printenv", "CONTEXTVEIL_VERIFY"]},
         "tool_response": {"output": canary.clone(), "exit_code": 0},
         "tool_use_id": "synthetic",
     })
@@ -150,7 +150,7 @@ mod tests {
     impl Home {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-codex-integration-{}-{}",
+                "contextveil-codex-integration-{}-{}",
                 std::process::id(),
                 Canary::generate("HOME").token()
             ));
@@ -159,7 +159,7 @@ mod tests {
         }
 
         fn executable(&self) -> PathBuf {
-            let path = self.root.join("bin").join("secretsieve");
+            let path = self.root.join("bin").join("contextveil");
             std::fs::create_dir_all(path.parent().expect("parent")).expect("bin directory");
             if !path.exists() {
                 std::fs::write(&path, "#!/bin/sh\n").expect("write fake executable");

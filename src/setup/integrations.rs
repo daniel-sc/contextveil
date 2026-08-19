@@ -2,7 +2,7 @@
 //!
 //! `INT-001`: every supported harness is detected, Claude is selected by default
 //! when detected, and experimental integrations stay unselected unless
-//! SecretSieve already installed them. `INT-002`: an undetected harness may still
+//! ContextVeil already installed them. `INT-002`: an undetected harness may still
 //! be installed, with disclosure. `SUP-003`: experimental integrations are
 //! labeled and require an affirmative choice. `SET-014`: each integration action
 //! is a separate transaction that restores its prior managed state on failure.
@@ -143,7 +143,7 @@ fn render(terminal: &mut Terminal<'_>, rows: &[Row]) {
         }
     }
     terminal
-        .line("  Installation is not proof of protection; run `secretsieve doctor` to check it.");
+        .line("  Installation is not proof of protection; run `contextveil doctor` to check it.");
 }
 
 fn describe(installed: &Installed) -> &'static str {
@@ -227,7 +227,7 @@ fn apply(
                 // `INT-002`: disclose that verification is limited.
                 terminal.line(&format!(
                     "  {label} was not detected. The integration will be installed, but \
-                     SecretSieve cannot confirm the host will load it."
+                     ContextVeil cannot confirm the host will load it."
                 ));
             }
             let Some(executable) = executable else {
@@ -303,13 +303,13 @@ fn approve_conflicts(
             conflict.command
         ));
         terminal.line(
-            "  SecretSieve cannot stop it from seeing the original content or replacing the \
+            "  ContextVeil cannot stop it from seeing the original content or replacing the \
              sanitized one.",
         );
         if terminal.confirm("  Keep it and continue?", false)? {
             integration::approve_conflict(row.inspection.harness, state, &conflict.command);
         } else {
-            terminal.line("  Leaving it unapproved; `secretsieve doctor` will report it.");
+            terminal.line("  Leaving it unapproved; `contextveil doctor` will report it.");
         }
     }
     Ok(())

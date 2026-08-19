@@ -2,7 +2,7 @@
 //!
 //! One generated canary is enrolled and then pushed through every shipped path:
 //! all four adapters, `status`, `doctor`, and a complete `setup` run. After each,
-//! the canary must be absent from stdout, stderr, every file SecretSieve wrote,
+//! the canary must be absent from stdout, stderr, every file ContextVeil wrote,
 //! and every diagnostic it produced.
 //!
 //! This is deliberately end to end through the built binary, so it also covers
@@ -12,7 +12,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use secretsieve::testing::{Canary, assert_canary_absent};
+use contextveil::testing::{Canary, assert_canary_absent};
 use serde_json::json;
 
 struct Machine {
@@ -29,23 +29,23 @@ impl Machine {
         // printed by design, and a fixture-shaped false positive would hide a
         // real leak.
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-leaks-{}-{}",
+            "contextveil-leaks-{}-{}",
             std::process::id(),
             Canary::generate("FIXTURE").token()
         ));
         let home = root.join("home");
         let project = home.join("project");
         std::fs::create_dir_all(project.join("nested")).expect("project");
-        std::fs::create_dir_all(home.join(".config").join("secretsieve")).expect("config");
+        std::fs::create_dir_all(home.join(".config").join("contextveil")).expect("config");
         std::fs::create_dir_all(home.join(".claude")).expect("claude");
 
         std::fs::write(
-            home.join(".config").join("secretsieve").join("config.toml"),
+            home.join(".config").join("contextveil").join("config.toml"),
             "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"LEAK_TOKEN\"\n",
         )
         .expect("global config");
         std::fs::write(
-            project.join(".secretsieve.toml"),
+            project.join(".contextveil.toml"),
             "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n",
         )
         .expect("project config");
@@ -74,7 +74,7 @@ impl Machine {
     }
 
     fn command(&self, arguments: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_secretsieve"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_contextveil"));
         command
             .args(arguments)
             .current_dir(self.project())
@@ -254,9 +254,9 @@ fn diagnostics_never_disclose_an_enrolled_value() {
 fn a_complete_setup_run_writes_no_value_anywhere() {
     // Setup is driven through the library so a scripted transcript can answer it;
     // the process-level surface is covered by the other tests here.
-    use secretsieve::setup;
-    use secretsieve::setup::ui::Terminal;
-    use secretsieve::source::Environment;
+    use contextveil::setup;
+    use contextveil::setup::ui::Terminal;
+    use contextveil::source::Environment;
 
     let machine = Machine::new();
     let environment = Environment::from_pairs([
@@ -277,18 +277,18 @@ fn a_complete_setup_run_writes_no_value_anywhere() {
             &mut terminal,
             &environment,
             &machine.project(),
-            Some(Path::new(env!("CARGO_BIN_EXE_secretsieve"))),
+            Some(Path::new(env!("CARGO_BIN_EXE_contextveil"))),
         )
     };
     assert_eq!(
         exit,
-        secretsieve::cli::Exit::Ok,
+        contextveil::cli::Exit::Ok,
         "{}",
         String::from_utf8_lossy(&transcript)
     );
 
     assert_canary_absent("setup transcript", &transcript, &machine.canary);
-    // Every file SecretSieve wrote, including the installed hook and the
+    // Every file ContextVeil wrote, including the installed hook and the
     // integration record, is value-free.
     machine.assert_files_clean();
 }
@@ -301,7 +301,7 @@ fn a_malfunction_on_every_adapter_discloses_nothing() {
         machine
             .home()
             .join(".config")
-            .join("secretsieve")
+            .join("contextveil")
             .join("config.toml"),
         "version = 1\n\n[[secret]]\nsource = \"unknown\"\n",
     )
@@ -399,13 +399,13 @@ fn terminal_hostile_names_and_paths_are_escaped_in_diagnostics() {
         machine
             .home()
             .join(".config")
-            .join("secretsieve")
+            .join("contextveil")
             .join("config.toml"),
         "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"\\u001b[31mLEAK_TOKEN\"\n",
     )
     .expect("write global config");
     std::fs::write(
-        machine.project().join(".secretsieve.toml"),
+        machine.project().join(".contextveil.toml"),
         "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"weird\\u001b[31mname.env\"\nkey = \"A\"\n",
     )
     .expect("write project config");

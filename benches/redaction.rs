@@ -10,8 +10,8 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use secretsieve::registry::{self, Outcome};
-use secretsieve::source::Environment;
+use contextveil::registry::{self, Outcome};
+use contextveil::source::Environment;
 
 const DOTENV_FILES: usize = 10;
 const KEYS_PER_FILE: usize = 10;
@@ -57,7 +57,7 @@ fn main() {
     let p50 = percentile(0.50);
     let p95 = percentile(0.95);
 
-    println!("SecretSieve redaction benchmark (RUN-005)");
+    println!("ContextVeil redaction benchmark (RUN-005)");
     println!("  payload         {} KiB", PAYLOAD_BYTES / 1024);
     println!("  active values   {active}");
     println!("  dotenv files    {DOTENV_FILES}");
@@ -83,9 +83,9 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let root = std::env::temp_dir().join(format!("secretsieve-bench-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("contextveil-bench-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("config").join("secretsieve")).expect("config directory");
+        std::fs::create_dir_all(root.join("config").join("contextveil")).expect("config directory");
         std::fs::create_dir_all(root.join("project")).expect("project directory");
 
         let mut project_config = String::from("version = 1\n");
@@ -103,12 +103,12 @@ impl Fixture {
             ));
         }
         std::fs::write(
-            root.join("project").join(".secretsieve.toml"),
+            root.join("project").join(".contextveil.toml"),
             project_config,
         )
         .expect("write project config");
         std::fs::write(
-            root.join("config").join("secretsieve").join("config.toml"),
+            root.join("config").join("contextveil").join("config.toml"),
             "version = 1\n",
         )
         .expect("write global config");

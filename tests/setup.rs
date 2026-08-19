@@ -10,11 +10,11 @@
 
 use std::path::{Path, PathBuf};
 
-use secretsieve::cli::Exit;
-use secretsieve::setup;
-use secretsieve::setup::ui::Terminal;
-use secretsieve::source::Environment;
-use secretsieve::testing::{Canary, assert_canary_absent};
+use contextveil::cli::Exit;
+use contextveil::setup;
+use contextveil::setup::ui::Terminal;
+use contextveil::source::Environment;
+use contextveil::testing::{Canary, assert_canary_absent};
 
 struct Fixture {
     root: PathBuf,
@@ -23,7 +23,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-setup-{}-{}",
+            "contextveil-setup-{}-{}",
             std::process::id(),
             Canary::generate("SETUP").token()
         ));
@@ -43,12 +43,12 @@ impl Fixture {
     fn global_config(&self) -> PathBuf {
         self.home()
             .join(".config")
-            .join("secretsieve")
+            .join("contextveil")
             .join("config.toml")
     }
 
     fn project_config(&self) -> PathBuf {
-        self.project().join(".secretsieve.toml")
+        self.project().join(".contextveil.toml")
     }
 
     fn write(&self, relative: &str, contents: &str) -> PathBuf {
@@ -94,7 +94,7 @@ impl Fixture {
                 &mut terminal,
                 environment,
                 directory,
-                Some(Path::new(env!("CARGO_BIN_EXE_secretsieve"))),
+                Some(Path::new(env!("CARGO_BIN_EXE_contextveil"))),
             )
         };
         (exit, String::from_utf8(output).expect("UTF-8 transcript"))
@@ -217,7 +217,7 @@ fn an_invalid_existing_config_is_preserved_byte_for_byte() {
     );
     // `CFG-014`: no other file is created either.
     assert!(!fixture.project_config().exists());
-    assert!(transcript.contains("not a valid SecretSieve configuration"));
+    assert!(transcript.contains("not a valid ContextVeil configuration"));
     assert!(transcript.contains("made no change"));
 }
 
@@ -460,7 +460,7 @@ fn the_project_root_is_selected_from_the_working_directory() {
     let (exit, _) = fixture.run_from(ACCEPT_ALL, &fixture.environment(&[]), &nested);
     assert_eq!(exit, Exit::Ok);
     assert!(fixture.project_config().exists());
-    assert!(!nested.join(".secretsieve.toml").exists());
+    assert!(!nested.join(".contextveil.toml").exists());
 }
 
 #[test]
@@ -702,7 +702,7 @@ fn an_experimental_integration_requires_an_affirmative_choice() {
 
 #[test]
 fn copilot_installs_one_dedicated_file_and_leaves_others_alone() {
-    // `COP-001`: only SecretSieve's own hook file is managed.
+    // `COP-001`: only ContextVeil's own hook file is managed.
     let fixture = Fixture::new();
     detect_claude(&fixture);
     let hooks = fixture.home().join(".copilot").join("hooks");
@@ -721,7 +721,7 @@ fn copilot_installs_one_dedicated_file_and_leaves_others_alone() {
     assert!(transcript.contains("/other/tool"));
 
     let managed: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(hooks.join("secretsieve.json")).expect("managed hook file"),
+        &std::fs::read_to_string(hooks.join("contextveil.json")).expect("managed hook file"),
     )
     .expect("valid JSON");
     assert_eq!(managed["version"], serde_json::json!(1));
@@ -739,13 +739,13 @@ fn copilot_installs_one_dedicated_file_and_leaves_others_alone() {
     // Deselecting removes only the managed file.
     let (exit, transcript) = fixture.run("\n\n3\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(!hooks.join("secretsieve.json").exists());
+    assert!(!hooks.join("contextveil.json").exists());
     assert!(other.exists());
 }
 
 #[test]
 fn opencode_installs_one_owned_plugin_file() {
-    // `OCO-001`: one SecretSieve-owned plugin file, opt-in like every
+    // `OCO-001`: one ContextVeil-owned plugin file, opt-in like every
     // experimental integration.
     let fixture = Fixture::new();
     detect_claude(&fixture);
@@ -765,15 +765,15 @@ fn opencode_installs_one_owned_plugin_file() {
     assert!(transcript.contains("Installed the OpenCode integration"));
     assert!(transcript.contains("other.ts"));
 
-    let plugin = std::fs::read_to_string(plugins.join("secretsieve.ts")).expect("plugin file");
-    assert!(plugin.starts_with("// SecretSieve managed plugin."));
+    let plugin = std::fs::read_to_string(plugins.join("contextveil.ts")).expect("plugin file");
+    assert!(plugin.starts_with("// ContextVeil managed plugin."));
     assert!(plugin.contains("chat.message"));
     assert!(plugin.contains("tool.execute.after"));
-    assert!(!plugin.contains("__SECRETSIEVE_BINARY__"));
+    assert!(!plugin.contains("__CONTEXTVEIL_BINARY__"));
 
     let (exit, transcript) = fixture.run("\n\n4\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(!plugins.join("secretsieve.ts").exists());
+    assert!(!plugins.join("contextveil.ts").exists());
     assert!(other.exists(), "unrelated plugins are never removed");
 }
 

@@ -181,12 +181,12 @@ impl Problem {
     fn message(&self) -> &'static str {
         match self {
             Problem::NotJson | Problem::NotAnObject => {
-                "SecretSieve could not parse the hook payload and made no change. \
-                 Run `secretsieve doctor`."
+                "ContextVeil could not parse the hook payload and made no change. \
+                 Run `contextveil doctor`."
             }
             Problem::UnknownEvent => {
-                "SecretSieve received an unexpected hook event and made no change. \
-                 Run `secretsieve doctor`."
+                "ContextVeil received an unexpected hook event and made no change. \
+                 Run `contextveil doctor`."
             }
         }
     }
@@ -222,17 +222,17 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-claude-{}-{}",
+                "contextveil-claude-{}-{}",
                 std::process::id(),
                 Canary::generate("FIXTURE").token()
             ));
-            std::fs::create_dir_all(root.join("secretsieve")).expect("fixture directory");
+            std::fs::create_dir_all(root.join("contextveil")).expect("fixture directory");
             Self { root }
         }
 
         fn enroll(&self, name: &str) {
             std::fs::write(
-                self.root.join("secretsieve").join("config.toml"),
+                self.root.join("contextveil").join("config.toml"),
                 format!("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"{name}\"\n"),
             )
             .expect("write global config");
@@ -339,7 +339,7 @@ mod tests {
         let canary = Canary::generate("GITHUB_TOKEN");
         let fixture = Fixture::new();
         std::fs::write(
-            fixture.root.join("secretsieve").join("config.toml"),
+            fixture.root.join("contextveil").join("config.toml"),
             "version = 1\n\n[[secret]]\nsource = \"nope\"\n",
         )
         .expect("write global config");
@@ -432,7 +432,7 @@ mod tests {
         let project = fixture.root.join("project");
         std::fs::create_dir_all(&project).expect("project directory");
         std::fs::write(
-            project.join(".secretsieve.toml"),
+            project.join(".contextveil.toml"),
             "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"PROJECT_TOKEN\"\n",
         )
         .expect("write project config");

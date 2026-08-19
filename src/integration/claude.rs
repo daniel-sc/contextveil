@@ -139,7 +139,7 @@ pub fn verify_offline(executable: &Path) -> Verification {
     let payload = json!({
         "hook_event_name": "PostToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "printenv SECRETSIEVE_VERIFY"},
+        "tool_input": {"command": "printenv CONTEXTVEIL_VERIFY"},
         "tool_response": {"stdout": canary.clone(), "stderr": "", "interrupted": false},
     })
     .to_string();
@@ -337,7 +337,7 @@ mod tests {
             "I can't run that command.",
             "",
             "The environment variable is not set.",
-            "printenv SECRETSIEVE_VERIFY",
+            "printenv CONTEXTVEIL_VERIFY",
         ] {
             assert_eq!(
                 classify_canary(reply.as_bytes(), value),
@@ -397,7 +397,7 @@ mod tests {
     impl Home {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-claude-integration-{}-{}",
+                "contextveil-claude-integration-{}-{}",
                 std::process::id(),
                 Canary::generate("HOME").token()
             ));
@@ -406,7 +406,7 @@ mod tests {
         }
 
         fn executable(&self) -> PathBuf {
-            let path = self.root.join("bin").join("secretsieve");
+            let path = self.root.join("bin").join("contextveil");
             std::fs::create_dir_all(path.parent().expect("parent")).expect("bin directory");
             if !path.exists() {
                 std::fs::write(&path, "#!/bin/sh\n").expect("write fake executable");

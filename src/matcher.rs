@@ -298,7 +298,7 @@ pub struct LabeledCount {
 
 impl Intervention {
     /// One-line, emit-safe summary for host UI, for example
-    /// `SecretSieve replaced 3 values (GITHUB_TOKEN x2, 1 unnamed)`.
+    /// `ContextVeil redacted 3 values (GITHUB_TOKEN x2, 1 unnamed)`.
     pub fn summary(&self) -> String {
         let plural = if self.total == 1 { "value" } else { "values" };
         let mut detail: Vec<String> = self
@@ -316,7 +316,7 @@ impl Intervention {
             detail.push(format!("{} unnamed", self.unnamed));
         }
         format!(
-            "SecretSieve replaced {} {plural} ({})",
+            "ContextVeil redacted {} {plural} ({})",
             self.total,
             detail.join(", ")
         )

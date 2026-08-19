@@ -11,8 +11,8 @@
 //! The named `TST-001` vectors have focused tests in `src/matcher.rs`; this file
 //! covers the same rules over generated input.
 
-use secretsieve::matcher::Redactor;
-use secretsieve::secret::{ResolvedSecret, SourceId};
+use contextveil::matcher::Redactor;
+use contextveil::secret::{ResolvedSecret, SourceId};
 
 /// A small xorshift generator. Deterministic and dependency-free.
 struct Rng(u64);

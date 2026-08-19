@@ -1,7 +1,7 @@
-# SecretSieve
+# ContextVeil
 
-SecretSieve is a local safety primitive that protects user-enrolled credential
-values at supported coding-agent model-context boundaries.
+ContextVeil is a local redaction primitive that keeps user-enrolled secrets out
+of supported coding-agent model-context boundaries.
 
 ## Language
 
@@ -29,7 +29,7 @@ _Avoid_: Global vault, system policy
 
 **Project Registry**:
 The project-scoped collection of enrolled sources described by the project's
-`.secretsieve.toml`.
+`.contextveil.toml`.
 _Avoid_: Repository vault, project secrets
 
 **Effective Registry**:
@@ -68,7 +68,7 @@ _Avoid_: Alert, policy violation
 
 **Adapter**:
 A harness-specific translator between a coding agent's extension protocol and
-the shared SecretSieve behavior.
+the shared ContextVeil behavior.
 _Avoid_: Security core, provider proxy
 
 **Coverage**:

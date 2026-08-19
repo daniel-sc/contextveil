@@ -1,7 +1,7 @@
 //! GitHub Copilot CLI integration installation, inspection, and verification.
 //!
 //! Copilot is experimental (`SUP-002`, `SUP-003`). `COP-001`: setup manages a
-//! dedicated SecretSieve hook file under `~/.copilot/hooks/` with a 5-second
+//! dedicated ContextVeil hook file under `~/.copilot/hooks/` with a 5-second
 //! timeout and never modifies an unrelated hook file.
 //!
 //! Verified against the GitHub Copilot CLI hooks reference (CLI 1.0.80): every
@@ -10,7 +10,7 @@
 //! flat object with `type`, `bash`, and a seconds-valued `timeoutSec`, the events
 //! are camelCase, and a structurally invalid file is rejected as a whole. Copilot
 //! also merges repository hooks and inline `settings.json` hooks, which
-//! SecretSieve neither writes nor inspects (`LIM-015`).
+//! ContextVeil neither writes nor inspects (`LIM-015`).
 
 use std::path::{Path, PathBuf};
 
@@ -27,8 +27,8 @@ use crate::sanitize;
 /// Hook timeout in seconds (`COP-001`, `RUN-004`).
 pub const TIMEOUT_SECONDS: u64 = 5;
 
-/// The dedicated file SecretSieve owns (`COP-001`).
-pub const FILENAME: &str = "secretsieve.json";
+/// The dedicated file ContextVeil owns (`COP-001`).
+pub const FILENAME: &str = "contextveil.json";
 
 /// Covered events and the hidden arguments that serve them (`COP-002`).
 const EVENTS: [(&str, &str); 2] = [
@@ -41,12 +41,12 @@ pub fn hooks_directory(home: &Path) -> PathBuf {
     home.join(".copilot").join("hooks")
 }
 
-/// Path of the dedicated SecretSieve hook file.
+/// Path of the dedicated ContextVeil hook file.
 pub fn hook_file(home: &Path) -> PathBuf {
     hooks_directory(home).join(FILENAME)
 }
 
-/// The file contents SecretSieve installs for `executable`.
+/// The file contents ContextVeil installs for `executable`.
 fn managed_file(executable: &Path) -> Value {
     let quoted = shell_quote(&executable.to_string_lossy());
     let mut hooks = Map::new();
@@ -70,7 +70,7 @@ fn render(executable: &Path) -> String {
     rendered
 }
 
-/// True when `command` is a SecretSieve Copilot hook command.
+/// True when `command` is a ContextVeil Copilot hook command.
 fn is_managed_command(command: &str) -> bool {
     EVENTS.iter().any(|(_, arguments)| {
         command
@@ -109,7 +109,7 @@ pub fn inspect(
 
 /// Classifies the dedicated file (`INT-004`).
 ///
-/// `Outdated` means only the embedded binary path differs, which SecretSieve may
+/// `Outdated` means only the embedded binary path differs, which ContextVeil may
 /// rewrite. Any other difference, such as a hand-edited timeout, means the file
 /// was edited and is preserved rather than reverted or deleted.
 fn classify(path: &Path, executable: Option<&Path>) -> Installed {
@@ -126,7 +126,7 @@ fn classify(path: &Path, executable: Option<&Path>) -> Installed {
         command: sanitize::text(&commands.join(", ")),
     };
     if commands.is_empty() || !commands.iter().all(|command| is_managed_command(command)) {
-        // The dedicated name is SecretSieve's, but this content is not ours.
+        // The dedicated name is ContextVeil's, but this content is not ours.
         return modified();
     }
     if executable.is_some_and(|executable| text == render(executable)) {
@@ -271,7 +271,7 @@ pub fn install(home: &Path, executable: &Path, state: &mut State) -> Result<(), 
 /// Removes the dedicated hook file.
 ///
 /// Returns `Ok(false)` when the file was preserved because its content is not
-/// SecretSieve's (`INT-004`). Unrelated hook files are never touched
+/// ContextVeil's (`INT-004`). Unrelated hook files are never touched
 /// (`COP-001`).
 pub fn remove(home: &Path, state: &mut State) -> Result<bool, InstallError> {
     let path = hook_file(home);
@@ -325,7 +325,7 @@ pub fn verify_offline(executable: &Path) -> Verification {
         "timestamp": 0,
         "cwd": "/nonexistent-synthetic-project",
         "toolName": "shell",
-        "toolArgs": {"command": "printenv SECRETSIEVE_VERIFY"},
+        "toolArgs": {"command": "printenv CONTEXTVEIL_VERIFY"},
         "toolResult": {"resultType": "success", "textResultForLlm": canary.clone()},
     })
     .to_string();
@@ -381,7 +381,7 @@ mod tests {
     impl Home {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-copilot-integration-{}-{}",
+                "contextveil-copilot-integration-{}-{}",
                 std::process::id(),
                 Canary::generate("HOME").token()
             ));
@@ -390,7 +390,7 @@ mod tests {
         }
 
         fn executable(&self) -> PathBuf {
-            let path = self.root.join("bin").join("secretsieve");
+            let path = self.root.join("bin").join("contextveil");
             std::fs::create_dir_all(path.parent().expect("parent")).expect("bin directory");
             if !path.exists() {
                 std::fs::write(&path, "#!/bin/sh\n").expect("write fake executable");
@@ -599,7 +599,7 @@ mod tests {
     fn an_outdated_file_is_updated_in_place() {
         let home = Home::new();
         let mut state = State::default();
-        let other = home.root.join("bin").join("other-secretsieve");
+        let other = home.root.join("bin").join("other-contextveil");
         std::fs::create_dir_all(other.parent().expect("parent")).expect("bin directory");
         std::fs::write(&other, "#!/bin/sh\n").expect("write other executable");
 

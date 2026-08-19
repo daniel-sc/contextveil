@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
-use secretsieve::testing::{Canary, assert_canary_absent};
+use contextveil::testing::{Canary, assert_canary_absent};
 use serde_json::{Value, json};
 
 struct Home {
@@ -19,16 +19,16 @@ struct Home {
 impl Home {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-codex-e2e-{}-{}",
+            "contextveil-codex-e2e-{}-{}",
             std::process::id(),
             Canary::generate("HOME").token()
         ));
-        std::fs::create_dir_all(root.join("secretsieve")).expect("config directory");
+        std::fs::create_dir_all(root.join("contextveil")).expect("config directory");
         Self { root }
     }
 
     fn write_global_config(&self, contents: &str) {
-        std::fs::write(self.root.join("secretsieve").join("config.toml"), contents)
+        std::fs::write(self.root.join("contextveil").join("config.toml"), contents)
             .expect("write global config");
     }
 
@@ -39,7 +39,7 @@ impl Home {
     }
 
     fn run_hook(&self, payload: &str, variables: &[(&str, &str)]) -> Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_secretsieve"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_contextveil"));
         command
             .args(["hook", "codex"])
             .env_clear()
@@ -52,7 +52,7 @@ impl Home {
             command.env(key, value);
         }
 
-        let mut child = command.spawn().expect("the secretsieve binary runs");
+        let mut child = command.spawn().expect("the contextveil binary runs");
         child
             .stdin
             .as_mut()
@@ -228,7 +228,7 @@ fn a_project_registry_is_selected_from_the_event_cwd() {
     let project = home.root.join("project");
     std::fs::create_dir_all(&project).expect("project directory");
     std::fs::write(
-        project.join(".secretsieve.toml"),
+        project.join(".contextveil.toml"),
         "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"PROJECT_TOKEN\"\n",
     )
     .expect("write project config");
