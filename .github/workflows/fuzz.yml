@@ -30,8 +30,8 @@ jobs:
       # passed in.
       - run: mise run fuzz-smoke
         env:
-          SECRETSIEVE_FUZZ_SECONDS: ${{ inputs.seconds || '300' }}
-          SECRETSIEVE_FUZZ_ITERATIONS: "200000"
+          CONTEXTVEIL_FUZZ_SECONDS: ${{ inputs.seconds || '300' }}
+          CONTEXTVEIL_FUZZ_ITERATIONS: "200000"
 
       - name: Upload promoted regressions
         if: failure()

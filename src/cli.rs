@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 
 use crate::source::Environment;
 
-/// Process exit status for every SecretSieve command.
+/// Process exit status for every ContextVeil command.
 ///
 /// `CLI-004` through `CLI-006` constrain the meaning of each value: zero on
 /// success, one for a diagnosed failure, and two for invalid usage or an
@@ -96,10 +96,10 @@ impl ParseError {
 }
 
 const HELP: &str = "\
-secretsieve - keep enrolled local credentials out of coding-agent model context
+contextveil - keep enrolled local secrets out of coding-agent model context
 
 USAGE:
-    secretsieve <COMMAND>
+    contextveil <COMMAND>
 
 COMMANDS:
     setup     Enroll local sources and install coding-agent integrations
@@ -111,7 +111,7 @@ OPTIONS:
     -V, --version    Print version information
 
 Setup is interactive and requires a terminal. Configuration lives in
-${XDG_CONFIG_HOME:-~/.config}/secretsieve/config.toml and in .secretsieve.toml
+${XDG_CONFIG_HOME:-~/.config}/contextveil/config.toml and in .contextveil.toml
 at the selected project root.
 ";
 
@@ -132,7 +132,7 @@ pub fn run(
             Exit::Ok
         }
         Ok(Command::Version) => {
-            let _ = writeln!(out, "secretsieve {}", crate::VERSION);
+            let _ = writeln!(out, "contextveil {}", crate::VERSION);
             Exit::Ok
         }
         Ok(Command::Setup) => run_setup(err),
@@ -150,8 +150,8 @@ pub fn run(
             run_copilot_hook(event.as_deref(), input, out, err)
         }
         Err(error) => {
-            let _ = writeln!(err, "secretsieve: {}", error.message());
-            let _ = writeln!(err, "Run `secretsieve --help` for usage.");
+            let _ = writeln!(err, "contextveil: {}", error.message());
+            let _ = writeln!(err, "Run `contextveil --help` for usage.");
             Exit::Usage
         }
     }
@@ -213,7 +213,7 @@ fn run_setup(err: &mut dyn Write) -> Exit {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         let _ = writeln!(
             err,
-            "secretsieve: `setup` requires an interactive terminal. No file was changed."
+            "contextveil: `setup` requires an interactive terminal. No file was changed."
         );
         return Exit::Usage;
     }
@@ -259,7 +259,7 @@ fn run_copilot_hook(
     err: &mut dyn Write,
 ) -> Exit {
     let Some(event) = event.and_then(crate::adapter::copilot::Event::parse) else {
-        let _ = writeln!(err, "secretsieve: unknown hook event");
+        let _ = writeln!(err, "contextveil: unknown hook event");
         return Exit::Usage;
     };
     let payload = read_payload(input);
@@ -381,7 +381,7 @@ mod tests {
     fn version_reports_the_package_version() {
         let (exit, out, _) = invoke(&["--version"]);
         assert_eq!(exit, Exit::Ok);
-        assert_eq!(out.trim(), format!("secretsieve {}", crate::VERSION));
+        assert_eq!(out.trim(), format!("contextveil {}", crate::VERSION));
     }
 
     #[test]

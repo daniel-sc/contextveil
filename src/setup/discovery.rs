@@ -174,7 +174,7 @@ pub fn global_dotenv_files(home: &Path) -> Vec<Discovered> {
     for harness in [".claude", ".codex", ".copilot"] {
         directories.push(home.join(harness));
     }
-    for config in ["opencode", "secretsieve"] {
+    for config in ["opencode", "contextveil"] {
         directories.push(home.join(".config").join(config));
     }
 
@@ -261,7 +261,7 @@ mod tests {
     impl Tree {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-discovery-{}-{}",
+                "contextveil-discovery-{}-{}",
                 std::process::id(),
                 Canary::generate("TREE").token()
             ));

@@ -44,8 +44,8 @@ impl Warning {
     pub fn message(&self) -> &'static str {
         match self {
             Warning::GlobalConfigMissing => {
-                "SecretSieve global setup is incomplete: no global configuration file was found. \
-                 Run `secretsieve setup`."
+                "ContextVeil global setup is incomplete: no global configuration file was found. \
+                 Run `contextveil setup`."
             }
         }
     }
@@ -83,7 +83,7 @@ impl Malfunction {
             }
         };
         format!(
-            "SecretSieve disabled redaction for this event: {detail}. Run `secretsieve doctor`."
+            "ContextVeil disabled redaction for this event: {detail}. Run `contextveil doctor`."
         )
     }
 }
@@ -184,11 +184,11 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-registry-{}-{}",
+                "contextveil-registry-{}-{}",
                 std::process::id(),
                 Canary::generate("FIXTURE").token()
             ));
-            std::fs::create_dir_all(root.join("config").join("secretsieve"))
+            std::fs::create_dir_all(root.join("config").join("contextveil"))
                 .expect("global config directory");
             std::fs::create_dir_all(root.join("project").join("nested"))
                 .expect("project directories");
@@ -199,7 +199,7 @@ mod tests {
             std::fs::write(
                 self.root
                     .join("config")
-                    .join("secretsieve")
+                    .join("contextveil")
                     .join("config.toml"),
                 contents,
             )
@@ -208,7 +208,7 @@ mod tests {
 
         fn write_project(&self, contents: &str) {
             std::fs::write(
-                self.root.join("project").join(".secretsieve.toml"),
+                self.root.join("project").join(".contextveil.toml"),
                 contents,
             )
             .expect("write project config");
@@ -286,7 +286,7 @@ mod tests {
         assert!(registry.warnings.is_empty());
         assert_eq!(
             registry.project_config,
-            Some(fixture.project_root().join(".secretsieve.toml"))
+            Some(fixture.project_root().join(".contextveil.toml"))
         );
     }
 
@@ -324,7 +324,7 @@ mod tests {
                 .root
                 .join("project")
                 .join("nested")
-                .join(".secretsieve.toml"),
+                .join(".contextveil.toml"),
             "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"INNER\"\n",
         )
         .expect("write nested config");

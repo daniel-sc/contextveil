@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# SecretSieve installer and upgrader (`REL-002` through `REL-004`).
+# ContextVeil installer and upgrader (`REL-002` through `REL-004`).
 #
 # It installs or upgrades the standalone binary only. It never runs setup, never
-# edits SecretSieve configuration, and never touches coding-agent configuration
+# edits ContextVeil configuration, and never touches coding-agent configuration
 # (`REL-003`). Every download is verified against the release checksum file
 # before it replaces anything.
 #
@@ -21,14 +21,14 @@
 # The two environment variables below exist so `mise run release-check` can
 # exercise this script against locally produced artifacts. They are not part of
 # the supported interface.
-#   SECRETSIEVE_RELEASE_INDEX  URL of a JSON document listing release tags
-#   SECRETSIEVE_RELEASE_BASE   URL prefix that holds the release assets
+#   CONTEXTVEIL_RELEASE_INDEX  URL of a JSON document listing release tags
+#   CONTEXTVEIL_RELEASE_BASE   URL prefix that holds the release assets
 set -euo pipefail
 
-REPOSITORY="daniel-sc/secretsieve"
+REPOSITORY="daniel-sc/contextveil"
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
-RELEASE_INDEX="${SECRETSIEVE_RELEASE_INDEX:-https://api.github.com/repos/${REPOSITORY}/releases?per_page=100}"
-RELEASE_BASE="${SECRETSIEVE_RELEASE_BASE:-https://github.com/${REPOSITORY}/releases/download}"
+RELEASE_INDEX="${CONTEXTVEIL_RELEASE_INDEX:-https://api.github.com/repos/${REPOSITORY}/releases?per_page=100}"
+RELEASE_BASE="${CONTEXTVEIL_RELEASE_BASE:-https://github.com/${REPOSITORY}/releases/download}"
 
 install_dir="${DEFAULT_INSTALL_DIR}"
 requested_version=""
@@ -50,7 +50,7 @@ Usage: install.sh [--install-dir DIR] [--version VERSION] [--allow-major-upgrade
   -h, --help              Show this help
 
 The installer only installs or upgrades the binary. It never runs setup and never
-changes SecretSieve or coding-agent configuration.
+changes ContextVeil or coding-agent configuration.
 USAGE
 }
 
@@ -132,7 +132,7 @@ fetch() {
 installed_version() {
   local binary="$1"
   [ -x "${binary}" ] || return 1
-  "${binary}" --version 2>/dev/null | awk '/^secretsieve /{print $2; exit}'
+  "${binary}" --version 2>/dev/null | awk '/^contextveil /{print $2; exit}'
 }
 
 major_of() {
@@ -195,28 +195,28 @@ require_tool tar
 require_tool uname
 
 target="$(detect_target)"
-binary_path="${install_dir}/secretsieve"
+binary_path="${install_dir}/contextveil"
 current_version="$(installed_version "${binary_path}" || true)"
 version="$(select_version "${current_version}")"
 
 if [ -n "${current_version}" ]; then
-  printf 'install.sh: found secretsieve %s in %s\n' "${current_version}" "${install_dir}"
+  printf 'install.sh: found contextveil %s in %s\n' "${current_version}" "${install_dir}"
   if [ "$(major_of "${version}")" != "$(major_of "${current_version}")" ] &&
     [ "${allow_major_upgrade}" != "yes" ]; then
     fail "installing ${version} would cross major version $(major_of "${current_version}"); rerun with --allow-major-upgrade"
   fi
   if [ "${version}" = "${current_version}" ]; then
-    printf 'install.sh: secretsieve %s is already installed\n' "${version}"
+    printf 'install.sh: contextveil %s is already installed\n' "${version}"
     exit 0
   fi
 fi
 
-archive="secretsieve-${version}-${target}.tar.gz"
-checksums="secretsieve-${version}-SHA256SUMS"
+archive="contextveil-${version}-${target}.tar.gz"
+checksums="contextveil-${version}-SHA256SUMS"
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 
-printf 'install.sh: downloading secretsieve %s for %s\n' "${version}" "${target}"
+printf 'install.sh: downloading contextveil %s for %s\n' "${version}" "${target}"
 fetch "${RELEASE_BASE}/v${version}/${archive}" "${work}/${archive}" ||
   fail "the release archive could not be downloaded"
 fetch "${RELEASE_BASE}/v${version}/${checksums}" "${work}/${checksums}" ||
@@ -233,27 +233,27 @@ printf 'install.sh: checksum verified\n'
 # Extract only the one member that is installed. A hostile archive therefore
 # cannot write anywhere else, and a member that is a symlink rather than a
 # regular file is refused instead of followed.
-tar -xzf "${work}/${archive}" -C "${work}" secretsieve ||
-  fail "the release archive does not contain an extractable \`secretsieve\`"
-if [ -L "${work}/secretsieve" ] || [ ! -f "${work}/secretsieve" ]; then
-  fail "the release archive does not contain \`secretsieve\` as a regular file"
+tar -xzf "${work}/${archive}" -C "${work}" contextveil ||
+  fail "the release archive does not contain an extractable \`contextveil\`"
+if [ -L "${work}/contextveil" ] || [ ! -f "${work}/contextveil" ]; then
+  fail "the release archive does not contain \`contextveil\` as a regular file"
 fi
-chmod 755 "${work}/secretsieve"
+chmod 755 "${work}/contextveil"
 
 mkdir -p "${install_dir}" || fail "${install_dir} could not be created"
 # Replace atomically: stage next to the target so the rename cannot cross a
 # filesystem boundary, then rename over it.
-staged="${install_dir}/.secretsieve.install.$$"
-cp "${work}/secretsieve" "${staged}" || fail "${install_dir} is not writable"
+staged="${install_dir}/.contextveil.install.$$"
+cp "${work}/contextveil" "${staged}" || fail "${install_dir} is not writable"
 chmod 755 "${staged}"
 mv -f "${staged}" "${binary_path}" || {
   rm -f "${staged}"
   fail "the binary could not be moved into place"
 }
 
-printf 'install.sh: installed secretsieve %s to %s\n' "${version}" "${binary_path}"
+printf 'install.sh: installed contextveil %s to %s\n' "${version}" "${binary_path}"
 case ":${PATH}:" in
   *":${install_dir}:"*) ;;
-  *) printf 'install.sh: add %s to your PATH to run `secretsieve`\n' "${install_dir}" ;;
+  *) printf 'install.sh: add %s to your PATH to run `contextveil`\n' "${install_dir}" ;;
 esac
-printf 'install.sh: nothing else was changed. Run `secretsieve setup` when you are ready.\n'
+printf 'install.sh: nothing else was changed. Run `contextveil setup` when you are ready.\n'

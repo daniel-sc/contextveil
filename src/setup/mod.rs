@@ -62,7 +62,7 @@ pub fn run(
     let home = environment.home();
     let Some(global_path) = config::global_config_path(environment) else {
         terminal.line(
-            "secretsieve: the configuration location could not be determined. Set HOME or \
+            "contextveil: the configuration location could not be determined. Set HOME or \
              XDG_CONFIG_HOME.",
         );
         return Exit::Failure;
@@ -70,7 +70,7 @@ pub fn run(
     let project_root = paths::setup_project_root(current_directory);
     let project_path = project_root.join(PROJECT_CONFIG_FILENAME);
 
-    terminal.line("SecretSieve setup");
+    terminal.line("ContextVeil setup");
     terminal.line("Complete values are never shown, stored, or sent anywhere.");
     terminal.blank();
 
@@ -119,7 +119,7 @@ pub fn run(
         && let Err(error) = write::write(&project_path, &project_sources, false)
     {
         terminal.line(&format!(
-            "secretsieve: `{}` could not be written because {}.",
+            "contextveil: `{}` could not be written because {}.",
             sanitize::path(&project_path),
             error.reason()
         ));
@@ -165,7 +165,7 @@ fn preflight(
 /// `CFG-014`: show where the problem is and change nothing.
 fn report_invalid(terminal: &mut Terminal<'_>, error: &ConfigError) {
     terminal.line(&format!(
-        "secretsieve: `{}` is not a valid SecretSieve configuration: {}.",
+        "contextveil: `{}` is not a valid ContextVeil configuration: {}.",
         sanitize::path(&error.path),
         error.kind.reason()
     ));
@@ -225,7 +225,7 @@ fn enrollment_phase(
                     }
                     Err(error) => {
                         terminal.line(&format!(
-                            "secretsieve: `{}` could not be written because {}.",
+                            "contextveil: `{}` could not be written because {}.",
                             sanitize::path(config_path),
                             error.reason()
                         ));

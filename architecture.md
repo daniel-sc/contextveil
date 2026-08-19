@@ -1,6 +1,6 @@
-# SecretSieve Architecture
+# ContextVeil Architecture
 
-This document defines mandatory technical boundaries for SecretSieve V1. It is
+This document defines mandatory technical boundaries for ContextVeil V1. It is
 authoritative for implementation structure; [specification.md](specification.md)
 is authoritative for observable behavior. A conflict between the two must be
 resolved explicitly before implementation continues.
@@ -19,7 +19,7 @@ resolved explicitly before implementation continues.
 ## System Shape
 
 ```text
-                         SecretSieve Rust binary
+                         ContextVeil Rust binary
 ┌──────────────────────────────────────────────────────────────────┐
 │ CLI                                                              │
 │ setup | status | doctor                                          │
@@ -166,7 +166,7 @@ effective registry by being invalid. This is an accepted boundary documented in
 validation.
 
 Integration ownership metadata may live in a separate file under the global
-SecretSieve config directory so policy TOML remains comprehensible. It must not
+ContextVeil config directory so policy TOML remains comprehensible. It must not
 contain resolved values or be treated as proof of health.
 
 Config parsing is strict and versioned. Within major version 1, newer binaries
@@ -310,7 +310,7 @@ for reproducibility.
 
 V1 produces checksummed standalone artifacts for Linux and macOS on x86_64 and
 arm64. A maintained installer verifies the checksum and atomically places the
-binary at a user-selected location, defaulting to `~/.local/bin/secretsieve`.
+binary at a user-selected location, defaulting to `~/.local/bin/contextveil`.
 The installer does not run setup or edit harness configuration.
 
 Ordinary upgrades stay within the installed major version. Incompatible major

@@ -99,7 +99,7 @@ pub fn handle(payload: &str, environment: &Environment) -> Response {
     let summary = intervention
         .as_ref()
         .map(|intervention| intervention.summary())
-        .unwrap_or_else(|| "SecretSieve replaced enrolled values".to_string());
+        .unwrap_or_else(|| "ContextVeil redacted enrolled values".to_string());
     if let Some(intervention) = &intervention {
         messages.push(intervention.summary());
     }
@@ -167,12 +167,12 @@ impl Problem {
     fn message(&self) -> &'static str {
         match self {
             Problem::NotAnObject => {
-                "SecretSieve could not parse the hook payload and made no change. \
-                 Run `secretsieve doctor`."
+                "ContextVeil could not parse the hook payload and made no change. \
+                 Run `contextveil doctor`."
             }
             Problem::UnknownEvent => {
-                "SecretSieve received an unexpected hook event and made no change. \
-                 Run `secretsieve doctor`."
+                "ContextVeil received an unexpected hook event and made no change. \
+                 Run `contextveil doctor`."
             }
         }
     }
@@ -206,16 +206,16 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-codex-{}-{}",
+                "contextveil-codex-{}-{}",
                 std::process::id(),
                 Canary::generate("CODEX").token()
             ));
-            std::fs::create_dir_all(root.join("secretsieve")).expect("config directory");
+            std::fs::create_dir_all(root.join("contextveil")).expect("config directory");
             Self { root }
         }
 
         fn write_global(&self, contents: &str) {
-            std::fs::write(self.root.join("secretsieve").join("config.toml"), contents)
+            std::fs::write(self.root.join("contextveil").join("config.toml"), contents)
                 .expect("write global config");
         }
 

@@ -2,7 +2,7 @@
 //
 // The plugin is loaded from the same template the installer ships, with the
 // binary path substituted exactly as `integration::opencode::render` does, and it
-// is driven against the real SecretSieve binary over the documented transport.
+// is driven against the real ContextVeil binary over the documented transport.
 //
 // Run it with `mise run test-plugin`.
 
@@ -13,9 +13,9 @@ import { join, resolve } from "node:path";
 
 const TEMPLATE = resolve(import.meta.dir, "../../assets/opencode/plugin.ts");
 const BINARY = resolve(
-  process.env.SECRETSIEVE_TEST_BINARY ?? "target/debug/secretsieve",
+  process.env.CONTEXTVEIL_TEST_BINARY ?? "target/debug/contextveil",
 );
-const MISSING_BINARY = "/nonexistent/secretsieve";
+const MISSING_BINARY = "/nonexistent/contextveil";
 
 let workspace: string;
 let invalidProtocolStub: string;
@@ -39,7 +39,7 @@ async function writeInstances(binaries: string[]) {
     const instance = join(workspace, `plugin-${index}.ts`);
     writeFileSync(
       instance,
-      source.replace('"__SECRETSIEVE_BINARY__"', JSON.stringify(binary)),
+      source.replace('"__CONTEXTVEIL_BINARY__"', JSON.stringify(binary)),
     );
     instances.set(binary, instance);
   }
@@ -80,12 +80,12 @@ function recordingClient(options: { failing?: boolean } = {}) {
   };
 }
 
-/** Points SecretSieve at a temporary configuration enrolling one variable. */
+/** Points ContextVeil at a temporary configuration enrolling one variable. */
 function enroll(name: string, value: string) {
-  const root = mkdtempSync(join(tmpdir(), "secretsieve-plugin-config-"));
-  mkdirSync(join(root, "secretsieve"), { recursive: true });
+  const root = mkdtempSync(join(tmpdir(), "contextveil-plugin-config-"));
+  mkdirSync(join(root, "contextveil"), { recursive: true });
   writeFileSync(
-    join(root, "secretsieve", "config.toml"),
+    join(root, "contextveil", "config.toml"),
     `version = 1\n\n[[secret]]\nsource = "env"\nname = "${name}"\n`,
   );
   process.env.XDG_CONFIG_HOME = root;
@@ -93,12 +93,12 @@ function enroll(name: string, value: string) {
   return root;
 }
 
-/** Points SecretSieve at an invalid configuration. */
+/** Points ContextVeil at an invalid configuration. */
 function enrollInvalid() {
-  const root = mkdtempSync(join(tmpdir(), "secretsieve-plugin-broken-"));
-  mkdirSync(join(root, "secretsieve"), { recursive: true });
+  const root = mkdtempSync(join(tmpdir(), "contextveil-plugin-broken-"));
+  mkdirSync(join(root, "contextveil"), { recursive: true });
   writeFileSync(
-    join(root, "secretsieve", "config.toml"),
+    join(root, "contextveil", "config.toml"),
     'version = 1\n\n[[secret]]\nsource = "nope"\n',
   );
   process.env.XDG_CONFIG_HOME = root;
@@ -108,7 +108,7 @@ function enrollInvalid() {
 const CANARY = `SSCANARY-PLUGIN-${crypto.randomUUID()}`;
 
 beforeAll(async () => {
-  workspace = mkdtempSync(join(tmpdir(), "secretsieve-plugin-"));
+  workspace = mkdtempSync(join(tmpdir(), "contextveil-plugin-"));
   invalidProtocolStub = join(workspace, "invalid-protocol.sh");
   failingStub = join(workspace, "failing.sh");
   await writeInstances([
@@ -261,7 +261,7 @@ test("a notification failure does not undo the mutation", async () => {
 });
 
 test("an incomplete global setup is surfaced as a warning toast", async () => {
-  const root = mkdtempSync(join(tmpdir(), "secretsieve-plugin-empty-"));
+  const root = mkdtempSync(join(tmpdir(), "contextveil-plugin-empty-"));
   process.env.XDG_CONFIG_HOME = root;
   const client = recordingClient();
   const hooks = await loadPlugin(BINARY, client);

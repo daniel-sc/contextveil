@@ -1,6 +1,6 @@
 # Security Policy
 
-SecretSieve is a local safety primitive. Please read
+ContextVeil is a local model-context redaction primitive. Please read
 [limitations.md](limitations.md) before reporting: several gaps are deliberate,
 documented parts of the V1 boundary rather than vulnerabilities.
 
@@ -8,13 +8,13 @@ documented parts of the V1 boundary rather than vulnerabilities.
 
 Report suspected vulnerabilities privately through GitHub Security Advisories:
 
-<https://github.com/daniel-sc/secretsieve/security/advisories/new>
+<https://github.com/daniel-sc/contextveil/security/advisories/new>
 
 Please do not open a public issue for an unfixed vulnerability.
 
 Include:
 
-- affected version (`secretsieve --version`) and platform;
+- affected version (`contextveil --version`) and platform;
 - the coding-agent harness and integration involved, if any;
 - reproduction steps and observed versus expected behavior;
 - the impact you believe the issue has.
@@ -37,7 +37,7 @@ the report.
   configuration, error output, or intervention metadata.
 - Failure to redact an enrolled value on a covered adapter path that the support
   matrix presents as protected.
-- Terminal escape, path, or label injection through SecretSieve output.
+- Terminal escape, path, or label injection through ContextVeil output.
 - Configuration or integration installation that corrupts unrelated user or
   harness configuration.
 - Execution of untrusted content by the configuration or dotenv parsers.

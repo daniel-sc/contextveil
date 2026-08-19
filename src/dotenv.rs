@@ -2,7 +2,7 @@
 //!
 //! `SRC-003` fixes the grammar exactly. The parser performs no variable
 //! interpolation, command substitution, or code execution, and it imposes no
-//! SecretSieve-specific size cap (`SRC-008`, `LIM-010`).
+//! ContextVeil-specific size cap (`SRC-008`, `LIM-010`).
 //!
 //! Malformed syntax is a malfunction (`SRC-006`), not an unresolved source, so
 //! the caller must disable the whole effective registry for the event.

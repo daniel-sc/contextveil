@@ -61,8 +61,8 @@ plugin suite) passed in full, with no failing test.
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | CFG-001 | Global config path is XDG-based; directory/file are user-only | src/config.rs (`global_config_path`); src/setup/write.rs (0o700/0o600 permissions) | config.rs unit test on the XDG path; write.rs permission-mode test | covered |
-| CFG-002 | Project config filename is `.secretsieve.toml` | src/paths.rs (`PROJECT_CONFIG_FILENAME`) | tests/setup.rs (literal filename used throughout) | covered |
-| CFG-003 | Setup project root: nearest `.secretsieve.toml`, else Git worktree root, else cwd | src/paths.rs (`setup_project_root`) | paths.rs::project_root_selection_prefers_the_nearest_config, ::project_root_falls_back_to_the_git_worktree_then_the_directory, ::a_git_file_marks_a_worktree_root; tests/setup.rs::the_project_root_is_selected_from_the_working_directory | covered |
+| CFG-002 | Project config filename is `.contextveil.toml` | src/paths.rs (`PROJECT_CONFIG_FILENAME`) | tests/setup.rs (literal filename used throughout) | covered |
+| CFG-003 | Setup project root: nearest `.contextveil.toml`, else Git worktree root, else cwd | src/paths.rs (`setup_project_root`) | paths.rs::project_root_selection_prefers_the_nearest_config, ::project_root_falls_back_to_the_git_worktree_then_the_directory, ::a_git_file_marks_a_worktree_root; tests/setup.rs::the_project_root_is_selected_from_the_working_directory | covered |
 | CFG-004 | Runtime uses at most one, nearest-ancestor project registry; no merging | src/paths.rs (`runtime_project_config`); src/registry.rs (`build`) | registry.rs fixture asserting exactly one project registry is used | covered |
 | CFG-005 | Per-adapter project root selection (Claude/OpenCode stable root; Codex/Copilot may use cwd) | src/adapter/claude.rs (project root from host field); src/adapter/opencode.rs (`Request.project_root`); Codex/Copilot adapters use event `cwd` | claude.rs::the_project_registry_is_selected_from_the_host_project_directory; tests/codex_hook.rs and tests/copilot_hook.rs::a_project_registry_is_selected_from_the_event_cwd | covered |
 | CFG-006 | `version = 1` required; unknown fields/types/malformed entries/duplicate identities invalidate the file | src/config.rs (`parse`, `parse_entry`); src/paths.rs (identity normalization) | config.rs::the_version_is_required_and_pinned, ::unknown_fields_invalidate_the_file, ::unknown_source_types_invalidate_the_file, ::identity_is_computed_after_expansion_and_normalization, ::duplicate_identities_in_one_file_are_rejected, ::a_keyed_entry_and_a_wildcard_entry_for_one_file_may_coexist | covered |
@@ -92,7 +92,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | SRC-005 | Absent file/key or empty value is unresolved, not a malfunction | src/source.rs (`Resolution::Unresolved`) | source.rs::absent_files_keys_and_empty_values_are_unresolved | covered |
 | SRC-006 | Permission denial, malformed dotenv, invalid UTF-8, or I/O failure disables the whole effective registry | src/source.rs (`SourceMalfunction`) | source.rs::malformed_and_invalid_utf8_files_are_malfunctions, ::an_unreadable_file_is_a_malfunction; src/registry.rs all-or-nothing tests | covered |
 | SRC-007 | A wildcard entry resolves every current non-empty key without another setup run | src/source.rs (`Resolver::resolve`, `DotenvAll` arm) | source.rs::a_wildcard_entry_resolves_every_current_non_empty_key | covered |
-| SRC-008 | No SecretSieve-specific dotenv size cap | src/dotenv.rs (linear parser, no size check) | tests/limits.rs (large-dotenv-file case); covered-by-design: absence of any cap-checking code | covered |
+| SRC-008 | No ContextVeil-specific dotenv size cap | src/dotenv.rs (linear parser, no size check) | tests/limits.rs (large-dotenv-file case); covered-by-design: absence of any cap-checking code | covered |
 | SRC-009 | Sources resolved afresh per event; no cross-process cache or rotation history | src/source.rs (`Resolver` constructed per event; a file is read once per event only) | source.rs::a_file_is_read_once_per_event_and_duplicates_are_recorded | covered |
 | SRC-010 | Dotenv changes observable next event; env changes need a harness restart | src/source.rs (doc comment tying this to SRC-009's per-event `Resolver`) | covered-by-design: an architectural consequence of a fresh `Resolver` per event plus process-immutable `Environment::from_process()`; not independently testable in-process (would require spawning a new harness process) | covered-by-design |
 
@@ -154,7 +154,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
-| INT-001 | Detect all four harnesses; Claude selected by default; experimental integrations unselected unless already SecretSieve-installed | src/setup/integrations.rs (default-selection logic); src/integration/mod.rs (`Tier`) | src/integration/mod.rs::only_claude_is_production; tests/setup.rs::an_experimental_integration_requires_an_affirmative_choice | covered |
+| INT-001 | Detect all four harnesses; Claude selected by default; experimental integrations unselected unless already ContextVeil-installed | src/setup/integrations.rs (default-selection logic); src/integration/mod.rs (`Tier`) | src/integration/mod.rs::only_claude_is_production; tests/setup.rs::an_experimental_integration_requires_an_affirmative_choice | covered |
 | INT-002 | A user may install an undetected harness; setup discloses limited verification | src/setup/integrations.rs (undetected-harness path) | tests/setup.rs::an_undetected_harness_discloses_limited_verification | covered |
 | INT-003 | Absolute binary path, direct argument arrays, stdin/stdout, no shell interpolation | src/integration/mod.rs (`current_executable`, `shell_quote`); src/integration/hooks_json.rs (`managed_command`) | src/integration/mod.rs::plain_paths_are_not_quoted, ::awkward_paths_are_quoted_so_the_shell_cannot_split_or_expand_them; tests/claude_hook.rs, tests/codex_hook.rs (spawn the real binary, feed stdin, read stdout) | covered |
 | INT-004 | No duplicate managed entries; removal only when ownership/identity is established; modified/user-owned entries preserved with a warning | src/integration/hooks_json.rs (`Installed::Modified`, classification); src/integration/opencode.rs, src/integration/copilot.rs (`classify`) | src/integration/claude.rs::malformed_settings_are_never_overwritten, ::removal_by_deselection_removes_only_the_managed_entry; tests/setup.rs::rerunning_setup_leaves_an_installed_integration_byte_identical, ::deselecting_the_integration_removes_only_the_managed_hook | covered |
@@ -184,7 +184,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
-| COP-001 | Dedicated SecretSieve hook file under `~/.copilot/hooks/`, 5-second timeout, unrelated files untouched | src/integration/copilot.rs (`hook_file`, `install`, `managed_file`) | src/integration/copilot.rs::copilot_installs_one_dedicated_file_and_leaves_others_alone | covered |
+| COP-001 | Dedicated ContextVeil hook file under `~/.copilot/hooks/`, 5-second timeout, unrelated files untouched | src/integration/copilot.rs (`hook_file`, `install`, `managed_file`) | src/integration/copilot.rs::copilot_installs_one_dedicated_file_and_leaves_others_alone | covered |
 | COP-002 | Redact `userPromptTransformed` and successful `postToolUse.toolResult.textResultForLlm`, preserve host result shape | src/adapter/copilot.rs (`handle`) | src/adapter/copilot.rs::a_transformed_prompt_is_redacted_with_one_progress_line, ::a_successful_tool_result_keeps_its_shape, ::extra_result_fields_are_preserved | covered |
 | COP-003 | On intervention, one safe persistent progress summary before the final mutation object | src/adapter/copilot.rs (`redact_one` pushes the progress line) | src/adapter/copilot.rs::a_transformed_prompt_is_redacted_with_one_progress_line (asserts exactly one progress line) | covered |
 | COP-004 | Must not claim coverage for failed tool errors, non-text attachments, other injection paths, or the local timeline prompt | limitations.md LIM-015 documents the gaps explicitly | src/adapter/copilot.rs::a_failed_tool_result_is_not_covered | covered |
@@ -193,7 +193,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
-| OCO-001 | One SecretSieve-owned TypeScript plugin file under `~/.config/opencode/plugins/`; JSON stdin/stdout to the absolute Rust binary | src/integration/opencode.rs (`plugin_file`, `install`, `render`) | src/integration/opencode.rs::installation_writes_one_owned_plugin_file; tests/opencode/plugin.test.ts (spawns the real plugin) | covered |
+| OCO-001 | One ContextVeil-owned TypeScript plugin file under `~/.config/opencode/plugins/`; JSON stdin/stdout to the absolute Rust binary | src/integration/opencode.rs (`plugin_file`, `install`, `render`) | src/integration/opencode.rs::installation_writes_one_owned_plugin_file; tests/opencode/plugin.test.ts (spawns the real plugin) | covered |
 | OCO-002 | Use `chat.message` for new textual user parts and `tool.execute.after` for successful standard textual tool output | assets/opencode/plugin.ts (both handlers); src/adapter/opencode.rs (`Event`) | tests/opencode/plugin.test.ts ("new user text is redacted in place and announced", "successful standard tool output is redacted in place") | covered |
 | OCO-003 | One safe named/count TUI notification when redaction occurs and the API is available | assets/opencode/plugin.ts (`announce`/`notify`) | tests/opencode/plugin.test.ts ("new user text is redacted...", "a notification failure does not undo the mutation") | covered |
 | OCO-004 | Must not implement V2 APIs, provider wrappers, full-history/system transforms, tool-definition rewriting, or claim wider coverage | assets/opencode/plugin.ts (only the two documented hooks, no matcher logic); limitations.md LIM-016 | src/integration/opencode.rs::the_plugin_carries_no_matcher_or_resolver_logic; tests/opencode/plugin.test.ts ("explicitly unsupported paths are left alone without spawning") | covered |
@@ -254,7 +254,7 @@ worth a maintainer's attention, are listed below.
   pass/fail gate; a human must run `mise run bench` and read the result.
 - **DIA-005** — the gating, confirmation, random-value, and reply-classification
   logic around the Claude live canary is tested, but the live network request
-  itself is made only when a human runs `secretsieve doctor` and opts in
+  itself is made only when a human runs `contextveil doctor` and opts in
   (`limitations.md` DEV-001).
 - **REL-008** — release qualification requires a manual live Claude test proving
   redaction survives session resume. It is deliberately outside automated CI

@@ -87,8 +87,8 @@ jobs:
           mkdir -p dist
           find incoming -name '*.tar.gz' -exec cp {} dist/ \;
           version="${GITHUB_REF_NAME#v}"
-          cat incoming/*/secretsieve-"${version}"-SHA256SUMS | sort -k2 > "dist/secretsieve-${version}-SHA256SUMS"
-          cd dist && sha256sum --check --status "secretsieve-${version}-SHA256SUMS"
+          cat incoming/*/contextveil-"${version}"-SHA256SUMS | sort -k2 > "dist/contextveil-${version}-SHA256SUMS"
+          cd dist && sha256sum --check --status "contextveil-${version}-SHA256SUMS"
           ls -l
 
       - name: Publish the GitHub Release
@@ -110,14 +110,14 @@ jobs:
                 printf '\n## This is a prerelease\n\n'
                 printf 'The installer only selects stable releases on its own, so name this one:\n\n'
                 printf '```bash\n'
-                printf 'curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/v%s/install.sh | bash -s -- --version %s\n' \
+                printf 'curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v%s/install.sh | bash -s -- --version %s\n' \
                   "${version}" "${version}"
                 printf '```\n'
               } >>"${notes}"
               ;;
           esac
           gh release create "${GITHUB_REF_NAME}" \
-            --title "SecretSieve ${version}" \
+            --title "ContextVeil ${version}" \
             --notes-file "${notes}" \
             "${prerelease[@]}" \
             dist/*

@@ -1,4 +1,4 @@
-# SecretSieve V1 Limitations
+# ContextVeil V1 Limitations
 
 This document records accepted product gaps and implementation deviations. It is
 not normative and does not authorize violating [specification.md](specification.md).
@@ -10,11 +10,11 @@ and may link to a limitation ID.
 
 ### LIM-001: Model Context, Not Credential Use
 
-**Reality:** SecretSieve intervenes only at supported model-bound harness paths.
+**Reality:** ContextVeil intervenes only at supported model-bound harness paths.
 A process can read a credential and send it directly over the network without
 that value entering model context.
 
-**Impact:** SecretSieve is not an egress control, sandbox, capability broker, or
+**Impact:** ContextVeil is not an egress control, sandbox, capability broker, or
 DLP boundary.
 
 **Workaround:** Use environment isolation, least-privilege credentials, sandboxing,
@@ -70,7 +70,7 @@ currently colliding candidates by default.
 ### LIM-005: No Automatic Rehydration
 
 **Reality:** A placeholder is a display marker, not a credential handle.
-SecretSieve never restores a value inside a later tool call.
+ContextVeil never restores a value inside a later tool call.
 
 **Impact:** Tasks that require literal credentials may need the user to arrange
 symbolic environment access or perform the operation outside the agent.
@@ -118,7 +118,7 @@ paths and environment names, including paths outside the project.
 or act as a limited presence/equality oracle. Source values are still never
 returned in diagnostics.
 
-**Workaround:** Review `.secretsieve.toml` before working in an untrusted project
+**Workaround:** Review `.contextveil.toml` before working in an untrusted project
 and prefer global config for machine-specific external paths.
 
 **Verification:** Security tests assert external paths resolve as specified while
@@ -132,14 +132,14 @@ project policy disables otherwise valid global redaction for that event.
 **Impact:** Project-controlled config can cause denial of protection. Process-hook
 hosts may then pass original content.
 
-**Workaround:** Run `secretsieve doctor`, repair/remove the invalid file, and
+**Workaround:** Run `contextveil doctor`, repair/remove the invalid file, and
 review project policy before starting the harness.
 
 **Verification:** Conformance tests assert no partial global fallback occurs.
 
 ### LIM-010: Unbounded Input Size
 
-**Reality:** V1 imposes no SecretSieve-specific size cap on dotenv files or
+**Reality:** V1 imposes no ContextVeil-specific size cap on dotenv files or
 intercepted payloads.
 
 Setup's collision analysis also reads every readable regular file under the
@@ -151,7 +151,7 @@ the five-second host timeout, causing fail-open behavior in process-hook hosts.
 Setup can take a noticeable moment on a very large repository.
 
 **Workaround:** Keep credential files small and rely on normal harness output
-limits. Diagnose slow paths with `secretsieve doctor` and benchmarks.
+limits. Diagnose slow paths with `contextveil doctor` and benchmarks.
 
 **Verification:** Large-input tests measure behavior without promising a fixed
 maximum: a 4 MiB dotenv file with about 90,000 wildcard keys, a 2 MiB tool
@@ -169,7 +169,7 @@ manager, shell-profile evaluation, or provider lookup.
 directly.
 
 **Workaround:** Expose the value through a dedicated environment variable or
-dotenv source without copying it into SecretSieve config.
+dotenv source without copying it into ContextVeil config.
 
 **Verification:** Strict config rejects unknown source types.
 
@@ -179,7 +179,7 @@ dotenv source without copying it into SecretSieve config.
 
 **Reality:** Claude, Codex, and Copilot continue with original content when the
 hook crashes, times out, is disabled, is not trusted, emits malformed output, or
-is bypassed by the host. Diagnosed SecretSieve malfunctions also pass original
+is bypassed by the host. Diagnosed ContextVeil malfunctions also pass original
 content with a warning by product choice.
 
 **Impact:** These integrations are safety guardrails, not reliable fail-closed
@@ -212,7 +212,7 @@ negative failed-result cases. Manual release qualification checks resume replay.
 **Reality:** Codex does not provide shape-preserving `tool_response` replacement.
 Its `updatedMCPToolOutput` field is rejected by the host, so the only mechanism
 that changes what the model sees is a block decision whose `reason` becomes the
-model-facing text. On intervention, SecretSieve therefore blocks the original
+model-facing text. On intervention, ContextVeil therefore blocks the original
 model-facing result and supplies a sanitized textual rendering for supported
 `PostToolUse` events.
 
@@ -220,7 +220,7 @@ Three further host-specific limits apply, verified against the Codex source:
 
 - a newly installed or changed hook stays untrusted, and untrusted hooks do not
   run, until the user accepts it in Codex's own hook-review screen;
-- Codex also accepts hooks declared inline in `config.toml`. SecretSieve neither
+- Codex also accepts hooks declared inline in `config.toml`. ContextVeil neither
   writes nor inspects that form, so a competing mutating hook declared there is
   not reported as a conflict;
 - a tool call that fails outright emits no `PostToolUse` event at all, while a
@@ -232,7 +232,7 @@ the hook. Hosted or specialized tools may not emit the event, and failed-result
 coverage is not universal.
 
 **Workaround:** Complete Codex's hook-review step after setup, declare competing
-hooks in `~/.codex/hooks.json` so they are visible to `secretsieve doctor`, and
+hooks in `~/.codex/hooks.json` so they are visible to `contextveil doctor`, and
 retry with narrower text-producing tools when the sanitized replacement no longer
 gives Codex enough structure.
 
@@ -252,7 +252,7 @@ replacement at all.
 Two further host-specific limits apply:
 
 - Copilot merges hooks from repository files and from inline `settings.json`
-  sections as well as from `~/.copilot/hooks/`. SecretSieve owns one file in that
+  sections as well as from `~/.copilot/hooks/`. ContextVeil owns one file in that
   directory and inspects only that directory for competing hooks, so a mutating
   hook declared elsewhere is not reported as a conflict.
 - The host documents that rewrites do not compose across multiple hooks on some
@@ -266,7 +266,7 @@ prevented.
 
 **Workaround:** Avoid pasting credentials into attachments, treat failed tool
 output as uncovered, and keep competing hooks in `~/.copilot/hooks/` so
-`secretsieve doctor` can report them.
+`contextveil doctor` can report them.
 
 **Verification:** Fixtures cover both mutable paths, the failed-result negative
 case, clean and malformed input, the progress summary, and the warning channel.
@@ -308,10 +308,10 @@ abort-on-malfunction behavior.
 ### LIM-017: Hook Composition Is Not A Security Boundary
 
 **Reality:** Hosts may run multiple hooks concurrently or with undocumented
-mutation ordering. Other hooks can see original content before SecretSieve and
+mutation ordering. Other hooks can see original content before ContextVeil and
 may replace its result.
 
-**Impact:** Installing SecretSieve cannot prevent another hook from logging,
+**Impact:** Installing ContextVeil cannot prevent another hook from logging,
 exfiltrating, or reintroducing a value. User-approved Claude conflicts are still
 reported as healthy by product choice.
 
@@ -326,7 +326,7 @@ delete or reorder unrelated hooks.
 **Reality:** V1 performs no minimum or maximum host version checks despite hook
 APIs evolving independently.
 
-**Impact:** A host upgrade can change behavior before SecretSieve's compatibility
+**Impact:** A host upgrade can change behavior before ContextVeil's compatibility
 fixtures are updated.
 
 **Workaround:** Run doctor after upgrades and use optional Claude live canary when
@@ -359,7 +359,7 @@ locked pages, core-dump exclusion, swap exclusion, or resistance to same-user
 debugging.
 
 **Impact:** Resolved values may transiently exist in process or operating-system
-memory outside SecretSieve's model-context claim.
+memory outside ContextVeil's model-context claim.
 
 **Workaround:** Apply operating-system hardening where local memory disclosure is
 in scope.
@@ -401,7 +401,7 @@ the reporting half alone.
 
 Contract: `DIA-005`, `TST-008`, `REL-008`
 
-**Observed behavior:** `secretsieve doctor` offers the optional Claude live
+**Observed behavior:** `contextveil doctor` offers the optional Claude live
 canary, and the code path that runs it is shipped, but no automated test starts
 the request. How its reply is classified is a pure function covered by unit
 tests; only the paid, networked request itself is uncovered. Every other doctor
@@ -417,7 +417,7 @@ than by CI. The check fails loudly rather than silently passing: a host that
 cannot be started, a non-zero exit, a timeout, or a disclosed value are all
 reported as a failure.
 
-**Workaround:** Run `secretsieve doctor` on a terminal and confirm the canary
+**Workaround:** Run `contextveil doctor` on a terminal and confirm the canary
 before relying on it, and treat `REL-008` as the gate for release.
 
 **Verification:** The manual live qualification in `REL-008` exercises this path
@@ -444,14 +444,14 @@ synthetic verification rather than from a live host run.
 
 **Impact:** If Copilot ignores `modifiedTransformedPrompt` for command hooks, the
 prompt path is silently uncovered while the tool-result path still works. The
-offline synthetic check cannot detect this, because it exercises SecretSieve's
+offline synthetic check cannot detect this, because it exercises ContextVeil's
 side of the protocol only.
 
 **Workaround:** Treat Copilot prompt coverage as unproven until a live check is
 performed, and rely on the Claude production integration where prompt-path
 assurance matters.
 
-**Verification:** Protocol fixtures assert SecretSieve emits exactly the
+**Verification:** Protocol fixtures assert ContextVeil emits exactly the
 documented response shape for both events. Confirming that the host honors the
 prompt mutation requires a live Copilot run, which is out of scope for automated
 tests (`TST-008`).

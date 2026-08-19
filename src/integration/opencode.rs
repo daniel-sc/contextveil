@@ -1,7 +1,7 @@
 //! OpenCode integration installation, inspection, and verification.
 //!
 //! OpenCode is experimental (`SUP-002`, `SUP-003`). `OCO-001`: setup manages one
-//! SecretSieve-owned TypeScript plugin file under `~/.config/opencode/plugins/`
+//! ContextVeil-owned TypeScript plugin file under `~/.config/opencode/plugins/`
 //! that invokes the absolute Rust binary with one JSON request on stdin and reads
 //! one JSON response from stdout.
 //!
@@ -22,17 +22,17 @@ use crate::integration::{
 };
 use crate::sanitize;
 
-/// The plugin source SecretSieve installs, with the binary path substituted.
+/// The plugin source ContextVeil installs, with the binary path substituted.
 const TEMPLATE: &str = include_str!("../../assets/opencode/plugin.ts");
 
 /// Placeholder replaced by the absolute binary path (`INT-003`).
-const BINARY_PLACEHOLDER: &str = "__SECRETSIEVE_BINARY__";
+const BINARY_PLACEHOLDER: &str = "__CONTEXTVEIL_BINARY__";
 
 /// First line of every managed plugin file, used to establish ownership.
-const MARKER: &str = "// SecretSieve managed plugin.";
+const MARKER: &str = "// ContextVeil managed plugin.";
 
-/// The file SecretSieve owns (`OCO-001`).
-pub const FILENAME: &str = "secretsieve.ts";
+/// The file ContextVeil owns (`OCO-001`).
+pub const FILENAME: &str = "contextveil.ts";
 
 /// Directory holding OpenCode's global plugins (`OCO-001`).
 pub fn plugins_directory(home: &Path) -> PathBuf {
@@ -96,7 +96,7 @@ fn detect(environment: &crate::source::Environment, home: &Path) -> integration:
 
 /// Classifies the managed plugin file (`INT-004`).
 ///
-/// `Outdated` means only the embedded binary path differs, which SecretSieve may
+/// `Outdated` means only the embedded binary path differs, which ContextVeil may
 /// rewrite. Any other difference means the file was edited by hand, and an edited
 /// file is preserved rather than reverted or deleted.
 fn classify(path: &Path, executable: Option<&Path>) -> Installed {
@@ -109,7 +109,7 @@ fn classify(path: &Path, executable: Option<&Path>) -> Installed {
         command: sanitize::path(path),
     };
     if !text.starts_with(MARKER) {
-        // A file with that name that SecretSieve did not write.
+        // A file with that name that ContextVeil did not write.
         return modified();
     }
     if executable.is_some_and(|executable| text == render(executable)) {
@@ -138,7 +138,7 @@ fn recorded_executable(path: &Path) -> Option<PathBuf> {
 fn recorded_executable_in(text: &str) -> Option<PathBuf> {
     let line = text
         .lines()
-        .find(|line| line.starts_with("const SECRETSIEVE_BINARY = "))?;
+        .find(|line| line.starts_with("const CONTEXTVEIL_BINARY = "))?;
     let literal = line
         .trim_end_matches(';')
         .split_once('=')
@@ -207,7 +207,7 @@ pub fn install(home: &Path, executable: &Path, state: &mut State) -> Result<(), 
 
 /// Removes the managed plugin file.
 ///
-/// Returns `Ok(false)` when a same-named file was preserved because SecretSieve
+/// Returns `Ok(false)` when a same-named file was preserved because ContextVeil
 /// did not write it (`INT-004`).
 pub fn remove(home: &Path, state: &mut State) -> Result<bool, InstallError> {
     let path = plugin_file(home);
@@ -225,7 +225,7 @@ pub fn remove(home: &Path, state: &mut State) -> Result<bool, InstallError> {
 
 /// Runs the installed binary against a synthetic transport request.
 ///
-/// This verifies SecretSieve's side of the plugin transport offline. The plugin
+/// This verifies ContextVeil's side of the plugin transport offline. The plugin
 /// side is covered by its own test suite, which OpenCode's Bun runtime executes
 /// (`DIA-006`).
 pub fn verify_offline(executable: &Path) -> Verification {
@@ -275,7 +275,7 @@ mod tests {
     impl Home {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-opencode-integration-{}-{}",
+                "contextveil-opencode-integration-{}-{}",
                 std::process::id(),
                 Canary::generate("HOME").token()
             ));
@@ -284,7 +284,7 @@ mod tests {
         }
 
         fn executable(&self) -> PathBuf {
-            let path = self.root.join("bin").join("secretsieve");
+            let path = self.root.join("bin").join("contextveil");
             std::fs::create_dir_all(path.parent().expect("parent")).expect("bin directory");
             if !path.exists() {
                 std::fs::write(&path, "#!/bin/sh\n").expect("write fake executable");
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn the_plugin_carries_no_matcher_or_resolver_logic() {
         // `OCO-004`: security semantics stay in Rust.
-        let source = render(Path::new("/opt/secretsieve"));
+        let source = render(Path::new("/opt/contextveil"));
         for forbidden in ["SECRET:", "leftmost", "dotenv", "placeholder", "regex"] {
             assert!(
                 !source.contains(forbidden),
@@ -339,8 +339,8 @@ mod tests {
 
     #[test]
     fn an_awkward_binary_path_cannot_break_out_of_the_source_literal() {
-        let source = render(Path::new("/tmp/a\"b\\c/secretsieve"));
-        assert!(source.contains(r#""/tmp/a\"b\\c/secretsieve""#));
+        let source = render(Path::new("/tmp/a\"b\\c/contextveil"));
+        assert!(source.contains(r#""/tmp/a\"b\\c/contextveil""#));
     }
 
     #[test]
@@ -379,7 +379,7 @@ mod tests {
     fn an_outdated_plugin_is_updated_in_place() {
         let home = Home::new();
         let mut state = State::default();
-        let other = home.root.join("bin").join("old-secretsieve");
+        let other = home.root.join("bin").join("old-contextveil");
         std::fs::create_dir_all(other.parent().expect("parent")).expect("bin directory");
         std::fs::write(&other, "#!/bin/sh\n").expect("write other executable");
 
@@ -467,7 +467,7 @@ mod tests {
     fn the_plugin_bounds_the_subprocess_at_five_seconds() {
         // `RUN-004`: the bound lives in the plugin source rather than in host
         // configuration, so it is asserted against the shared constant.
-        let source = render(Path::new("/opt/secretsieve"));
+        let source = render(Path::new("/opt/contextveil"));
         let expected = claude::TIMEOUT_SECONDS * 1000;
         assert!(
             source.contains(&format!("TIMEOUT_MS = {expected}")),

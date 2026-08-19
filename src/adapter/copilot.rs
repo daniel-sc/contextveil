@@ -149,7 +149,7 @@ pub fn handle(event: Event, payload: &str, environment: &Environment) -> Respons
 }
 
 const MALFORMED: &str =
-    "SecretSieve could not use this hook payload and made no change. Run `secretsieve doctor`.";
+    "ContextVeil could not use this hook payload and made no change. Run `contextveil doctor`.";
 
 /// Redacts one string and builds the host mutation object around it.
 fn redact_one(
@@ -200,16 +200,16 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-copilot-{}-{}",
+                "contextveil-copilot-{}-{}",
                 std::process::id(),
                 Canary::generate("COPILOT").token()
             ));
-            std::fs::create_dir_all(root.join("secretsieve")).expect("config directory");
+            std::fs::create_dir_all(root.join("contextveil")).expect("config directory");
             Self { root }
         }
 
         fn write_global(&self, contents: &str) {
-            std::fs::write(self.root.join("secretsieve").join("config.toml"), contents)
+            std::fs::write(self.root.join("contextveil").join("config.toml"), contents)
                 .expect("write global config");
         }
 

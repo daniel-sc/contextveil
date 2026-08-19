@@ -1,6 +1,6 @@
-# SecretSieve V1 Specification
+# ContextVeil V1 Specification
 
-This document is the normative contract for observable SecretSieve V1 behavior.
+This document is the normative contract for observable ContextVeil V1 behavior.
 The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 to be interpreted as requirements. [architecture.md](architecture.md) defines
 mandatory technical boundaries; [vision.md](vision.md) is non-normative product
@@ -11,23 +11,23 @@ without an ID remains normative when it uses a requirement keyword.
 
 ## 1. Security Claim
 
-**SEC-001** SecretSieve MUST help prevent currently resolved values from enrolled
+**SEC-001** ContextVeil MUST help prevent currently resolved values from enrolled
 local sources from entering model context through the explicitly covered paths
 of installed, functioning adapters.
 
-**SEC-002** SecretSieve MUST NOT claim to prevent direct local-process use or
+**SEC-002** ContextVeil MUST NOT claim to prevent direct local-process use or
 network exfiltration, unknown secrets, transformed values, host bypass, or
 content paths outside the current support matrix.
 
 **SEC-003** Runtime resolution and redaction MUST make no network calls.
 Installation and an explicitly selected Claude live canary are the only V1
-network-capable SecretSieve workflows.
+network-capable ContextVeil workflows.
 
-**SEC-004** SecretSieve MUST NOT persist resolved source values, include them in
+**SEC-004** ContextVeil MUST NOT persist resolved source values, include them in
 configuration, or expose them in diagnostics, logs, telemetry, test artifacts,
 or intervention metadata.
 
-**SEC-005** SecretSieve MUST have no telemetry, crash upload, analytics, or
+**SEC-005** ContextVeil MUST have no telemetry, crash upload, analytics, or
 persistent runtime logging.
 
 **SEC-006** Every untrusted string rendered to a terminal, including labels,
@@ -54,7 +54,7 @@ limitations in [limitations.md](limitations.md).
 
 **SUP-005** Coverage applies to local harness modes that honor the configured
 machine/user integration. Cloud, remote, container, or managed-policy modes are
-covered only when SecretSieve is separately installed and the configured hook is
+covered only when ContextVeil is separately installed and the configured hook is
 honored there.
 
 ## 3. CLI
@@ -62,11 +62,11 @@ honored there.
 The public command surface is:
 
 ```text
-secretsieve setup
-secretsieve status
-secretsieve doctor
-secretsieve --help
-secretsieve --version
+contextveil setup
+contextveil status
+contextveil doctor
+contextveil --help
+contextveil --version
 ```
 
 Harness protocol entry points MAY appear in process listings or configuration,
@@ -104,21 +104,21 @@ unhandled crash remains governed by host behavior.
 **CFG-001** The global config path MUST be:
 
 ```text
-${XDG_CONFIG_HOME:-~/.config}/secretsieve/config.toml
+${XDG_CONFIG_HOME:-~/.config}/contextveil/config.toml
 ```
 
 This location applies on both Linux and macOS. Newly created directories and
 global files MUST be user-only on platforms supporting Unix permissions.
 
-**CFG-002** The project config filename MUST be `.secretsieve.toml`.
+**CFG-002** The project config filename MUST be `.contextveil.toml`.
 
 **CFG-003** Setup MUST select its project root as follows:
 
-1. the nearest ancestor containing `.secretsieve.toml`;
+1. the nearest ancestor containing `.contextveil.toml`;
 2. otherwise the enclosing Git worktree root;
 3. otherwise the current directory.
 
-Setup MUST create `.secretsieve.toml` at that root even when the project registry
+Setup MUST create `.contextveil.toml` at that root even when the project registry
 is empty.
 
 **CFG-004** Runtime MUST select at most one project registry. Starting from the
@@ -265,7 +265,7 @@ the entire effective registry for that event.
 added later become enrolled without another setup run. Empty keys remain
 unresolved.
 
-**SRC-008** V1 MUST impose no SecretSieve-specific dotenv file-size cap.
+**SRC-008** V1 MUST impose no ContextVeil-specific dotenv file-size cap.
 
 **SRC-009** Sources MUST be resolved afresh for every intercepted event. Values
 MUST NOT be cached across hook processes or retained as rotation history.
@@ -302,7 +302,7 @@ still be entered manually.
 **SET-004** Global dotenv probing MUST inspect matching files directly under the
 home directory and directly under the supported harness config directories,
 including `~/.claude`, `~/.codex`, `~/.copilot`, and
-`~/.config/{opencode,secretsieve}`. It MUST NOT recursively crawl the home or
+`~/.config/{opencode,contextveil}`. It MUST NOT recursively crawl the home or
 general config directory.
 
 **SET-005** Both enrollment phases MUST allow manual dotenv paths, individual
@@ -442,7 +442,7 @@ supported. Unresolved sources MUST remain silent during normal runtime. The
 incomplete-global warning in `CFG-013` is a configuration warning, not an
 intervention.
 
-**RED-010** SecretSieve MUST NOT replace placeholders with source values in later
+**RED-010** ContextVeil MUST NOT replace placeholders with source values in later
 tool calls or offer another automatic rehydration path.
 
 ## 10. Runtime Failure Policy
@@ -480,12 +480,12 @@ warn.
 
 **INT-001** Setup MUST detect all four harnesses. Claude MUST be selected by
 default when detected. Experimental integrations MUST remain unselected unless
-already installed by SecretSieve.
+already installed by ContextVeil.
 
 **INT-002** A user MAY explicitly install an integration whose executable was
 not detected. Setup MUST disclose that verification is limited.
 
-**INT-003** Every installed command MUST use the absolute current SecretSieve
+**INT-003** Every installed command MUST use the absolute current ContextVeil
 binary path and direct argument arrays where supported. Hook payloads MUST use
 stdin and responses MUST use structured stdout. Shell interpolation MUST NOT be
 used.
@@ -542,7 +542,7 @@ results are shape-preserving, or that all failed result categories are covered.
 
 ## 14. GitHub Copilot CLI Adapter
 
-**COP-001** Setup MUST manage a dedicated SecretSieve user hook file under
+**COP-001** Setup MUST manage a dedicated ContextVeil user hook file under
 `~/.copilot/hooks/` with a 5-second timeout. It MUST NOT modify unrelated hook
 files.
 
@@ -559,7 +559,7 @@ the local timeline.
 
 ## 15. OpenCode Adapter
 
-**OCO-001** Setup MUST manage one SecretSieve-owned TypeScript plugin file under
+**OCO-001** Setup MUST manage one ContextVeil-owned TypeScript plugin file under
 `~/.config/opencode/plugins/`. The plugin MUST invoke the absolute Rust binary
 with one JSON request on stdin and one JSON response on stdout.
 
@@ -627,7 +627,7 @@ platform/architecture targets in `SUP-001` with SHA-256 checksums.
 **REL-002** The project MUST provide a maintained installation script that
 detects platform and architecture, downloads the selected release asset,
 verifies its checksum, and atomically installs it. The default destination is
-`~/.local/bin/secretsieve` and MUST be overridable.
+`~/.local/bin/contextveil` and MUST be overridable.
 
 The script interface MUST be:
 

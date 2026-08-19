@@ -1,8 +1,8 @@
-# SecretSieve
+# ContextVeil
 
 **A small, local safety net for secrets used around coding agents.**
 
-SecretSieve replaces secret values you choose before supported coding-agent text
+ContextVeil replaces secret values you choose before supported coding-agent text
 reaches the LLM:
 
 ```text
@@ -15,11 +15,7 @@ It only replaces exact values from sources you choose.
 It is an extra safety net, not a promise to cover every
 way a secret can be exposed or used.
 
-> **Status:** Pre-release. `v1.0.0-alpha.1` is available, but stable V1 has not{
-  "session": {
-    "trust_all_worktrees": true
-  }
-}
+> **Status:** Pre-release. `v1.0.0-alpha.1` is available, but stable V1 has not
 > been published yet. See [Quick Start](#quick-start) for the current install
 > command.
 
@@ -29,8 +25,8 @@ Imagine asking a coding agent to debug your app. It reads `.env` or runs a comma
 such as `printenv`. Most of the output is useful, but it also contains an API key.
 That key may become part of the next request to the model (LLM).
 
-SecretSieve does not block the file read or command. The local operation still
-happens. On a supported integration path, SecretSieve changes the text headed to
+ContextVeil does not block the file read or command. The local operation still
+happens. On a supported integration path, ContextVeil changes the text headed to
 the model and leaves the rest useful:
 
 ```text
@@ -44,11 +40,11 @@ secret or control everything an agent can do.
 
 ## Guided Setup, Boring Runtime
 
-`secretsieve setup` does the thoughtful part: it suggests likely environment variables and
+`contextveil setup` does the thoughtful part: it suggests likely environment variables and
 entries in `.env` files, shows only masked previews, lets you choose what to
 protect, and installs the coding-agent integrations you select.
 
-Daily use is boring on purpose: SecretSieve reads the current values, performs
+Daily use is boring on purpose: ContextVeil reads the current values, performs
 local exact-text replacement, and exits. There is no daemon, no network request,
 no account, no hosted service and no LLM deciding what looks secret. Clean events are
 silent.
@@ -69,8 +65,8 @@ flowchart TD
 
     subgraph persistence [Persistence: configuration files]
       direction LR
-      X[Global<br>~/.config/secretsieve/config.toml]
-      Y[Project<br>.secretsieve.toml]
+      X[Global<br>~/.config/contextveil/config.toml]
+      Y[Project<br>.contextveil.toml]
       X ~~~ Y
     end
 
@@ -91,7 +87,7 @@ flowchart TD
     persistence -. Used by .-> runtime
 ```
 
-SecretSieve stores where to find each value, such as “the `API_TOKEN` environment
+ContextVeil stores where to find each value, such as “the `API_TOKEN` environment
 variable” or “the `STRIPE_KEY` entry in `.env.local`.” It does not copy the value
 into its configuration. Changes to `.env` files apply on the next supported
 event. Environment changes apply after you restart the coding agent.
@@ -100,10 +96,10 @@ event. Environment changes apply after you restart the coding agent.
 
 ### 1. Install
 
-While SecretSieve is in pre-release, install the published alpha explicitly:
+While ContextVeil is in pre-release, install the published alpha explicitly:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/main/install.sh |
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.sh |
   bash -s -- --version 1.0.0-alpha.1
 ```
 
@@ -111,10 +107,10 @@ After stable V1 is published, the shorter command will install the latest stable
 release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.sh | bash
 ```
 
-The binary is installed to `~/.local/bin/secretsieve` by default. Make sure that
+The binary is installed to `~/.local/bin/contextveil` by default. Make sure that
 directory is on your `PATH`.
 
 ### 2. Set Up A Project
@@ -122,7 +118,7 @@ directory is on your `PATH`.
 Run this from the project where you use your coding agent:
 
 ```bash
-secretsieve setup
+contextveil setup
 ```
 
 Setup is interactive and safe to rerun. It walks through:
@@ -138,10 +134,10 @@ you make the final choices.
 ### 3. Check It
 
 ```bash
-secretsieve status
+contextveil status
 ```
 
-Then work normally. SecretSieve stays quiet unless it replaces something - then it notifies you via the agent harness.
+Then work normally. ContextVeil stays quiet unless it replaces something - then it notifies you via the agent harness.
 
 ## What It Is Good At
 
@@ -151,7 +147,7 @@ Then work normally. SecretSieve stays quiet unless it replaces something - then 
   There is no runtime guess about whether arbitrary text looks sensitive.
 - **Handling private token formats.** A value does not need to match a known API
   key pattern. If you enroll its source, its current exact value can be matched.
-- **Following rotation.** SecretSieve reads the selected environment variables
+- **Following rotation.** ContextVeil reads the selected environment variables
   and `.env` entries for each supported event instead of keeping copied values.
 - **Staying small and local.** Runtime has no network calls, telemetry, account,
   subscription, or persistent logging. Safe and fast by design.
@@ -160,7 +156,7 @@ Then work normally. SecretSieve stays quiet unless it replaces something - then 
 
 V1 supports Linux (including WSL on Windows) and macOS on x86_64 and arm64.
 
-| Coding agent | Support | Text SecretSieve can replace | If SecretSieve fails |
+| Coding agent | Support | Text ContextVeil can replace | If ContextVeil fails |
 | --- | --- | --- | --- |
 | Claude Code | **Production** | String values in successful tool results that Claude allows hooks to replace | Claude continues with the original content: fail open |
 | OpenAI Codex CLI | **EXPERIMENTAL** | Supported successful tool results; replacement becomes plain text and may lose structure | Codex continues with the original content: fail open |
@@ -170,7 +166,7 @@ V1 supports Linux (including WSL on Windows) and macOS on x86_64 and arm64.
 Experimental integrations are functional and fixture-tested, but they are not
 part of the production support promise. 
 
-SecretSieve is a guardrail for accidental exposure, not a general security
+ContextVeil is a guardrail for accidental exposure, not a general security
 boundary:
 
 - It protects only current, exact values from sources you enroll. Unknown,
@@ -182,7 +178,7 @@ boundary:
 - Claude, Codex, and Copilot fail open. If their hook crashes, times out, is
   disabled, or is bypassed, the coding agent may continue with the original text.
   OpenCode can stop a covered operation only after its plugin has loaded.
-- SecretSieve does not stop local processes from reading or using credentials,
+- ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
 - Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warngin.)
 
@@ -193,36 +189,36 @@ coding-agent-specific gaps.
 
 ```bash
 # find sources, record your choices, and install integrations. It is interactive and safe to rerun:
-secretsieve setup
+contextveil setup
 
 # give a quick view of current sources and integrations:
-secretsieve status
+contextveil status
 
 # It can optionally offer a confirmed, paid/networked Claude test.
-secretsieve doctor
+contextveil doctor
 
-secretsieve --help
-secretsieve --version
+contextveil --help
+contextveil --version
 ```
 
 ## Configuration
 
-SecretSieve keeps source references in:
+ContextVeil keeps source references in:
 
-- `${XDG_CONFIG_HOME:-~/.config}/secretsieve/config.toml` for sources used across
+- `${XDG_CONFIG_HOME:-~/.config}/contextveil/config.toml` for sources used across
   projects;
-- `.secretsieve.toml` at the selected project root for project sources.
+- `.contextveil.toml` at the selected project root for project sources.
 
-The two files are additive. Review `.secretsieve.toml` before using an untrusted
+The two files are additive. Review `.contextveil.toml` before using an untrusted
 project: it can refer to environment variables or `.env` files outside the
 project. If a selected config is invalid or unreadable,
-SecretSieve uses none of the sources for that event instead of applying partial redaction.
+ContextVeil uses none of the sources for that event instead of applying partial redaction.
 
 ## Installation Details
 
 You can download a checksummed binary directly from
-[GitHub Releases](https://github.com/daniel-sc/secretsieve/releases), extract and place it
-at `~/.local/bin/secretsieve`.
+[GitHub Releases](https://github.com/daniel-sc/contextveil/releases), extract and place it
+at `~/.local/bin/contextveil`.
 
 Alteratively, the install script detects your platform and architecture, downloads the matching
 release, verifies its SHA-256 checksum, and replaces the binary atomically:
@@ -231,7 +227,7 @@ release, verifies its SHA-256 checksum, and replaces the binary atomically:
 install.sh [--install-dir DIR] [--version VERSION] [--allow-major-upgrade]
 ```
 
-It never runs setup or changes SecretSieve or coding-agent configuration.
+It never runs setup or changes ContextVeil or coding-agent configuration.
 Rerunning it upgrades within the installed major version. A major-version upgrade
 requires `--allow-major-upgrade`, and a prerelease is installed only when you name
 its exact version.
@@ -243,7 +239,7 @@ mise install
 mise run build
 ```
 
-The binary will be at `target/release/secretsieve`.
+The binary will be at `target/release/contextveil`.
 
 ## Development
 
@@ -269,5 +265,5 @@ mise run release-check
 - [Vision](vision.md): product intent and non-goals
 - [Architecture](architecture.md): implementation boundaries
 
-SecretSieve is free and open source under MIT OR Apache-2.0. It needs no account
+ContextVeil is free and open source under MIT OR Apache-2.0. It needs no account
 or hosted runtime.

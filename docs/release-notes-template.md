@@ -1,25 +1,25 @@
-# SecretSieve __VERSION__
+# ContextVeil __VERSION__
 
-SecretSieve keeps local credentials out of coding-agent context using
-deterministic exact-value redaction. Runtime resolution and redaction make no
-network calls, and no value is ever written into SecretSieve configuration.
+ContextVeil keeps enrolled local secrets out of coding-agent model context
+through deterministic local redaction. Runtime resolution and redaction make no
+network calls, and no value is ever written into ContextVeil configuration.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daniel-sc/secretsieve/v__VERSION__/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v__VERSION__/install.sh | bash
 ```
 
 The installer verifies the release checksum before replacing anything, installs
-into `~/.local/bin/secretsieve` by default, and never runs setup or changes
+into `~/.local/bin/contextveil` by default, and never runs setup or changes
 coding-agent configuration. Rerunning it upgrades within the installed major
 version; crossing a major version needs `--allow-major-upgrade`.
 
 Then, in a project:
 
 ```bash
-secretsieve setup
-secretsieve doctor
+contextveil setup
+contextveil doctor
 ```
 
 ## Support matrix
@@ -40,7 +40,7 @@ integration.
 
 Protocol behavior was verified against these host versions. V1 performs no host
 version checks (`LIM-018`), so these are evidence rather than a supported range:
-run `secretsieve doctor` after upgrading a coding agent.
+run `contextveil doctor` after upgrading a coding agent.
 
 | Host | Verified against |
 | --- | --- |
@@ -52,12 +52,12 @@ run `secretsieve doctor` after upgrading a coding agent.
 ## Platforms
 
 Linux and macOS on x86_64 and arm64. Each asset is listed in
-`secretsieve-__VERSION__-SHA256SUMS`.
+`contextveil-__VERSION__-SHA256SUMS`.
 
 ## Known boundaries
 
-SecretSieve is a safety primitive, not a guarantee that credentials cannot leave
-the machine. Read [limitations.md](../limitations.md) before relying on it. The
+ContextVeil is a model-context safety primitive, not a guarantee that credentials
+cannot leave the machine. Read [limitations.md](../limitations.md) before relying on it. The
 most important entries:
 
 - [`LIM-001`](../limitations.md#lim-001-model-context-not-credential-use): model

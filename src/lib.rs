@@ -1,4 +1,4 @@
-//! SecretSieve replaces currently resolved values from user-enrolled local
+//! ContextVeil redacts currently resolved values from user-enrolled local
 //! sources before they reach a coding agent's model context.
 //!
 //! The library holds every security-relevant behavior: configuration loading,

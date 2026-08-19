@@ -28,12 +28,12 @@ fi
 cargo build --release --locked --target "${target}"
 
 mkdir -p "${output}"
-archive="${output}/secretsieve-${version}-${target}.tar.gz"
+archive="${output}/contextveil-${version}-${target}.tar.gz"
 staging="$(mktemp -d)"
 trap 'rm -rf "${staging}"' EXIT
 
-cp "target/${target}/release/secretsieve" "${staging}/secretsieve"
-chmod 755 "${staging}/secretsieve"
+cp "target/${target}/release/contextveil" "${staging}/contextveil"
+chmod 755 "${staging}/contextveil"
 cp LICENSE-MIT LICENSE-APACHE README.md "${staging}/"
 
 # Deterministic archive: fixed member order, owner, and timestamp. Members are
@@ -42,7 +42,7 @@ cp LICENSE-MIT LICENSE-APACHE README.md "${staging}/"
 # GNU tar and bsdtar spell the metadata options differently and macOS ships
 # bsdtar, which rejects `--sort` and `--owner` outright. Determinism is required
 # per platform, not across them, so each implementation gets its own invocation.
-members="secretsieve LICENSE-MIT LICENSE-APACHE README.md"
+members="contextveil LICENSE-MIT LICENSE-APACHE README.md"
 if tar --version 2>/dev/null | grep -q 'GNU tar'; then
   # shellcheck disable=SC2086
   tar --create \
@@ -73,7 +73,7 @@ else
   gzip -n -f "${archive%.gz}"
 fi
 
-checksums="${output}/secretsieve-${version}-SHA256SUMS"
+checksums="${output}/contextveil-${version}-SHA256SUMS"
 (
   cd "${output}"
   if command -v sha256sum >/dev/null 2>&1; then

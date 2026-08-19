@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use secretsieve::testing::{Canary, assert_canary_absent};
+use contextveil::testing::{Canary, assert_canary_absent};
 
 struct Machine {
     root: PathBuf,
@@ -15,12 +15,12 @@ struct Machine {
 impl Machine {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-diag-e2e-{}-{}",
+            "contextveil-diag-e2e-{}-{}",
             std::process::id(),
             Canary::generate("DIAG").token()
         ));
         std::fs::create_dir_all(root.join("home").join("project")).expect("project");
-        std::fs::create_dir_all(root.join("home").join(".config").join("secretsieve"))
+        std::fs::create_dir_all(root.join("home").join(".config").join("contextveil"))
             .expect("config directory");
         Self { root }
     }
@@ -37,7 +37,7 @@ impl Machine {
         std::fs::write(
             self.home()
                 .join(".config")
-                .join("secretsieve")
+                .join("contextveil")
                 .join("config.toml"),
             contents,
         )
@@ -48,7 +48,7 @@ impl Machine {
         std::fs::write(
             self.home()
                 .join(".config")
-                .join("secretsieve")
+                .join("contextveil")
                 .join("integrations.toml"),
             contents,
         )
@@ -58,7 +58,7 @@ impl Machine {
     /// Installs a hook entry pointing at the real test binary.
     fn install_hook(&self, extra_groups: &str) {
         std::fs::create_dir_all(self.home().join(".claude")).expect("claude directory");
-        let binary = env!("CARGO_BIN_EXE_secretsieve");
+        let binary = env!("CARGO_BIN_EXE_contextveil");
         std::fs::write(
             self.home().join(".claude").join("settings.json"),
             format!(
@@ -71,7 +71,7 @@ impl Machine {
     }
 
     fn run(&self, command: &str, variables: &[(&str, &str)]) -> Output {
-        let mut process = Command::new(env!("CARGO_BIN_EXE_secretsieve"));
+        let mut process = Command::new(env!("CARGO_BIN_EXE_contextveil"));
         process
             .arg(command)
             .current_dir(self.project())
@@ -165,7 +165,7 @@ fn an_approved_conflict_stays_healthy_but_visible() {
     machine.install_hook(
         r#", {"matcher": "*", "hooks": [{"type": "command", "command": "/other/mutator"}]}"#,
     );
-    let binary = env!("CARGO_BIN_EXE_secretsieve");
+    let binary = env!("CARGO_BIN_EXE_contextveil");
     machine.write_record(&format!(
         "version = 1\n\n[claude]\ncommand = \"{binary} hook claude\"\napproved_conflicts = [\"/other/mutator\"]\n"
     ));
@@ -208,7 +208,7 @@ fn a_missing_integration_is_a_health_failure() {
 fn an_inspection_that_cannot_complete_exits_two() {
     // No HOME and no XDG_CONFIG_HOME, so no configuration location exists.
     let machine = Machine::new();
-    let mut process = Command::new(env!("CARGO_BIN_EXE_secretsieve"));
+    let mut process = Command::new(env!("CARGO_BIN_EXE_contextveil"));
     let output = process
         .arg("doctor")
         .current_dir(machine.project())
@@ -219,7 +219,7 @@ fn an_inspection_that_cannot_complete_exits_two() {
         .expect("the binary runs");
     assert_eq!(output.status.code(), Some(2));
 
-    let status = Command::new(env!("CARGO_BIN_EXE_secretsieve"))
+    let status = Command::new(env!("CARGO_BIN_EXE_contextveil"))
         .arg("status")
         .current_dir(machine.project())
         .env_clear()
@@ -277,7 +277,7 @@ fn status_runs_no_adapter_protocol_test() {
     std::fs::create_dir_all(machine.home().join(".claude")).expect("claude directory");
     std::fs::write(
         machine.home().join(".claude").join("settings.json"),
-        r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/gone/secretsieve hook claude", "timeout": 5}]}]}}"#,
+        r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/gone/contextveil hook claude", "timeout": 5}]}]}}"#,
     )
     .expect("write settings");
 
@@ -313,7 +313,7 @@ fn diagnostics_contain_no_source_content() {
     .expect("write dotenv");
     machine.write_global("version = 1\n");
     std::fs::write(
-        machine.project().join(".secretsieve.toml"),
+        machine.project().join(".contextveil.toml"),
         "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n",
     )
     .expect("write project config");
@@ -333,14 +333,14 @@ fn the_project_root_follows_the_working_directory() {
     let machine = Machine::new();
     machine.write_global("version = 1\n");
     std::fs::write(
-        machine.project().join(".secretsieve.toml"),
+        machine.project().join(".contextveil.toml"),
         "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"PROJECT_TOKEN\"\n",
     )
     .expect("write project config");
     let nested = machine.project().join("deep").join("nested");
     std::fs::create_dir_all(&nested).expect("nested directories");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_secretsieve"))
+    let output = Command::new(env!("CARGO_BIN_EXE_contextveil"))
         .arg("status")
         .current_dir(&nested)
         .env_clear()
@@ -352,12 +352,12 @@ fn the_project_root_follows_the_working_directory() {
         .expect("the binary runs");
     assert_eq!(output.status.code(), Some(0));
     let text = String::from_utf8(output.stdout).expect("UTF-8 stdout");
-    assert!(text.contains(".secretsieve.toml"));
+    assert!(text.contains(".contextveil.toml"));
     assert!(text.contains("active          1 value"));
 }
 
 /// Sanity check that the fixtures above really point at a usable binary.
 #[test]
 fn the_test_binary_path_is_absolute() {
-    assert!(Path::new(env!("CARGO_BIN_EXE_secretsieve")).is_absolute());
+    assert!(Path::new(env!("CARGO_BIN_EXE_contextveil")).is_absolute());
 }

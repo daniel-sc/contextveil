@@ -113,7 +113,7 @@ pub enum Verification {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inspection {
     pub harness: Harness,
-    /// The host file SecretSieve manages.
+    /// The host file ContextVeil manages.
     pub artifact_path: PathBuf,
     pub detection: Detection,
     pub installed: Installed,
@@ -128,7 +128,7 @@ pub struct Inspection {
 }
 
 impl Inspection {
-    /// True when a managed artifact exists that SecretSieve may rewrite.
+    /// True when a managed artifact exists that ContextVeil may rewrite.
     pub fn is_installed(&self) -> bool {
         matches!(
             self.installed,
@@ -221,7 +221,7 @@ impl InstallError {
                 "the host configuration file has an unexpected shape and was left unchanged"
             }
             InstallError::Write => "the host configuration file could not be written",
-            InstallError::ExecutablePath => "the SecretSieve binary path could not be determined",
+            InstallError::ExecutablePath => "the ContextVeil binary path could not be determined",
         }
     }
 }
@@ -303,10 +303,10 @@ pub fn synthetic_canary(kind: &str) -> String {
 }
 
 /// Environment variable name used by every synthetic check.
-pub const SYNTHETIC_VARIABLE: &str = "SECRETSIEVE_VERIFY";
+pub const SYNTHETIC_VARIABLE: &str = "CONTEXTVEIL_VERIFY";
 
 /// The placeholder a synthetic check expects to find.
-pub const SYNTHETIC_PLACEHOLDER: &str = "<SECRET:SECRETSIEVE_VERIFY>";
+pub const SYNTHETIC_PLACEHOLDER: &str = "<SECRET:CONTEXTVEIL_VERIFY>";
 
 /// A temporary configuration directory enrolling only the synthetic variable.
 pub struct SyntheticConfig {
@@ -316,8 +316,8 @@ pub struct SyntheticConfig {
 impl SyntheticConfig {
     pub fn create(kind: &str) -> Option<Self> {
         let root =
-            std::env::temp_dir().join(format!("secretsieve-verify-{}", synthetic_canary(kind)));
-        let configuration = root.join("secretsieve");
+            std::env::temp_dir().join(format!("contextveil-verify-{}", synthetic_canary(kind)));
+        let configuration = root.join("contextveil");
         std::fs::create_dir_all(&configuration).ok()?;
         std::fs::write(
             configuration.join("config.toml"),
@@ -347,8 +347,8 @@ mod tests {
     #[test]
     fn plain_paths_are_not_quoted() {
         assert_eq!(
-            shell_quote("/usr/local/bin/secretsieve"),
-            "/usr/local/bin/secretsieve"
+            shell_quote("/usr/local/bin/contextveil"),
+            "/usr/local/bin/contextveil"
         );
         assert_eq!(shell_quote("hook"), "hook");
     }
@@ -356,8 +356,8 @@ mod tests {
     #[test]
     fn awkward_paths_are_quoted_so_the_shell_cannot_split_or_expand_them() {
         assert_eq!(
-            shell_quote("/home/a b/secretsieve"),
-            "'/home/a b/secretsieve'"
+            shell_quote("/home/a b/contextveil"),
+            "'/home/a b/contextveil'"
         );
         assert_eq!(shell_quote("/tmp/$(whoami)/x"), "'/tmp/$(whoami)/x'");
         assert_eq!(shell_quote("/tmp/`id`/x"), "'/tmp/`id`/x'");
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn executables_are_found_only_where_they_exist() {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-which-{}-{}",
+            "contextveil-which-{}-{}",
             std::process::id(),
             crate::testing::Canary::generate("WHICH").token()
         ));
@@ -409,7 +409,7 @@ mod tests {
     fn a_synthetic_config_enrolls_only_the_verification_variable() {
         let config = SyntheticConfig::create("TEST").expect("config");
         let contents =
-            std::fs::read_to_string(config.root().join("secretsieve").join("config.toml"))
+            std::fs::read_to_string(config.root().join("contextveil").join("config.toml"))
                 .expect("read config");
         assert!(contents.contains(SYNTHETIC_VARIABLE));
         let root = config.root().to_path_buf();

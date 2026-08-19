@@ -6,11 +6,11 @@
 
 use std::process::{Command, Output};
 
-fn secretsieve(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_secretsieve"))
+fn contextveil(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_contextveil"))
         .args(args)
         .output()
-        .expect("the secretsieve binary runs")
+        .expect("the contextveil binary runs")
 }
 
 fn stdout(output: &Output) -> String {
@@ -23,7 +23,7 @@ fn stderr(output: &Output) -> String {
 
 #[test]
 fn help_exits_zero_and_documents_the_public_commands() {
-    let output = secretsieve(&["--help"]);
+    let output = contextveil(&["--help"]);
     assert_eq!(output.status.code(), Some(0));
     let text = stdout(&output);
     for command in ["setup", "status", "doctor"] {
@@ -34,17 +34,17 @@ fn help_exits_zero_and_documents_the_public_commands() {
 
 #[test]
 fn help_hides_harness_protocol_entry_points() {
-    let text = stdout(&secretsieve(&["--help"]));
+    let text = stdout(&contextveil(&["--help"]));
     assert!(!text.contains("hook"));
 }
 
 #[test]
 fn version_reports_the_binary_version() {
-    let output = secretsieve(&["--version"]);
+    let output = contextveil(&["--version"]);
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
         stdout(&output).trim(),
-        format!("secretsieve {}", env!("CARGO_PKG_VERSION"))
+        format!("contextveil {}", env!("CARGO_PKG_VERSION"))
     );
 }
 
@@ -57,7 +57,7 @@ fn invalid_usage_exits_two_without_stdout() {
         vec!["hook"],
         vec!["hook", "unsupported"],
     ] {
-        let output = secretsieve(&args);
+        let output = contextveil(&args);
         assert_eq!(
             output.status.code(),
             Some(2),
@@ -75,7 +75,7 @@ fn invalid_usage_exits_two_without_stdout() {
 fn setup_refuses_to_run_without_a_terminal() {
     // `CLI-002`: a non-interactive invocation fails clearly and changes nothing.
     // The test harness never attaches a TTY, so this is the non-interactive case.
-    let output = secretsieve(&["setup"]);
+    let output = contextveil(&["setup"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(stdout(&output).is_empty());
     let message = stderr(&output);

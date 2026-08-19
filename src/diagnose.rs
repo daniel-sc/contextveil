@@ -76,19 +76,19 @@ pub fn status(
     let Some(snapshot) = Snapshot::take(environment, current_directory, executable) else {
         let _ = writeln!(
             out,
-            "secretsieve: the configuration location could not be determined. Set HOME or \
+            "contextveil: the configuration location could not be determined. Set HOME or \
              XDG_CONFIG_HOME."
         );
         // Inspection itself could not complete.
         return Exit::Usage;
     };
 
-    let _ = writeln!(out, "SecretSieve status");
+    let _ = writeln!(out, "ContextVeil status");
     snapshot.render_registry(out);
     snapshot.render_integrations(out);
     let _ = writeln!(
         out,
-        "\nInstallation is not proof of protection. Run `secretsieve doctor` for deeper checks."
+        "\nInstallation is not proof of protection. Run `contextveil doctor` for deeper checks."
     );
     // `CLI-005`: zero whenever inspection completes, whatever it found.
     Exit::Ok
@@ -105,14 +105,14 @@ pub fn doctor(
     let Some(snapshot) = Snapshot::take(environment, current_directory, executable) else {
         let _ = writeln!(
             out,
-            "secretsieve: the configuration location could not be determined. Set HOME or \
+            "contextveil: the configuration location could not be determined. Set HOME or \
              XDG_CONFIG_HOME."
         );
         // `CLI-006`: two only for usage or an inspection that cannot complete.
         return Exit::Usage;
     };
 
-    let _ = writeln!(out, "SecretSieve doctor");
+    let _ = writeln!(out, "ContextVeil doctor");
     snapshot.render_registry(out);
     snapshot.render_integrations(out);
 
@@ -397,7 +397,7 @@ impl Snapshot {
                 Load::Missing if label == "global" => {
                     // `CFG-013`: incomplete machine setup, not malformed config.
                     findings.push(Finding::warning(
-                        "global configuration is missing; run `secretsieve setup`",
+                        "global configuration is missing; run `contextveil setup`",
                     ));
                 }
                 Load::Missing => {}
@@ -518,7 +518,7 @@ impl Snapshot {
             // `DIA-008`: no installed integration is a health failure. An absent
             // unselected integration on its own is only informational.
             findings.push(Finding::failure(
-                "no coding-agent integration is installed; run `secretsieve setup`",
+                "no coding-agent integration is installed; run `contextveil setup`",
             ));
         }
 
@@ -538,14 +538,14 @@ impl Snapshot {
 
         match &inspection.installed {
             Installed::Current => findings.push(Finding::ok(format!(
-                "the {label}{experimental} integration is installed and owned by SecretSieve"
+                "the {label}{experimental} integration is installed and owned by ContextVeil"
             ))),
             Installed::Outdated { .. } => findings.push(Finding::warning(format!(
-                "the {label} integration points at a different SecretSieve binary; rerun \
-                 `secretsieve setup`"
+                "the {label} integration points at a different ContextVeil binary; rerun \
+                 `contextveil setup`"
             ))),
             Installed::Modified { command } => findings.push(Finding::warning(format!(
-                "the {label} integration was modified by hand ({command}); SecretSieve will not \
+                "the {label} integration was modified by hand ({command}); ContextVeil will not \
                  change it"
             ))),
             // Absent is informational per integration; the aggregate check above
@@ -603,7 +603,7 @@ impl Snapshot {
             } else {
                 findings.push(Finding::failure(format!(
                     "an unapproved {label} hook can also change the same content: {}; rerun \
-                     `secretsieve setup`",
+                     `contextveil setup`",
                     conflict.command
                 )));
             }
@@ -831,12 +831,12 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
-                "secretsieve-diagnose-{}-{}",
+                "contextveil-diagnose-{}-{}",
                 std::process::id(),
                 Canary::generate("DIAG").token()
             ));
             std::fs::create_dir_all(root.join("home").join("project")).expect("project");
-            std::fs::create_dir_all(root.join("home").join(".config").join("secretsieve"))
+            std::fs::create_dir_all(root.join("home").join(".config").join("contextveil"))
                 .expect("config directory");
             Self { root }
         }
@@ -853,7 +853,7 @@ mod tests {
             std::fs::write(
                 self.home()
                     .join(".config")
-                    .join("secretsieve")
+                    .join("contextveil")
                     .join("config.toml"),
                 contents,
             )
@@ -861,7 +861,7 @@ mod tests {
         }
 
         fn write_project(&self, contents: &str) {
-            std::fs::write(self.project().join(".secretsieve.toml"), contents)
+            std::fs::write(self.project().join(".contextveil.toml"), contents)
                 .expect("write project config");
         }
 
@@ -1030,7 +1030,7 @@ mod tests {
         std::fs::write(
             fixture.home().join(".claude").join("settings.json"),
             r#"{"hooks": {"PostToolUse": [
-                {"matcher": "*", "hooks": [{"type": "command", "command": "/gone/secretsieve hook claude", "timeout": 5}]},
+                {"matcher": "*", "hooks": [{"type": "command", "command": "/gone/contextveil hook claude", "timeout": 5}]},
                 {"matcher": "*", "hooks": [{"type": "command", "command": "/other/mutator"}]}
             ]}}"#,
         )
@@ -1049,7 +1049,7 @@ mod tests {
         std::fs::create_dir_all(fixture.home().join(".claude")).expect("claude directory");
         std::fs::write(
             fixture.home().join(".claude").join("settings.json"),
-            r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/gone/secretsieve hook claude", "timeout": 30}]}]}}"#,
+            r#"{"hooks": {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/gone/contextveil hook claude", "timeout": 30}]}]}}"#,
         )
         .expect("write settings");
 

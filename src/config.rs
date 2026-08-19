@@ -118,7 +118,7 @@ pub fn global_config_path(environment: &Environment) -> Option<PathBuf> {
         Some(value) if !value.is_empty() && Path::new(value).is_absolute() => PathBuf::from(value),
         _ => environment.home()?.join(".config"),
     };
-    Some(base.join("secretsieve").join("config.toml"))
+    Some(base.join("contextveil").join("config.toml"))
 }
 
 /// Loads and validates one configuration file.
@@ -532,20 +532,20 @@ all = true
         let with_xdg = Environment::from_pairs([("XDG_CONFIG_HOME", "/xdg"), ("HOME", "/home/a")]);
         assert_eq!(
             global_config_path(&with_xdg),
-            Some(PathBuf::from("/xdg/secretsieve/config.toml"))
+            Some(PathBuf::from("/xdg/contextveil/config.toml"))
         );
 
         let without_xdg = Environment::from_pairs([("HOME", "/home/a")]);
         assert_eq!(
             global_config_path(&without_xdg),
-            Some(PathBuf::from("/home/a/.config/secretsieve/config.toml"))
+            Some(PathBuf::from("/home/a/.config/contextveil/config.toml"))
         );
 
         // A relative or empty XDG_CONFIG_HOME is ignored, per the XDG spec.
         let relative = Environment::from_pairs([("XDG_CONFIG_HOME", "relative"), ("HOME", "/h")]);
         assert_eq!(
             global_config_path(&relative),
-            Some(PathBuf::from("/h/.config/secretsieve/config.toml"))
+            Some(PathBuf::from("/h/.config/contextveil/config.toml"))
         );
         let empty = Environment::from_pairs([("XDG_CONFIG_HOME", ""), ("HOME", "")]);
         assert_eq!(global_config_path(&empty), None);
@@ -553,19 +553,19 @@ all = true
 
     #[test]
     fn a_missing_file_is_not_an_error() {
-        let path = std::env::temp_dir().join("secretsieve-missing-config-does-not-exist.toml");
+        let path = std::env::temp_dir().join("contextveil-missing-config-does-not-exist.toml");
         assert_eq!(load(&path, None), Load::Missing);
     }
 
     #[test]
     fn relative_paths_resolve_against_the_config_file_directory() {
         let root = std::env::temp_dir().join(format!(
-            "secretsieve-config-{}-{}",
+            "contextveil-config-{}-{}",
             std::process::id(),
             crate::testing::Canary::generate("CONFIG").token()
         ));
         std::fs::create_dir_all(root.join("nested")).expect("fixture directories");
-        let config_path = root.join("nested").join(".secretsieve.toml");
+        let config_path = root.join("nested").join(".contextveil.toml");
         std::fs::write(
             &config_path,
             "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nkey = \"A\"\n",

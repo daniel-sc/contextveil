@@ -1,8 +1,8 @@
-// SecretSieve managed plugin. Do not edit; `secretsieve setup` rewrites this file.
+// ContextVeil managed plugin. Do not edit; `contextveil setup` rewrites this file.
 //
 // This file is a thin translator (`architecture.md`, `OCO-004`): it carries no
 // matcher, resolver, or replacement logic. It sends the model-visible strings of
-// two documented V1 hooks to the SecretSieve binary and writes the answers back.
+// two documented V1 hooks to the ContextVeil binary and writes the answers back.
 //
 // `OCO-001`: one JSON request on stdin, one JSON response on stdout, per event.
 // `OCO-002`: `chat.message` new textual user parts and `tool.execute.after`
@@ -13,7 +13,7 @@
 // after a successful mutation never undoes the sanitized result.
 // `RUN-004`: the subprocess gets five seconds.
 
-const SECRETSIEVE_BINARY = "__SECRETSIEVE_BINARY__";
+const CONTEXTVEIL_BINARY = "__CONTEXTVEIL_BINARY__";
 const PROTOCOL_VERSION = 1;
 const TIMEOUT_MS = 5000;
 
@@ -38,7 +38,7 @@ async function redact(
 
   let process: ReturnType<typeof Bun.spawn>;
   try {
-    process = Bun.spawn([SECRETSIEVE_BINARY, "hook", "opencode"], {
+    process = Bun.spawn([CONTEXTVEIL_BINARY, "hook", "opencode"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -48,7 +48,7 @@ async function redact(
       env: { ...globalThis.process.env },
     });
   } catch (cause) {
-    throw new Error(`SecretSieve could not be started: ${cause}`);
+    throw new Error(`ContextVeil could not be started: ${cause}`);
   }
 
   const timer = setTimeout(() => process.kill(), TIMEOUT_MS);
@@ -62,28 +62,28 @@ async function redact(
       process.exited,
     ]);
   } catch (cause) {
-    throw new Error(`SecretSieve could not be run: ${cause}`);
+    throw new Error(`ContextVeil could not be run: ${cause}`);
   } finally {
     clearTimeout(timer);
   }
 
   if (exitCode !== 0) {
-    throw new Error(`SecretSieve exited with status ${exitCode}`);
+    throw new Error(`ContextVeil exited with status ${exitCode}`);
   }
 
   let response: Record<string, unknown>;
   try {
     response = JSON.parse(stdout);
   } catch {
-    throw new Error("SecretSieve returned invalid protocol output");
+    throw new Error("ContextVeil returned invalid protocol output");
   }
   if (response.version !== PROTOCOL_VERSION) {
-    throw new Error("SecretSieve returned an unsupported protocol version");
+    throw new Error("ContextVeil returned an unsupported protocol version");
   }
   if (response.status === "ok") {
     const answer = response as unknown as Redaction;
     if (!Array.isArray(answer.texts) || answer.texts.length !== texts.length) {
-      throw new Error("SecretSieve returned an unexpected number of values");
+      throw new Error("ContextVeil returned an unexpected number of values");
     }
     return answer;
   }
@@ -91,11 +91,11 @@ async function redact(
   const message =
     typeof response.message === "string"
       ? response.message
-      : "SecretSieve reported a malfunction";
+      : "ContextVeil reported a malfunction";
   throw new Error(message);
 }
 
-export const SecretSievePlugin = async ({ client, worktree, directory }: any) => {
+export const ContextVeilPlugin = async ({ client, worktree, directory }: any) => {
   const projectRoot: string | undefined = worktree ?? directory;
 
   const notify = async (message: string, variant: "info" | "warning") => {
