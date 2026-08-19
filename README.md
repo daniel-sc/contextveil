@@ -3,19 +3,23 @@
 **A small, local safety net for secrets used around coding agents.**
 
 SecretSieve replaces secret values you choose before supported coding-agent text
-reaches the model:
+reaches the LLM:
 
 ```text
 GITHUB_TOKEN=ghp_example  ->  GITHUB_TOKEN=<SECRET:GITHUB_TOKEN>
 ```
 
-> **Choose what counts as secret. Replace exact matches. Keep working.**
+> **You choose what counts as secret. Automatically replace exact matches. Keep working. No magic.**
 
-It only replaces exact values from sources you choose, and only in supported
-parts of a coding agent. It is an extra safety net, not a promise to cover every
+It only replaces exact values from sources you choose.
+It is an extra safety net, not a promise to cover every
 way a secret can be exposed or used.
 
-> **Status:** Pre-release. `v1.0.0-alpha.1` is available, but stable V1 has not
+> **Status:** Pre-release. `v1.0.0-alpha.1` is available, but stable V1 has not{
+  "session": {
+    "trust_all_worktrees": true
+  }
+}
 > been published yet. See [Quick Start](#quick-start) for the current install
 > command.
 
@@ -23,7 +27,7 @@ way a secret can be exposed or used.
 
 Imagine asking a coding agent to debug your app. It reads `.env` or runs a command
 such as `printenv`. Most of the output is useful, but it also contains an API key.
-That key may become part of the next request to the model.
+That key may become part of the next request to the model (LLM).
 
 SecretSieve does not block the file read or command. The local operation still
 happens. On a supported integration path, SecretSieve changes the text headed to
@@ -40,18 +44,21 @@ secret or control everything an agent can do.
 
 ## Guided Setup, Boring Runtime
 
-Setup does the thoughtful part: it suggests likely environment variables and
+`secretsieve setup` does the thoughtful part: it suggests likely environment variables and
 entries in `.env` files, shows only masked previews, lets you choose what to
 protect, and installs the coding-agent integrations you select.
 
 Daily use is boring on purpose: SecretSieve reads the current values, performs
-local exact-text replacement, and exits. There is no daemon, network request,
-account, hosted service, or LLM deciding what looks secret. Clean events are
+local exact-text replacement, and exits. There is no daemon, no network request,
+no account, no hosted service and no LLM deciding what looks secret. Clean events are
 silent.
 
+And of course it is fast. You won't notice it, promise!
+
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph setup [Setup: run once, rerun when needed]
+        direction LR
         A[Find likely environment variables and .env entries]
         B[You choose what to protect]
         C[Install selected coding-agent integrations]
@@ -59,19 +66,28 @@ flowchart LR
         A --> B --> C --> D
     end
 
+
+    subgraph persistence [Persistence: configuration files]
+      direction LR
+      X[Global<br>~/.config/secretsieve/config.toml]
+      Y[Project<br>.secretsieve.toml]
+    end
+
     subgraph runtime [Runtime: for each supported event]
+        direction LR
         E[Coding agent produces model-bound text]
         F[Read current values from enrolled sources]
         G{Exact value found?}
         H[Pass text through unchanged]
         I[Replace value with a placeholder]
-        J[Cleaned text continues to the model]
+        J[Cleaned text continues to the LLM]
         E --> F --> G
         G -- No --> H --> J
         G -- Yes --> I --> J
     end
 
-    D -. Used by .-> F
+    setup -. Stored in .-> persistence
+    persistence -. Used by .-> runtime
 ```
 
 SecretSieve stores where to find each value, such as “the `API_TOKEN` environment
@@ -138,11 +154,11 @@ finds a problem the coding agent can show.
 - **Following rotation.** SecretSieve reads the selected environment variables
   and `.env` entries for each supported event instead of keeping copied values.
 - **Staying small and local.** Runtime has no network calls, telemetry, account,
-  subscription, or persistent logging.
+  subscription, or persistent logging. Safe and fast by design.
 
 ## Supported Coding Agents
 
-V1 supports Linux and macOS on x86_64 and arm64.
+V1 supports Linux (including WSL on Windows) and macOS on x86_64 and arm64.
 
 | Coding agent | Support | Text SecretSieve can replace | If SecretSieve fails |
 | --- | --- | --- | --- |
@@ -152,8 +168,7 @@ V1 supports Linux and macOS on x86_64 and arm64.
 | OpenCode | **EXPERIMENTAL** | New user text and successful standard tool output on the V1 plugin API | A detected problem stops that covered operation while the plugin is running |
 
 Experimental integrations are functional and fixture-tested, but they are not
-part of the production support promise. Setup never selects them without your
-approval.
+part of the production support promise. 
 
 Coverage applies only when the coding-agent application runs locally, loads, and
 honors the installed integration. Cloud, remote, container, and company-managed
@@ -163,19 +178,19 @@ environment must support the configured integration. See
 
 ## Commands
 
-```text
+```bash
+# find sources, record your choices, and install integrations. It is interactive and safe to rerun:
 secretsieve setup
+
+# give a quick view of current sources and integrations:
 secretsieve status
+
+# It can optionally offer a confirmed, paid/networked Claude test.
 secretsieve doctor
+
 secretsieve --help
 secretsieve --version
 ```
-
-- `setup` finds sources, records your choices, and installs integrations. It is
-  interactive and safe to rerun.
-- `status` gives a quick view of current sources and integrations.
-- `doctor` performs deeper source, configuration, and offline integration checks.
-  It can optionally offer a confirmed, paid/networked Claude test.
 
 ## Practical Limits
 
@@ -215,17 +230,16 @@ SecretSieve keeps source references in:
 
 The two files are additive. Review `.secretsieve.toml` before using an untrusted
 project: it can refer to environment variables or `.env` files outside the
-project. If a selected config or enrolled source is invalid or unreadable,
-SecretSieve uses none of the sources for that event instead of applying partial
-redaction.
+project. If a selected config is invalid or unreadable,
+SecretSieve uses none of the sources for that event instead of applying partial redaction.
 
 ## Installation Details
 
-You can also download a checksummed binary directly from
-[GitHub Releases](https://github.com/daniel-sc/secretsieve/releases) and place it
+You can download a checksummed binary directly from
+[GitHub Releases](https://github.com/daniel-sc/secretsieve/releases), extract and place it
 at `~/.local/bin/secretsieve`.
 
-The install script detects your platform and architecture, downloads the matching
+Alteratively, the install script detects your platform and architecture, downloads the matching
 release, verifies its SHA-256 checksum, and replaces the binary atomically:
 
 ```text
