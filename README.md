@@ -71,6 +71,7 @@ flowchart TD
       direction LR
       X[Global<br>~/.config/secretsieve/config.toml]
       Y[Project<br>.secretsieve.toml]
+      X ~~~ Y
     end
 
     subgraph runtime [Runtime: for each supported event]
@@ -140,8 +141,7 @@ you make the final choices.
 secretsieve status
 ```
 
-Then work normally. SecretSieve stays quiet unless it replaces something or
-finds a problem the coding agent can show.
+Then work normally. SecretSieve stays quiet unless it replaces something - then it notifies you via the agent harness.
 
 ## What It Is Good At
 

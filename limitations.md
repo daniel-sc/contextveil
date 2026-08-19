@@ -20,8 +20,8 @@ DLP boundary.
 **Workaround:** Use environment isolation, least-privilege credentials, sandboxing,
 and network policy when credential use itself must be controlled.
 
-**Verification:** Threat-model and public wording tests must reject claims that
-secrets can never leave the machine.
+**Verification:** Release review compares public claims with `SEC-002` and rejects
+claims that secrets can never leave the machine.
 
 ### LIM-002: Unknown And Transformed Values
 

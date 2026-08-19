@@ -28,7 +28,7 @@ plugin suite) passed in full, with no failing test.
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | SEC-001 | Help prevent resolved values reaching model context via covered adapter paths | src/matcher.rs (`Redactor`), src/redact.rs, src/adapter/{claude,codex,copilot,opencode}.rs | tests/leaks.rs::no_adapter_discloses_an_enrolled_value; per-adapter protocol fixtures in tests/claude_hook.rs, tests/codex_hook.rs, tests/copilot_hook.rs, tests/opencode/plugin.test.ts | covered |
-| SEC-002 | Must not claim protection beyond the support matrix | tests/wording.rs (forbidden-phrase and disclaimer checks over README.md, vision.md, docs/release-notes-template.md, SECURITY.md); limitations.md LIM-001/LIM-002 | tests/wording.rs::no_public_document_promises_more_than_the_security_claim | covered |
+| SEC-002 | Must not claim protection beyond the support matrix | Public documentation; limitations.md LIM-001/LIM-002 | Manual release review compares public claims with the requirement; prose meaning is not inferred from keywords | manual |
 | SEC-003 | Runtime resolution/redaction make no network calls; install and the Claude live canary are the only network-capable workflows | Cargo.toml dependencies (`serde`, `serde_json`, `toml` only — no HTTP client in the binary); src/integration/claude.rs:223 (live canary is the one exception) | tests/diagnose.rs (comment-anchored assertion that nothing else reaches the network, ~line 298); tests/diagnose.rs::doctor_is_not_offered_the_live_canary_without_a_terminal | covered |
 | SEC-004 | Must not persist, configure, or diagnose with resolved values | src/setup/write.rs (only source references are ever written); src/matcher.rs intervention metadata (counts/labels only); src/source.rs malfunction reasons never quote content | tests/leaks.rs::a_complete_setup_run_writes_no_value_anywhere, ::no_adapter_discloses_an_enrolled_value, ::diagnostics_never_disclose_an_enrolled_value, ::a_malfunction_on_every_adapter_discloses_nothing | covered |
 | SEC-005 | No telemetry, crash upload, analytics, or persistent runtime logging | Absence of any such dependency (Cargo.toml lists only `serde`, `serde_json`, `toml`) or code path | tests/leaks.rs::runtime_writes_no_log_or_telemetry_file (walks the isolated home before/after every adapter, status, and doctor run and asserts no new file appears) | covered |
@@ -39,10 +39,10 @@ plugin suite) passed in full, with no failing test.
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | SUP-001 | Support Linux and macOS on x86_64 and arm64 | .github/workflows/release.yml (package matrix: x86_64/aarch64-linux-gnu, aarch64/x86_64-apple-darwin); install.sh platform detection | scripts/release-check.sh (native artifact + checksum verification); .github/workflows/ci.yml matrix (ubuntu-latest x86_64, macos-latest arm64) | covered |
-| SUP-002 | Claude is production; Codex, Copilot, OpenCode are experimental | src/integration/mod.rs (`Tier` enum) | src/integration/mod.rs::only_claude_is_production; tests/wording.rs::every_public_support_matrix_labels_the_tiers | covered |
-| SUP-003 | Experimental integrations labeled EXPERIMENTAL everywhere; opt-in only; not counted as production health | src/diagnose.rs:534 (`Tier::Experimental => " (EXPERIMENTAL)"`); src/setup/integrations.rs:171-174 (affirmative installation only) | tests/diagnose.rs (asserts output contains "EXPERIMENTAL", ~line 884); tests/setup.rs::an_experimental_integration_requires_an_affirmative_choice; tests/wording.rs::every_public_support_matrix_labels_the_tiers | covered |
+| SUP-002 | Claude is production; Codex, Copilot, OpenCode are experimental | src/integration/mod.rs (`Tier` enum) | src/integration/mod.rs::only_claude_is_production; tests/documentation.rs::public_support_matrices_have_the_required_tiers | covered |
+| SUP-003 | Experimental integrations labeled EXPERIMENTAL everywhere; opt-in only; not counted as production health | src/diagnose.rs:534 (`Tier::Experimental => " (EXPERIMENTAL)"`); src/setup/integrations.rs:171-174 (affirmative installation only) | tests/diagnose.rs (asserts output contains "EXPERIMENTAL", ~line 884); tests/setup.rs::an_experimental_integration_requires_an_affirmative_choice; tests/documentation.rs::public_support_matrices_have_the_required_tiers | covered |
 | SUP-004 | No host version checks; health from configuration and synthetic checks | No version-detection code exists anywhere in src/; doc comment in src/integration/mod.rs states this explicitly | covered-by-design — a prohibition satisfied by the absence of any version-comparison code; DIA-003/DIA-006 evidence the config+synthetic-check alternative | covered-by-design |
-| SUP-005 | Coverage applies to local harness modes honoring the integration; cloud/remote/container modes need separate install | README.md support-matrix scoping text | tests/wording.rs::coverage_is_scoped_to_local_harnesses_that_honor_the_integration | covered |
+| SUP-005 | Coverage applies to local harness modes honoring the integration; cloud/remote/container modes need separate install | README.md and release-note support-matrix scoping text | Manual release review compares the coverage statements with the requirement | manual |
 
 ## 3. CLI (`CLI-*`)
 
@@ -144,7 +144,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | RUN-001 | Malfunction/invalid config yields no partial redaction; original content passed with a warning | src/registry.rs (`Outcome::Malfunction`); adapter call sites in src/adapter/{claude,codex,copilot}.rs | tests/claude_hook.rs::an_invalid_global_config_disables_redaction_and_warns; src/registry.rs::an_invalid_project_config_disables_global_redaction | covered |
-| RUN-002 | Claude, Codex, and Copilot are documented as fail-open | README.md support matrix ("Fail open" column); limitations.md LIM-012 | tests/wording.rs::the_readme_states_the_boundary_it_must_state (asserts README literally contains "fail open") | covered |
+| RUN-002 | Claude, Codex, and Copilot are documented as fail-open | README.md support matrix; limitations.md LIM-012 | Manual release review verifies the documented failure behavior | manual |
 | RUN-003 | The OpenCode plugin aborts the covered operation on subprocess failure; a notify failure does not undo the mutation | assets/opencode/plugin.ts (throws on crash/timeout/invalid protocol/malfunction; notify-failure guard) | tests/opencode/plugin.test.ts (subprocess-failure, invalid-protocol-output, reported-malfunction, and notify-failure-ignored cases) | covered |
 | RUN-004 | Every installed hook/subprocess invocation uses a 5-second timeout | src/integration/{claude,codex,copilot}.rs (`TIMEOUT_SECONDS = 5`); assets/opencode/plugin.ts (`TIMEOUT_MS = 5000`) | src/integration/{claude,codex,copilot}.rs timeout-in-config tests; tests/{claude,codex,copilot}_hook.rs timeout-mapping tests | covered |
 | RUN-005 | Runtime should target p95 below 100 ms for the documented workload (engineering benchmark, not a pass/fail gate) | benches/redaction.rs | `mise run bench` (`cargo bench --bench redaction`); tests/limits.rs::many_enrolled_values_stay_inside_the_host_timeout (loose 5-second wiring check only) | manual |
@@ -222,7 +222,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | REL-005 | Hooks and plugins never download/install/update the Rust binary | src/integration/mod.rs (doc comment: "no installer, hook, or plugin downloads or updates the binary. The only component that fetches anything is `install.sh`") | covered-by-design — no networking dependency exists in the hook/adapter code paths (Cargo.toml has no HTTP client); install.sh is the sole fetcher | covered-by-design |
 | REL-006 | MIT OR Apache-2.0 license plus a public security-reporting policy | Cargo.toml (`license = "MIT OR Apache-2.0"`); LICENSE-MIT, LICENSE-APACHE | SECURITY.md (reporting instructions, response expectations) | covered |
 | REL-007 | Every V1 release reads earlier V1 config/managed state without requiring setup to run first | scripts/release-check.sh (installs an older release, writes a V1 config, upgrades, reads the config with the new binary) | scripts/release-check.sh (upgrade case, ~line 118-151: "an existing V1 configuration still runtime-readable afterwards") | covered |
-| REL-008 | Release qualification includes a manual live Claude test proving redaction survives session resume | Not automatable by design; run per release and recorded in docs/qualification.md | Run and passed 2026-08-17 against Claude Code 2.1.233 by an automated session: placeholder survived `claude -r`, value absent from the reply and the stored transcript. Human sign-off on that run is still outstanding (tasks.md T120). No automated test exists or should exist (`TST-008`); limitations.md DEV-001 records the automation gap | manual |
+| REL-008 | Release qualification includes a manual live Claude test proving redaction survives session resume | Not automatable by design; run per release and recorded in docs/qualification.md | Run and passed 2026-08-17 against Claude Code 2.1.233 by an automated session: placeholder survived `claude -r`, value absent from the reply and the stored transcript. Human sign-off remains outstanding per docs/qualification.md. No automated test exists or should exist (`TST-008`); limitations.md DEV-001 records the automation gap | manual |
 
 ## 18. Testing And Acceptance (`TST-*`)
 
@@ -235,7 +235,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | TST-005 | Tests use generated canaries and assert absence from stdout/stderr/diagnostics/snapshots/model-visible content | src/testing.rs (`Canary`, `assert_canary_absent`) | tests/leaks.rs (entire suite); src/fuzz.rs (canary-absence check for every fuzz target) | covered |
 | TST-006 | Fuzz targets cover the matcher and untrusted JSON/TOML/dotenv input; a bounded smoke task runs through mise | src/fuzz.rs (`TARGETS`); src/bin/fuzz_smoke.rs; fuzz/regressions/{matcher,config,dotenv,claude,codex,copilot,opencode,sanitize}/* | scripts/fuzz-smoke.sh; mise.toml `fuzz-smoke` task; .github/workflows/fuzz.yml | covered |
 | TST-007 | Routine CI runs format/lint/test/build through mise; release checks exercise artifacts, checksums, install, upgrade | mise.toml (`format-check`, `lint`, `test`, `build`, `check` tasks) | .github/workflows/ci.yml (`mise run check`, `mise run build`); .github/workflows/release.yml (`mise run release-check`) | covered |
-| TST-008 | Optional paid/networked tests do not gate routine CI; REL-008 gates a release only | .github/workflows/{ci,fuzz,release}.yml contain no live-canary or credential references | tests/wording.rs::no_routine_workflow_runs_a_paid_or_networked_check | covered |
+| TST-008 | Optional paid/networked tests do not gate routine CI; REL-008 gates a release only | Routine workflows invoke offline mise tasks; the live qualification is a documented manual release step | Covered by workflow design and review, not a keyword blacklist | covered-by-design |
 
 ## Gaps and manual items
 
@@ -248,6 +248,8 @@ worth a maintainer's attention, are listed below.
 
 **Manual (verifiable only by a human or a paid/networked run):**
 
+- **SEC-002, SUP-005, RUN-002** — release review checks the meaning of public
+  security-boundary and failure-policy claims; keyword tests cannot establish it.
 - **RUN-005** — the p95-latency benchmark is an engineering target, not a
   pass/fail gate; a human must run `mise run bench` and read the result.
 - **DIA-005** — the gating, confirmation, random-value, and reply-classification
@@ -282,6 +284,5 @@ worth a maintainer's attention, are listed below.
   environment used so far. The other three need their CI runners.
 
 At the point this document was written, `mise run check` (format, lint, test,
-and the OpenCode plugin suite) passed in full — including
-`tests/wording.rs::no_public_document_promises_more_than_the_security_claim`,
-which enforces `SEC-002` — with no failing test and no Clippy warning.
+and the OpenCode plugin suite) passed in full with no failing test or Clippy
+warning.
