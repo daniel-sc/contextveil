@@ -9,7 +9,6 @@ Read these files before changing behavior or architecture:
 3. [specification.md](specification.md) for normative behavior.
 4. [architecture.md](architecture.md) for mandatory technical boundaries.
 5. [limitations.md](limitations.md) for accepted gaps and active deviations.
-6. [tasks.md](tasks.md) for dependency order and current implementation work.
 
 `specification.md` is authoritative for observable behavior.
 `architecture.md` is authoritative for technical boundaries. Do not silently
@@ -85,7 +84,6 @@ they can be pinned by mise or the Rust toolchain configuration.
 - Product direction changes update `vision.md`.
 - New accepted gaps or deliberate implementation deviations update
   `limitations.md` with impact, workaround, and verification.
-- Task state and sequencing changes update `tasks.md`.
 - Canonical domain terminology changes update `CONTEXT.md`.
 - Use code comments only for local, non-obvious constraints. Do not duplicate
   broad limitations in comments; link to a limitation ID where useful.

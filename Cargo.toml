@@ -58,7 +58,7 @@ name = "limits"
 required-features = ["testing"]
 
 [[test]]
-name = "wording"
+name = "documentation"
 
 [[bench]]
 name = "redaction"
