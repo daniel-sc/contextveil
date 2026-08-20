@@ -15,7 +15,7 @@ It only replaces exact values from sources you choose.
 It is an extra safety net, not a promise to cover every
 way a secret can be exposed or used.
 
-> **Status:** Pre-release. `v1.0.0-alpha.1` is available, but stable V1 has not
+> **Status:** Pre-release. `v1.0.0-alpha.2` is available, but stable V1 has not
 > been published yet. See [Quick Start](#quick-start) for the current install
 > command.
 
@@ -100,7 +100,7 @@ While ContextVeil is in pre-release, install the published alpha explicitly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.sh |
-  bash -s -- --version 1.0.0-alpha.1
+  bash -s -- --version 1.0.0-alpha.2
 ```
 
 After stable V1 is published, the shorter command will install the latest stable
@@ -180,7 +180,7 @@ boundary:
   OpenCode can stop a covered operation only after its plugin has loaded.
 - ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
-- Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warngin.)
+- Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warning.)
 
 See [limitations.md](limitations.md) for the complete security boundary and
 coding-agent-specific gaps.

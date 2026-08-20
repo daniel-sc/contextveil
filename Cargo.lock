@@ -64,6 +64,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "contextveil"
+version = "1.0.0-alpha.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
