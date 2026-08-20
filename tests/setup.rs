@@ -159,6 +159,41 @@ fn setup_shows_a_masked_preview_and_its_reason() {
 }
 
 #[test]
+fn setup_lists_number_toggle_and_other_actions_separately() {
+    let canary = Canary::generate("API_TOKEN");
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[("API_TOKEN", canary.value())]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains(
+        "Choose an action:\n  [1 3]   toggle row(s)\n  [a]     select all\n  [n]     select none\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [Enter] save\n  [s]     skip\n  [q]     quit\n> "
+    ));
+    assert!(transcript.contains(
+        "Choose an action:\n  [1 3]   toggle row(s)\n  [Enter] apply\n  [s]     skip\n  [q]     quit\n> "
+    ));
+    assert!(transcript.contains(
+        "(no candidates found)\nChoose an action:\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n"
+    ));
+    assert!(
+        !transcript.contains("(no candidates found)\nChoose an action:\n  [1 3]   toggle row(s)")
+    );
+    assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
+fn setup_repeats_the_action_menu_after_a_toggle() {
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[("API_TOKEN", "value")]);
+
+    // The first input toggles the global row off; the following blank inputs
+    // save the two enrollment phases and apply integrations.
+    let (exit, transcript) = fixture.run("1\n\n\n\n", &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(transcript.matches("Choose an action:").count(), 4);
+}
+
+#[test]
 fn rerunning_setup_with_no_changes_is_idempotent() {
     let canary = Canary::generate("STRIPE_SECRET");
     let fixture = Fixture::new();

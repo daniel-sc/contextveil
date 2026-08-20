@@ -69,7 +69,8 @@ pub fn phase(
 
     loop {
         render(terminal, &rows);
-        let answer = match terminal.ask("Toggle numbers, Enter to apply, [s]kip, [q]uit:") {
+        render_actions(terminal, rows.len());
+        let answer = match terminal.ask(">") {
             Ok(answer) => answer,
             Err(Cancelled) => return cancelled(terminal),
         };
@@ -144,6 +145,16 @@ fn render(terminal: &mut Terminal<'_>, rows: &[Row]) {
     }
     terminal
         .line("  Installation is not proof of protection; run `contextveil doctor` to check it.");
+}
+
+fn render_actions(terminal: &mut Terminal<'_>, row_count: usize) {
+    terminal.line("Choose an action:");
+    if row_count > 0 {
+        terminal.line("  [1 3]   toggle row(s)");
+    }
+    terminal.line("  [Enter] apply");
+    terminal.line("  [s]     skip");
+    terminal.line("  [q]     quit");
 }
 
 fn describe(installed: &Installed) -> &'static str {

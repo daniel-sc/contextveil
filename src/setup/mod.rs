@@ -196,10 +196,8 @@ fn enrollment_phase(
     terminal.line(&format!("  file: {}", sanitize::path(config_path)));
     loop {
         render(terminal, &items);
-        let answer = match terminal.ask(
-            "Toggle numbers, [a]ll, [n]one, add [e]nv, add dotenv [k]ey, add [w]ildcard file, \
-             Enter to save, [s]kip, [q]uit:",
-        ) {
+        render_actions(terminal, items.len());
+        let answer = match terminal.ask(">") {
             Ok(answer) => answer,
             Err(Cancelled) => return cancelled(terminal),
         };
@@ -540,6 +538,21 @@ fn render(terminal: &mut Terminal<'_>, items: &[Item]) {
             terminal.line(&format!("        collision: {}", collisions.describe()));
         }
     }
+}
+
+fn render_actions(terminal: &mut Terminal<'_>, item_count: usize) {
+    terminal.line("Choose an action:");
+    if item_count > 0 {
+        terminal.line("  [1 3]   toggle row(s)");
+        terminal.line("  [a]     select all");
+        terminal.line("  [n]     select none");
+    }
+    terminal.line("  [e]     add env");
+    terminal.line("  [k]     add dotenv key");
+    terminal.line("  [w]     add wildcard file");
+    terminal.line("  [Enter] save");
+    terminal.line("  [s]     skip");
+    terminal.line("  [q]     quit");
 }
 
 /// The first selected source that blocks saving (`SET-013`).
