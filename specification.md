@@ -383,6 +383,16 @@ managed state where possible; already completed integration actions remain.
 Setup MUST report any rollback failure, preserve unrelated host config, skip
 remaining actions, and return nonzero.
 
+**SET-015** Each enrollment and integration phase MUST render a multiline action
+menu after its numbered rows. When rows exist, the menu MUST list numeric row
+toggling before the other actions using a simple whitespace-separated example,
+such as `[1 3]   toggle row(s)`. Enrollment menus MUST list select-all,
+select-none, manual source additions, save, skip, and quit as separate actions.
+Integration menus MUST list apply, skip, and quit as separate actions. When a
+phase has no rows, row-specific toggling and bulk-selection actions MUST be
+omitted. The menu MUST be rendered again after each action that returns to the
+selection loop.
+
 ## 8. Effective Registry
 
 **REG-001** Every non-empty UTF-8 resolved value becomes an active match pattern.
