@@ -10,6 +10,7 @@
 //! matched lines, or snippets. Findings are advisory (`DIA-004`), so skipped
 //! files need not be reported.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::sanitize;
@@ -67,7 +68,23 @@ pub fn analyze(project_root: &Path, subjects: &[Subject<'_>]) -> Vec<Collisions>
     if subjects.is_empty() {
         return results;
     }
-    scan(project_root, project_root, subjects, &mut results);
+    let canonical_sources: Vec<Vec<PathBuf>> = subjects
+        .iter()
+        .map(|subject| {
+            subject
+                .source_files
+                .iter()
+                .filter_map(|path| path.canonicalize().ok())
+                .collect()
+        })
+        .collect();
+    scan(
+        project_root,
+        project_root,
+        subjects,
+        &canonical_sources,
+        &mut results,
+    );
     for collisions in &mut results {
         collisions
             .files
@@ -76,7 +93,13 @@ pub fn analyze(project_root: &Path, subjects: &[Subject<'_>]) -> Vec<Collisions>
     results
 }
 
-fn scan(root: &Path, directory: &Path, subjects: &[Subject<'_>], results: &mut [Collisions]) {
+fn scan(
+    root: &Path,
+    directory: &Path,
+    subjects: &[Subject<'_>],
+    canonical_sources: &[Vec<PathBuf>],
+    results: &mut [Collisions],
+) {
     let Ok(entries) = std::fs::read_dir(directory) else {
         return;
     };
@@ -94,20 +117,32 @@ fn scan(root: &Path, directory: &Path, subjects: &[Subject<'_>], results: &mut [
                 .to_str()
                 .is_some_and(|name| EXCLUDED_DIRECTORIES.contains(&name));
             if !excluded {
-                scan(root, &path, subjects, results);
+                scan(root, &path, subjects, canonical_sources, results);
             }
             continue;
         }
         if !metadata.is_file() {
             continue;
         }
-        let Ok(bytes) = std::fs::read(&path) else {
+        let Ok(mut file) = std::fs::File::open(&path) else {
             // Unreadable files are skipped; analysis is advisory.
             continue;
         };
+        if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        if file.read_to_end(&mut bytes).is_err() {
+            continue;
+        }
         let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        let canonical_path = path.canonicalize().ok();
         for (index, subject) in subjects.iter().enumerate() {
-            if subject.source_files.iter().any(|source| source == &path) {
+            if subject.source_files.iter().any(|source| source == &path)
+                || canonical_path
+                    .as_ref()
+                    .is_some_and(|path| canonical_sources[index].contains(path))
+            {
                 continue;
             }
             let count = count_occurrences(&bytes, subject.value.as_bytes());
@@ -241,6 +276,19 @@ mod tests {
 
         assert_eq!(collisions[0].total, 1);
         assert_eq!(collisions[0].files[0].0, "README.md");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_symlinked_source_excludes_its_regular_project_target() {
+        let tree = Tree::new();
+        let target = tree.file("config/auth.json", br#"{"token":"value"}"#);
+        let source = tree.root.join("machine-auth.json");
+        std::os::unix::fs::symlink(&target, &source).expect("source symlink");
+
+        let collisions = analyze_one(&tree.root, "value", Some(&source));
+
+        assert!(collisions.is_empty());
     }
 
     #[test]

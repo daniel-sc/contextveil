@@ -1244,3 +1244,341 @@ fn duplicate_dotenv_keys_are_warned_about_without_values() {
     assert!(transcript.contains("more than once"));
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
 }
+
+#[test]
+fn known_sources_persist_explicit_refs_and_bypass_name_gating() {
+    let canary = Canary::generate("KNOWN_IDENTITY");
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    std::fs::write(
+        fixture.home().join(".codex/auth.json"),
+        format!(r#"{{"agent_identity":"{}"}}"#, canary.value()),
+    )
+    .expect("codex auth");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("source = \"json\""));
+    assert!(global.contains("file = \"~/.codex/auth.json\""));
+    assert!(global.contains("pointer = \"/agent_identity\""));
+    assert!(transcript.contains("Known Source"));
+    assert_canary_absent("known source transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("known source config", global.as_bytes(), &canary);
+}
+
+#[test]
+fn project_known_source_aliases_form_one_candidate_group() {
+    let canary = Canary::generate("PROJECT_KNOWN_ALIAS");
+    let fixture = Fixture::new();
+    fixture.write(
+        "app/.claude/settings.json",
+        &format!(r#"{{"env":{{"ANTHROPIC_API_KEY":"{}"}}}}"#, canary.value()),
+    );
+    fixture.write(
+        "app/.mcp.json",
+        &format!(
+            r#"{{"mcpServers":{{"server":{{"headers":{{"Authorization":"{}"}}}}}}}}"#,
+            canary.value()
+        ),
+    );
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Candidate group (2 sources)"));
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(project.contains("app/.claude/settings.json"));
+    assert!(project.contains("app/.mcp.json"));
+    assert!(project.contains("/mcpServers/server/headers/Authorization"));
+    assert_canary_absent("known aliases transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("known aliases config", project.as_bytes(), &canary);
+}
+
+#[test]
+fn a_known_source_group_with_an_external_collision_defaults_unselected() {
+    let canary = Canary::generate("PROJECT_KNOWN_COLLISION");
+    let fixture = Fixture::new();
+    fixture.write(
+        ".claude/settings.json",
+        &format!(
+            r#"{{"env":{{"ANTHROPIC_AUTH_TOKEN":"{}"}}}}"#,
+            canary.value()
+        ),
+    );
+    fixture.write(
+        ".mcp.json",
+        &format!(
+            r#"{{"mcpServers":{{"server":{{"env":{{"TOKEN":"{}"}}}}}}}}"#,
+            canary.value()
+        ),
+    );
+    fixture.write("README.txt", canary.value());
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(transcript.contains("collision:"));
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(!project.contains("settings.json"));
+    assert!(!project.contains(".mcp.json"));
+    assert_canary_absent("known collision transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
+fn known_source_override_reruns_are_idempotent_and_pick_up_changes() {
+    let fixture = Fixture::new();
+    fixture.write("first/auth.json", r#"{"agent_identity":"first-value"}"#);
+    fixture.write("second/auth.json", r#"{"agent_identity":"second-value"}"#);
+    let first_environment = fixture.environment(&[("CODEX_HOME", "first")]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &first_environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let first = std::fs::read(fixture.global_config()).expect("first global config");
+    let explicit_first = fixture.project().join("first/auth.json");
+    assert!(
+        String::from_utf8_lossy(&first).contains(&explicit_first.to_string_lossy().into_owned())
+    );
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &first_environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        std::fs::read(fixture.global_config()).expect("second read"),
+        first
+    );
+
+    let second_environment = fixture.environment(&[("CODEX_HOME", "second")]);
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &second_environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let rerun = std::fs::read_to_string(fixture.global_config()).expect("rerun global config");
+    let first_position = rerun.find("first/auth.json").expect("existing ref remains");
+    let second_position = rerun.find("second/auth.json").expect("new override ref");
+    assert!(
+        first_position < second_position,
+        "existing refs must remain first"
+    );
+}
+
+#[test]
+fn malformed_and_non_utf8_known_sources_are_visible_and_secret_safe() {
+    let canary = Canary::generate("MALFORMED_KNOWN");
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    std::fs::write(
+        fixture.home().join(".codex/auth.json"),
+        format!(r#"{{"OPENAI_API_KEY":"{}""#, canary.value()),
+    )
+    .expect("malformed auth");
+    std::fs::create_dir_all(fixture.home().join(".local/share/opencode"))
+        .expect("opencode directory");
+    std::fs::write(
+        fixture.home().join(".local/share/opencode/auth.json"),
+        [b'{', b'"', 0xff, b'"', b':', b'1', b'}'],
+    )
+    .expect("non UTF-8 auth");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("unavailable:"));
+    assert!(transcript.contains("malformed JSON"));
+    assert!(transcript.contains("not valid UTF-8"));
+    assert_canary_absent(
+        "known source unavailable transcript",
+        transcript.as_bytes(),
+        &canary,
+    );
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(!global.contains("auth.json"));
+}
+
+#[test]
+#[cfg(unix)]
+fn setup_follows_exact_machine_file_symlinks_but_not_project_symlinks() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home().join("target.json"),
+        r#"{"agent_identity":"machine-value"}"#,
+    )
+    .expect("machine target");
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    std::os::unix::fs::symlink(
+        fixture.home().join("target.json"),
+        fixture.home().join(".codex/auth.json"),
+    )
+    .expect("machine file symlink");
+    std::fs::create_dir_all(fixture.home().join("outside/.claude"))
+        .expect("outside claude directory");
+    std::fs::write(
+        fixture.home().join("outside/.claude/settings.json"),
+        r#"{"env":{"ANTHROPIC_API_KEY":"project-value"}}"#,
+    )
+    .expect("outside settings");
+    std::os::unix::fs::symlink(
+        fixture.home().join("outside"),
+        fixture.project().join("linked"),
+    )
+    .expect("project directory symlink");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("/agent_identity"));
+    assert!(!project.contains("linked"));
+}
+
+#[test]
+fn relative_known_source_overrides_use_the_setup_invocation_directory() {
+    let fixture = Fixture::new();
+    let codex = Canary::generate("CODEX_OVERRIDE");
+    let opencode = Canary::generate("OPENCODE_OVERRIDE");
+    let copilot = Canary::generate("COPILOT_OVERRIDE");
+    let claude = Canary::generate("CLAUDE_OVERRIDE");
+    std::fs::create_dir_all(fixture.project().join(".git")).expect("git root");
+    let nested = fixture.project().join("packages/app");
+    std::fs::create_dir_all(&nested).expect("nested invocation directory");
+    let stores = nested.join("stores");
+    for (relative, contents) in [
+        (
+            "codex/auth.json",
+            format!(r#"{{"OPENAI_API_KEY":"{}"}}"#, codex.value()),
+        ),
+        (
+            "data/opencode/auth.json",
+            format!(
+                r#"{{"provider":{{"type":"api","key":"{}"}}}}"#,
+                opencode.value()
+            ),
+        ),
+        (
+            "copilot/config.json",
+            format!(
+                r#"{{"copilotTokens":{{"github.com":"{}"}}}}"#,
+                copilot.value()
+            ),
+        ),
+        (
+            "claude/settings.json",
+            format!(r#"{{"env":{{"ANTHROPIC_API_KEY":"{}"}}}}"#, claude.value()),
+        ),
+    ] {
+        let path = stores.join(relative);
+        std::fs::create_dir_all(path.parent().expect("store parent")).expect("store directory");
+        std::fs::write(path, contents).expect("store file");
+    }
+    let environment = fixture.environment(&[
+        ("CODEX_HOME", "stores/codex"),
+        ("XDG_DATA_HOME", "stores/data"),
+        ("COPILOT_HOME", "stores/copilot"),
+        ("CLAUDE_CONFIG_DIR", "stores/claude"),
+    ]);
+
+    let (exit, transcript) = fixture.run_from(ACCEPT_ALL, &environment, &nested);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    for relative in [
+        "stores/codex/auth.json",
+        "stores/data/opencode/auth.json",
+        "stores/copilot/config.json",
+        "stores/claude/settings.json",
+    ] {
+        assert!(
+            global.contains(&nested.join(relative).to_string_lossy().into_owned()),
+            "missing invocation-relative {relative}: {global}"
+        );
+    }
+    for canary in [&codex, &opencode, &copilot, &claude] {
+        assert_canary_absent("override setup transcript", transcript.as_bytes(), canary);
+        assert_canary_absent("override global config", global.as_bytes(), canary);
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn non_utf8_known_source_override_is_unavailable_without_default_fallback() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let canary = Canary::generate("NON_UTF8_OVERRIDE");
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("default codex directory");
+    std::fs::write(
+        fixture.home().join(".codex/auth.json"),
+        format!(r#"{{"OPENAI_API_KEY":"{}"}}"#, canary.value()),
+    )
+    .expect("default codex auth");
+    let environment = Environment::from_pairs([
+        (OsString::from("HOME"), fixture.home().into_os_string()),
+        (
+            OsString::from("CODEX_HOME"),
+            OsString::from_vec(vec![b'c', b'o', b'd', b'e', b'x', 0xff]),
+        ),
+    ]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("unavailable: CODEX_HOME"));
+    assert!(transcript.contains("override is not valid UTF-8"));
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(!global.contains(".codex/auth.json"));
+    assert_canary_absent(
+        "non-UTF-8 override transcript",
+        transcript.as_bytes(),
+        &canary,
+    );
+    assert_canary_absent("non-UTF-8 override config", global.as_bytes(), &canary);
+}
+
+#[test]
+#[cfg(unix)]
+fn exact_machine_symlink_target_inside_project_is_excluded_from_collisions() {
+    let canary = Canary::generate("SYMLINK_COLLISION");
+    let fixture = Fixture::new();
+    let target = fixture.write(
+        "stores/codex-auth.json",
+        &format!(r#"{{"OPENAI_API_KEY":"{}"}}"#, canary.value()),
+    );
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    std::os::unix::fs::symlink(&target, fixture.home().join(".codex/auth.json"))
+        .expect("machine source symlink");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!transcript.contains("collision:"), "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("~/.codex/auth.json"));
+    assert_canary_absent(
+        "symlink collision transcript",
+        transcript.as_bytes(),
+        &canary,
+    );
+}
+
+#[test]
+fn invalid_config_prevents_project_discovery_file_reads() {
+    use std::time::{Duration, SystemTime};
+
+    let fixture = Fixture::new();
+    let dotenv = fixture.write("nested/.env", "API_TOKEN=value\n");
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+    std::fs::File::open(&dotenv)
+        .expect("dotenv handle")
+        .set_times(
+            std::fs::FileTimes::new()
+                .set_accessed(old)
+                .set_modified(old),
+        )
+        .expect("old file times");
+    std::fs::write(fixture.project_config(), "version = 2\n").expect("invalid project config");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+
+    assert_eq!(exit, Exit::Failure, "{transcript}");
+    assert_eq!(
+        std::fs::metadata(dotenv)
+            .expect("dotenv metadata")
+            .accessed()
+            .expect("dotenv access time"),
+        old,
+        "project discovery must not open dotenv files before both config preflights"
+    );
+}

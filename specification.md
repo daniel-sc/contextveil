@@ -463,7 +463,9 @@ source.
 **SET-018** A Known Source is setup-time discovery knowledge only. It MUST
 produce explicit source references and MUST NOT be persisted as runtime
 indirection. Path override environment variables are resolved during setup; a
-later override change requires setup to be rerun. See
+later override change requires setup to be rerun. Relative override values MUST
+resolve from setup's invocation directory. Override values MUST NOT receive
+shell, environment-variable, glob, or tilde expansion. See
 [`ADR-0001`](docs/adr/0001-persist-explicit-source-references.md).
 
 Known Source discovery MUST inspect exact machine paths, environment-resolved
@@ -477,18 +479,38 @@ symlink MUST be followed only when its target is a regular file.
 **SET-019** Valid JSON at a Known Source location with no recognized credential
 fields MUST be treated as an ordinary silent no-match, without an unsupported
 schema warning. Malformed, non-UTF-8, or unreadable automatically discovered
-files follow `SET-013`. Recognized fields MUST be exact and source-specific;
-setup MUST NOT recursively classify arbitrary JSON strings by generic key
-substrings.
+files follow `SET-013`. Known Source JSON MUST use the strict JSON semantics in
+`SRC-011`; comment-bearing JSONC is malformed. Recognized fields MUST be exact
+and source-specific. A recognized dynamic object member MUST be representable as
+an exact JSON Pointer under `CFG-016`; an unrepresentable member name, including
+an empty name or `*`, MUST silently produce no candidate. Setup MUST NOT
+recursively classify arbitrary JSON strings by generic key substrings.
 
-**SET-020** The first Known Source set MUST cover the supported coding-agent
-hosts' primary plaintext credential stores and verifiable MCP credential stores:
-Codex, OpenCode, GitHub Copilot CLI, and Claude Code. Private or version-sensitive
-schemas MUST use narrowly recognized structures backed by pinned fixtures;
-unknown structures produce no candidate. ContextVeil MUST NOT query OS keychains
-or execute credential helpers. `OPENCODE_AUTH_CONTENT`, when present and
-non-empty, is suggested as one whole environment value rather than parsed into
-derived references.
+**SET-020** The first Known Source set MUST cover only these explicitly listed V1
+representable primary and MCP plaintext stores, using the exact field
+vocabularies in [the Known Source inventory](docs/known-sources.md). Dynamic
+member names in those vocabularies are recognized only when they are
+representable under `CFG-016`:
+
+- Codex `CODEX_HOME` or `~/.codex` `auth.json` and `.credentials.json`;
+- OpenCode `XDG_DATA_HOME/opencode` or `~/.local/share/opencode` `auth.json` and
+  `mcp-auth.json`, plus a non-empty `OPENCODE_AUTH_CONTENT` as one whole
+  environment source rather than parsed derived references;
+- GitHub Copilot CLI `COPILOT_HOME` or `~/.copilot` strict-JSON `config.json`
+  `copilotTokens` fields and immediate `mcp-oauth-config` files whose basenames
+  are exactly 64 lowercase hexadecimal characters followed by `.tokens.json` or
+  `.json`;
+- Claude Code `CLAUDE_CONFIG_DIR` or `~/.claude` machine files, the default
+  `~/.claude.json` or override-root `.claude.json`, and project-anchored
+  `.claude/settings.json` and `.mcp.json`; primary `.credentials.json` discovery
+  is non-macOS only.
+
+Private or version-sensitive schemas MUST use narrowly recognized structures
+backed by pinned fixtures; unknown structures produce no candidate. ContextVeil
+MUST NOT query OS keychains or execute credential helpers. Copilot JSONC, raw
+`.secret` and `.verifier` files, and `mcp-secrets` fallback files are outside the
+V1 source formats and MUST NOT be claimed as discovered. macOS Claude primary
+credentials are keychain-backed and MUST NOT be claimed as discovered.
 
 ## 8. Effective Registry
 

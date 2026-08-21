@@ -159,22 +159,6 @@ result, and 201 active values over a 512 KiB payload all complete well inside th
 five-second host bound, and runtime cost is linear in input size rather than
 quadratic.
 
-### LIM-011: Known Source Discovery Is Not Yet Implemented
-
-**Reality:** The current binary resolves inherited environment variables, dotenv
-files, and manually enrolled exact JSON pointers, and suggests credential-bearing
-URL values from environment and dotenv discovery. Coding-agent Known Sources are
-specified but their separately tracked implementation commit has not landed.
-
-**Impact:** Until that work ships, Known Source credentials are not suggested
-automatically.
-
-**Workaround:** Manually enroll supported environment, dotenv, or exact JSON
-references.
-
-**Verification:** Strict config rejects unknown source types. Issue #11 tracks
-removal of the remaining limitation.
-
 ## Host Integration Limits
 
 ### LIM-012: Process Hooks Fail Open
@@ -399,23 +383,44 @@ the reporting half alone.
 
 ### LIM-023: Known Source Discovery Is Advisory
 
-**Reality:** Known Sources inspect only maintained exact paths and bounded project
-patterns. They do not crawl arbitrary structured files, query keychains, execute
-credential helpers, or retain their identity in runtime configuration. Valid
-unrecognized schemas are silently treated as no match, and path overrides are
-resolved only when setup runs.
+**Reality:** Known Source discovery is setup-time, advisory, and version-sensitive;
+it is not an adapter coverage guarantee or a promise to find every host
+credential. It inspects only the exact machine paths and bounded project patterns
+in [`docs/known-sources.md`](docs/known-sources.md), then persists ordinary
+environment or exact JSON references. It accepts strict JSON only. Valid unknown
+schemas silently no-match; malformed matched JSON, including JSONC, is shown as
+unavailable. Recognized dynamic object members are candidates only when their
+names are representable as exact JSON Pointers under `CFG-016`; empty names and
+`*` silently no-match. Keychains and credential helpers are not queried.
 
-**Impact:** A new or changed third-party schema, keychain-only credential, unusual
-path, or path override changed after setup may not be suggested. Private Copilot
-and Claude schemas are especially version-sensitive.
+Copilot CLI 1.0.80 commonly writes a comment-bearing JSONC `config.json` that the
+V1 strict JSON resolver cannot enroll. Its raw `.secret` and `.verifier` files
+and `mcp-secrets` fallback files are not representable by V1 environment, dotenv,
+or JSON source references and are not discovered. On macOS, Claude's primary
+credentials are keychain-backed, so `.credentials.json` primary discovery is
+non-macOS only. Path overrides are resolved during setup; changes require a
+rerun. Relative overrides are invocation-directory relative and receive no
+shell, environment-variable, glob, or tilde expansion. These are source-format
+boundaries, not an implementation-not-present deviation.
 
-**Workaround:** Rerun setup after path changes, use manual exact source references
-for supported resolver types, and use the third-party tool's diagnostics for
-keychain-backed credentials.
+**Impact:** Setup may show a matched strict-JSON path as unavailable or silently
+omit a valid but unknown schema or an otherwise recognized dynamic member whose
+name cannot be represented by `CFG-016`. Credentials in Copilot's common
+JSONC/raw fallback stores, the macOS Claude keychain, a new third-party schema,
+an unusual path, or a changed override are not automatically suggested.
+Installing an adapter does not change this source-discovery boundary.
 
-**Verification:** Fixtures pin every recognized schema and assert unknown fields
-produce no candidate; discovery tests assert that unrelated JSON files are never
-read.
+**Workaround:** Review setup candidates, rerun setup after host or override
+changes, and manually enroll a supported environment, dotenv, or exact strict-JSON
+reference when one represents the value. Use host diagnostics and separate
+keychain controls for keychain- or helper-backed credentials. Copilot raw/JSONC
+stores require a future source format or another representable source.
+
+**Verification:** Unit fixtures pin every recognized field vocabulary and host
+version; filesystem and setup tests cover exact and anchored paths, override
+resolution, strict-JSON unavailability, silent unknown-schema no-match, symlink
+rules, explicit-reference persistence, and canary-free output. Documentation
+tests require the public matrices and pinned evidence links.
 
 ## Implementation Deviations
 
@@ -477,32 +482,6 @@ assurance matters.
 documented response shape for both events. Confirming that the host honors the
 prompt mutation requires a live Copilot run, which is out of scope for automated
 tests (`TST-008`).
-
-### DEV-003: Known Source Discovery Contract Is Not Yet Implemented
-
-Contract: `SET-002`, `SET-006`, `SET-018` through `SET-020`, `TST-003`
-
-**Observed behavior:** The current binary accepts environment, dotenv, and exact
-JSON references, applies name-gated and credential-bearing URL discovery, and
-groups equal resolved values during setup and doctor. Known Source discovery is
-not yet implemented.
-
-**Reason:** The contract was resolved before implementation so the separately
-reviewable feature commits can share one agreed target while shipping in one
-release.
-
-**Impact:** Coding-agent Known Sources do not function until the tracked
-implementation work lands.
-
-**Workaround:** Use the workarounds in `LIM-011` and do not claim the expanded
-source support in release material yet.
-
-**Verification:** Issue #11 must add the remaining conformance coverage required
-by the contract. Remove this deviation only after that feature commit passes
-`mise run check` with the existing source-expansion coverage.
-
-**Resolution or accepted status:** Temporarily accepted for the documentation and
-tracking change; it blocks release of the expanded source-support claim.
 
 Add future deviations using this template:
 

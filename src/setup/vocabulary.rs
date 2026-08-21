@@ -42,6 +42,8 @@ pub enum Signal {
     NameMatches(&'static str),
     /// The bounded whole-value exception in `SET-017`.
     CredentialBearingUrl,
+    /// Admission by one of the closed coding-agent Known Source definitions.
+    KnownSource,
     /// Advisory only (`SET-006`).
     LongValue,
     HighVariety,
@@ -53,6 +55,7 @@ impl Signal {
         match self {
             Signal::NameMatches(term) => format!("name contains `{term}`"),
             Signal::CredentialBearingUrl => "credential-bearing URL".to_string(),
+            Signal::KnownSource => "Known Source".to_string(),
             Signal::LongValue => "long value".to_string(),
             Signal::HighVariety => "mixed character classes".to_string(),
             Signal::LooksEncoded => "encoded-looking value".to_string(),
@@ -134,6 +137,7 @@ pub fn rank(signals: &[Signal]) -> u32 {
         .map(|signal| match signal {
             Signal::NameMatches(_) => 4,
             Signal::CredentialBearingUrl => 4,
+            Signal::KnownSource => 4,
             Signal::LongValue => 2,
             Signal::HighVariety => 2,
             Signal::LooksEncoded => 1,

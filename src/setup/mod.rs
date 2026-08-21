@@ -14,6 +14,7 @@ pub mod collision;
 pub mod credential_url;
 pub mod discovery;
 pub mod integrations;
+pub mod known_source;
 pub mod preview;
 pub mod ui;
 pub mod vocabulary;
@@ -86,22 +87,28 @@ pub fn run(
         Err(exit) => return exit,
     };
 
+    let project_files = discovery::project_files(&project_root);
+
     // Discover both scopes before presenting either phase. Candidate Groups stay
     // phase-local, while collision exclusions can account for aliases in both
     // scopes (`SET-011`, `SET-016`).
-    let global_items = build_items(
+    let (global_items, global_notices) = build_items(
         Scope::Global,
         &global,
         &project_root,
         environment,
         home.as_deref(),
+        current_directory,
+        &project_files,
     );
-    let project_items = build_items(
+    let (project_items, project_notices) = build_items(
         Scope::Project,
         &project,
         &project_root,
         environment,
         home.as_deref(),
+        current_directory,
+        &project_files,
     );
     let mut aliases = alias_inventory([
         (Scope::Global, global_items.as_slice()),
@@ -113,6 +120,7 @@ pub fn run(
         Scope::Global,
         &global,
         global_items,
+        global_notices,
         EnrollmentContext {
             config_path: &global_path,
             project_root: &project_root,
@@ -131,6 +139,7 @@ pub fn run(
         Scope::Project,
         &project,
         project_items,
+        project_notices,
         EnrollmentContext {
             config_path: &project_path,
             project_root: &project_root,
@@ -224,12 +233,19 @@ fn enrollment_phase(
     scope: Scope,
     existing: &Config,
     mut items: Vec<Item>,
+    notices: Vec<known_source::Notice>,
     mut context: EnrollmentContext<'_>,
 ) -> PhaseResult {
     refresh_items(scope, &mut items, &mut context);
 
     terminal.line(scope.title());
     terminal.line(&format!("  file: {}", sanitize::path(context.config_path)));
+    for notice in notices {
+        terminal.line(&format!(
+            "  unavailable: {} ({})",
+            notice.display, notice.reason
+        ));
+    }
     loop {
         render(terminal, &items);
         render_actions(terminal, visible_count(&items));
@@ -335,6 +351,7 @@ struct Item {
     /// Whether the user explicitly chose this row rather than accepting setup's
     /// collision-derived default.
     selection_touched: bool,
+    known_source: bool,
 }
 
 impl Item {
@@ -409,7 +426,9 @@ fn build_items(
     project_root: &Path,
     environment: &Environment,
     home: Option<&Path>,
-) -> Vec<Item> {
+    invocation_directory: &Path,
+    project_files: &discovery::ProjectFiles,
+) -> (Vec<Item>, Vec<known_source::Notice>) {
     let mut resolver = Resolver::new();
     let mut items: Vec<Item> = Vec::new();
 
@@ -418,25 +437,34 @@ fn build_items(
     for source in &existing.sources {
         merge_item(
             &mut items,
-            item_for(source.clone(), true, &mut resolver, environment),
+            item_for(source.clone(), true, false, &mut resolver, environment),
         );
     }
 
-    let known: HashSet<SourceId> = items
+    let mut known: HashSet<SourceId> = items
         .iter()
         .flat_map(|item| &item.members)
         .map(|member| member.source.id())
         .collect();
     let mut candidates: Vec<Item> = Vec::new();
 
+    let discovered_known = match scope {
+        Scope::Global => known_source::machine(environment, home, invocation_directory),
+        Scope::Project => known_source::project(project_root, project_files),
+    };
+    for source in discovered_known.sources {
+        if known.insert(source.id()) {
+            candidates.push(item_for(source, false, true, &mut resolver, environment));
+        }
+    }
+
     if scope == Scope::Global {
         // `SET-002`: the current process environment is inspected automatically.
         for name in environment_candidates(environment) {
             let source = SourceRef::Env { name };
-            if known.contains(&source.id()) {
-                continue;
+            if known.insert(source.id()) {
+                candidates.push(item_for(source, false, false, &mut resolver, environment));
             }
-            candidates.push(item_for(source, false, &mut resolver, environment));
         }
     }
 
@@ -444,10 +472,13 @@ fn build_items(
         // `SET-004`: bounded probe locations only.
         Scope::Global => home.map(discovery::global_dotenv_files).unwrap_or_default(),
         // `SET-003`: recursive project discovery.
-        Scope::Project => discovery::project_dotenv_files(project_root),
+        Scope::Project => project_files.dotenv.clone(),
     };
     for file in &discovered {
-        candidates.extend(file_candidates(file, &known, &mut resolver, environment));
+        for candidate in file_candidates(file, &known, &mut resolver, environment) {
+            known.insert(candidate.members[0].source.id());
+            candidates.push(candidate);
+        }
     }
 
     // Rank suggestions by their admission and advisory signals (`SET-006`,
@@ -463,7 +494,7 @@ fn build_items(
     for candidate in candidates {
         merge_item(&mut items, candidate);
     }
-    items
+    (items, discovered_known.notices)
 }
 
 fn rank_of(item: &Item) -> u32 {
@@ -471,6 +502,9 @@ fn rank_of(item: &Item) -> u32 {
         None => 0,
         Some(value) => {
             let mut signals = vocabulary::value_signals(value);
+            if item.known_source {
+                signals.push(Signal::KnownSource);
+            }
             if let Some(signal) = admission_signal(&item.members[0].source, value) {
                 signals.push(signal);
             }
@@ -518,13 +552,14 @@ fn file_candidates(
             key: key.to_string(),
         })
         .filter(|source| !known.contains(&source.id()))
-        .map(|source| item_for(source, false, resolver, environment))
+        .map(|source| item_for(source, false, false, resolver, environment))
         .collect()
 }
 
 fn item_for(
     source: SourceRef,
     enrolled: bool,
+    known_source: bool,
     resolver: &mut Resolver,
     environment: &Environment,
 ) -> Item {
@@ -545,6 +580,7 @@ fn item_for(
         wildcard_values: Vec::new(),
         collisions: None,
         selection_touched: false,
+        known_source,
     };
 
     match resolver.resolve(&source, environment) {
@@ -559,6 +595,9 @@ fn item_for(
                 Some(value) => {
                     let mut signals: Vec<Signal> =
                         admission_signal(&source, value).into_iter().collect();
+                    if known_source {
+                        signals.push(Signal::KnownSource);
+                    }
                     signals.extend(vocabulary::value_signals(value));
                     let described: Vec<String> = signals.iter().map(Signal::describe).collect();
                     if described.is_empty() {
@@ -613,6 +652,7 @@ fn merge_item(items: &mut Vec<Item>, mut incoming: Item) {
         existing.enrolled |= incoming.enrolled;
         existing.selected |= incoming.selected;
         existing.selection_touched |= incoming.selection_touched;
+        existing.known_source |= incoming.known_source;
         existing.members.append(&mut incoming.members);
         return;
     }
@@ -978,7 +1018,7 @@ fn add_manual(
     }
 
     let mut resolver = Resolver::new();
-    let mut item = item_for(source, false, &mut resolver, context.environment);
+    let mut item = item_for(source, false, false, &mut resolver, context.environment);
     if item.problem.is_some() {
         terminal.line(&format!("  This source is currently {}.", item.detail));
         terminal.line("  Not added; repair the source and try again.");
