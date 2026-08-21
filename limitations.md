@@ -163,19 +163,17 @@ quadratic.
 
 **Reality:** The current binary resolves inherited environment variables, dotenv
 files, and manually enrolled exact JSON pointers. Credential-bearing URL
-suggestions, Candidate Groups, and coding-agent Known Sources are specified but
-their separately tracked implementation commits have not landed.
+suggestions and coding-agent Known Sources are specified but their separately
+tracked implementation commits have not landed.
 
 **Impact:** Until that work ships, Known Source credentials are not suggested
-automatically, URL-bearing values remain subject to ordinary name gating, and
-alias source files can produce false collision warnings.
+automatically and URL-bearing values remain subject to ordinary name gating.
 
 **Workaround:** Manually enroll supported environment, dotenv, or exact JSON
-references, manually enroll URL-bearing environment/dotenv names, and override
-advisory collision warnings after reviewing them.
+references and manually enroll URL-bearing environment/dotenv names.
 
-**Verification:** Strict config rejects unknown source types. Issues #7, #8, and
-#11 track removal of the remaining limitation.
+**Verification:** Strict config rejects unknown source types. Issues #7 and #11
+track removal of the remaining limitation.
 
 ## Host Integration Limits
 
@@ -482,24 +480,23 @@ tests (`TST-008`).
 
 ### DEV-003: Remaining Source Expansion Contract Is Not Yet Implemented
 
-Contract: `SET-002`, `SET-006`, `SET-007`, `SET-011`, `SET-016` through
-`SET-020`, `DIA-004`, `TST-003`
+Contract: `SET-002`, `SET-006`, `SET-017` through `SET-020`, `TST-003`
 
 **Observed behavior:** The current binary accepts environment, dotenv, and exact
-JSON references. It still presents one row per source, applies name-gated
-discovery only, and excludes only one source file from each collision search.
+JSON references and groups equal resolved values during setup and doctor. It
+still applies name-gated discovery only.
 
 **Reason:** The contract was resolved before implementation so the separately
 reviewable feature commits can share one agreed target while shipping in one
 release.
 
-**Impact:** Candidate Groups, credential-bearing URL discovery, and coding-agent
-Known Sources do not function until the tracked implementation work lands.
+**Impact:** Credential-bearing URL discovery and coding-agent Known Sources do
+not function until the tracked implementation work lands.
 
 **Workaround:** Use the workarounds in `LIM-011` and do not claim the expanded
 source support in release material yet.
 
-**Verification:** Issues #7, #8, and #11 must add the remaining conformance
+**Verification:** Issues #7 and #11 must add the remaining conformance
 coverage required by the contract. Remove this deviation only after all tracked
 feature commits pass `mise run check` together.
 

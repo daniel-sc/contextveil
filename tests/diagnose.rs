@@ -328,6 +328,39 @@ fn diagnostics_contain_no_source_content() {
 }
 
 #[test]
+fn doctor_groups_aliases_and_excludes_all_of_their_source_files() {
+    let canary = Canary::generate("DOCTOR_ALIAS_TOKEN");
+    let machine = Machine::new();
+    std::fs::write(
+        machine.project().join(".env.one"),
+        format!("FIRST_TOKEN={}\n", canary.value()),
+    )
+    .expect("first dotenv");
+    std::fs::write(
+        machine.project().join(".env.two"),
+        format!("SECOND_TOKEN={}\n", canary.value()),
+    )
+    .expect("second dotenv");
+    std::fs::write(machine.project().join("README.md"), canary.value()).expect("README");
+    machine.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"GLOBAL_TOKEN\"\n");
+    std::fs::write(
+        machine.project().join(".contextveil.toml"),
+        "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env.one\"\nkey = \"FIRST_TOKEN\"\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env.two\"\nkey = \"SECOND_TOKEN\"\n",
+    )
+    .expect("project config");
+    machine.install_hook("");
+
+    let doctor = machine.run("doctor", &[("GLOBAL_TOKEN", canary.value())]);
+    assert_eq!(doctor.status.code(), Some(0), "{}", text(&doctor));
+    let output = text(&doctor);
+    assert_eq!(output.matches("also occurs in this project").count(), 1);
+    assert!(output.contains("README.md x1"));
+    assert!(output.contains("2 aliases resolving to the same value"));
+    assert_canary_absent("grouped doctor stdout", &doctor.stdout, &canary);
+    assert_canary_absent("grouped doctor stderr", &doctor.stderr, &canary);
+}
+
+#[test]
 fn status_and_doctor_resolve_json_without_reporting_its_value_or_own_file() {
     let canary = Canary::generate("JSON_DIAGNOSTIC_TOKEN");
     let machine = Machine::new();

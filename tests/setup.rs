@@ -295,6 +295,115 @@ fn project_dotenv_keys_are_discovered_and_gated() {
 }
 
 #[test]
+fn equal_environment_candidates_are_one_group_and_enroll_every_alias() {
+    let canary = Canary::generate("GROUPED_ENV_TOKEN");
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[
+        ("FIRST_API_TOKEN", canary.value()),
+        ("SECOND_API_SECRET", canary.value()),
+    ]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(transcript.matches("Candidate group (2 sources)").count(), 1);
+    assert!(transcript.contains("env FIRST_API_TOKEN"));
+    assert!(transcript.contains("env SECOND_API_SECRET"));
+
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("FIRST_API_TOKEN"));
+    assert!(global.contains("SECOND_API_SECRET"));
+    assert!(
+        global.find("FIRST_API_TOKEN").expect("first identity")
+            < global.find("SECOND_API_SECRET").expect("second identity")
+    );
+    assert_canary_absent("grouped setup transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
+fn equal_values_in_different_phases_remain_separate_choices() {
+    let canary = Canary::generate("CROSS_PHASE_TOKEN");
+    let fixture = Fixture::new();
+    fixture.write(".env", &format!("PROJECT_TOKEN={}\n", canary.value()));
+    let environment = fixture.environment(&[("GLOBAL_TOKEN", canary.value())]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!transcript.contains("Candidate group"));
+    assert!(!transcript.contains("collision:"));
+    assert!(
+        std::fs::read_to_string(fixture.global_config())
+            .expect("global config")
+            .contains("GLOBAL_TOKEN")
+    );
+    assert!(
+        std::fs::read_to_string(fixture.project_config())
+            .expect("project config")
+            .contains("PROJECT_TOKEN")
+    );
+}
+
+#[test]
+fn a_partially_enrolled_group_saves_all_aliases_but_skip_is_exact() {
+    let canary = Canary::generate("PARTIAL_GROUP_TOKEN");
+    let fixture = Fixture::new();
+    let original = "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"FIRST_TOKEN\"\n";
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    std::fs::write(fixture.global_config(), original).expect("global config");
+    let environment = fixture.environment(&[
+        ("FIRST_TOKEN", canary.value()),
+        ("SECOND_TOKEN", canary.value()),
+    ]);
+
+    let (exit, transcript) = fixture.run("s\n\n\n", &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        std::fs::read_to_string(fixture.global_config()).expect("global config"),
+        original
+    );
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("FIRST_TOKEN"));
+    assert!(global.contains("SECOND_TOKEN"));
+    assert!(
+        global.find("FIRST_TOKEN").expect("first alias")
+            < global.find("SECOND_TOKEN").expect("second alias")
+    );
+}
+
+#[test]
+fn aliases_split_into_separate_rows_after_their_values_diverge() {
+    let fixture = Fixture::new();
+    let first = fixture.environment(&[("FIRST_TOKEN", "same"), ("SECOND_TOKEN", "same")]);
+    assert_eq!(fixture.run(ACCEPT_ALL, &first).0, Exit::Ok);
+
+    let second = fixture.environment(&[("FIRST_TOKEN", "one"), ("SECOND_TOKEN", "two")]);
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &second);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!transcript.contains("Candidate group"));
+    assert!(transcript.contains("env FIRST_TOKEN (enrolled)"));
+    assert!(transcript.contains("env SECOND_TOKEN (enrolled)"));
+}
+
+#[test]
+fn every_alias_file_is_excluded_but_an_unrelated_collision_remains() {
+    let canary = Canary::generate("ALIAS_COLLISION_TOKEN");
+    let fixture = Fixture::new();
+    fixture.write(".env.one", &format!("FIRST_TOKEN={}\n", canary.value()));
+    fixture.write(".env.two", &format!("SECOND_SECRET={}\n", canary.value()));
+    fixture.write("README.md", canary.value());
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(transcript.contains("1 occurrence(s) elsewhere"));
+    assert!(transcript.contains("README.md x1"));
+    assert_canary_absent("alias collision transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
 fn a_colliding_candidate_is_visible_but_unselected() {
     let fixture = Fixture::new();
     // A short, common value that also appears in a tracked file.
@@ -344,6 +453,97 @@ fn wildcard_enrollment_requires_an_extra_confirmation() {
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("all = true"));
     assert!(project.contains("\".env.shared\""));
+}
+
+#[test]
+fn a_selected_wildcard_suppresses_redundant_keyed_candidates() {
+    let fixture = Fixture::new();
+    fixture.write(".env.shared", "API_TOKEN=value\nOTHER=plain\n");
+
+    let (exit, transcript) = fixture.run("\nw\n.env.shared\ny\n\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(project.contains("all = true"));
+    assert!(!project.contains("key = \"API_TOKEN\""));
+}
+
+#[test]
+fn wildcard_values_exclude_their_file_for_other_candidate_groups() {
+    let fixture = Fixture::new();
+    fixture.write(".env.target", "TARGET_TOKEN=shared\n");
+    fixture.write(".env.wild", "ORDINARY_NAME=shared\n");
+
+    let (exit, transcript) = fixture.run("\nw\n.env.wild\ny\n\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(project.contains("key = \"TARGET_TOKEN\""));
+    assert!(project.contains("all = true"));
+}
+
+#[test]
+fn deselecting_a_wildcard_restores_keyed_candidates_and_collisions() {
+    let fixture = Fixture::new();
+    fixture.write(".env.target", "TARGET_TOKEN=shared\n");
+    fixture.write(".env.wild", "ORDINARY_NAME=shared\n");
+
+    let (exit, transcript) = fixture.run("\nw\n.env.wild\ny\n2\n\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(!project.contains("TARGET_TOKEN"));
+    assert!(!project.contains("all = true"));
+}
+
+#[test]
+fn a_wildcard_in_the_other_phase_suppresses_the_same_files_keyed_candidate() {
+    let fixture = Fixture::new();
+    let dotenv = fixture.write(".env", "API_TOKEN=value\n");
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    std::fs::write(
+        fixture.global_config(),
+        format!(
+            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"{}\"\nall = true\n",
+            dotenv.display()
+        ),
+    )
+    .expect("global config");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(!project.contains("API_TOKEN"));
+}
+
+#[test]
+fn resolvable_manual_sources_merge_into_an_existing_group() {
+    let canary = Canary::generate("MANUAL_GROUP_TOKEN");
+    let fixture = Fixture::new();
+    fixture.write("manual.env", &format!("PRIVATE_VALUE={}\n", canary.value()));
+    fixture.write(
+        "manual.json",
+        &format!(r#"{{"credential":"{}"}}"#, canary.value()),
+    );
+    let environment = fixture.environment(&[
+        ("AUTO_TOKEN", canary.value()),
+        ("UNGATED_MANUAL", canary.value()),
+    ]);
+    let script =
+        "e\nUNGATED_MANUAL\n\nk\nmanual.env\nPRIVATE_VALUE\nj\nmanual.json\n/credential\n\n\n";
+
+    let (exit, transcript) = fixture.run(script, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(
+        transcript.matches("Candidate group (2 sources)").count() >= 2,
+        "{transcript}"
+    );
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("AUTO_TOKEN"));
+    assert!(global.contains("UNGATED_MANUAL"));
+    assert!(project.contains("PRIVATE_VALUE"));
+    assert!(project.contains("/credential"));
+    assert_canary_absent("manual group transcript", transcript.as_bytes(), &canary);
 }
 
 #[test]

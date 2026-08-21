@@ -11,7 +11,7 @@ use std::path::PathBuf;
 /// The path is already expanded and lexically normalized, without filesystem
 /// canonicalization or symlink resolution, so identity does not depend on
 /// filesystem state.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SourceId {
     /// An environment variable inherited by the hook process.
     Env { name: String },

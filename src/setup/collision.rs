@@ -2,7 +2,7 @@
 //!
 //! `SET-011`: search readable regular-file bytes under the current selected
 //! project root using the discovery exclusions, include ignored files, exclude
-//! the candidate's entire source dotenv file, never follow symlinks, and skip
+//! every equal-value alias source file, never follow symlinks, and skip
 //! special files. Occurrences are counted as non-overlapping exact byte matches
 //! from left to right, including inside binary or non-UTF-8 files.
 //!
@@ -50,11 +50,11 @@ impl Collisions {
     }
 }
 
-/// One value to search for, with the file that must be excluded from its search.
+/// One value to search for, with the files that must be excluded from its search.
 pub struct Subject<'a> {
     pub value: &'a str,
-    /// The candidate's own dotenv file, excluded in full (`SET-011`).
-    pub source_file: Option<&'a Path>,
+    /// Every known equal-value source file, excluded in full (`SET-011`).
+    pub source_files: &'a [PathBuf],
 }
 
 /// Counts occurrences of every subject under `project_root`.
@@ -107,7 +107,7 @@ fn scan(root: &Path, directory: &Path, subjects: &[Subject<'_>], results: &mut [
         };
         let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
         for (index, subject) in subjects.iter().enumerate() {
-            if subject.source_file == Some(path.as_path()) {
+            if subject.source_files.iter().any(|source| source == &path) {
                 continue;
             }
             let count = count_occurrences(&bytes, subject.value.as_bytes());
@@ -141,14 +141,16 @@ fn count_occurrences(haystack: &[u8], needle: &[u8]) -> usize {
 
 /// Convenience wrapper for one value.
 pub fn analyze_one(project_root: &Path, value: &str, source_file: Option<&Path>) -> Collisions {
-    analyze(project_root, &[Subject { value, source_file }])
-        .pop()
-        .unwrap_or_default()
-}
-
-/// The absolute path of a candidate's dotenv source file, if it has one.
-pub fn source_file(path: Option<&PathBuf>) -> Option<&Path> {
-    path.map(PathBuf::as_path)
+    let source_files: Vec<PathBuf> = source_file.map(Path::to_path_buf).into_iter().collect();
+    analyze(
+        project_root,
+        &[Subject {
+            value,
+            source_files: &source_files,
+        }],
+    )
+    .pop()
+    .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -222,6 +224,26 @@ mod tests {
     }
 
     #[test]
+    fn every_equal_value_alias_file_is_excluded() {
+        let tree = Tree::new();
+        let first = tree.file(".env", b"TOKEN=value\n");
+        let second = tree.file("config/auth.json", br#"{"token":"value"}"#);
+        tree.file("README.md", b"value");
+        let source_files = vec![first, second];
+
+        let collisions = analyze(
+            &tree.root,
+            &[Subject {
+                value: "value",
+                source_files: &source_files,
+            }],
+        );
+
+        assert_eq!(collisions[0].total, 1);
+        assert_eq!(collisions[0].files[0].0, "README.md");
+    }
+
+    #[test]
     fn binary_and_non_utf8_files_are_included() {
         let tree = Tree::new();
         tree.file("blob.bin", &[0x00, 0xff, b'v', b'a', b'l', 0xfe]);
@@ -292,15 +314,15 @@ mod tests {
             &[
                 Subject {
                     value: "alpha",
-                    source_file: None,
+                    source_files: &[],
                 },
                 Subject {
                     value: "beta",
-                    source_file: None,
+                    source_files: &[],
                 },
                 Subject {
                     value: "gamma",
-                    source_file: None,
+                    source_files: &[],
                 },
             ],
         );
