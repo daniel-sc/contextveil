@@ -167,13 +167,13 @@ fn setup_lists_number_toggle_and_other_actions_separately() {
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains(
-        "Choose an action:\n  [1 3]   toggle row(s)\n  [a]     select all\n  [n]     select none\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [Enter] save\n  [s]     skip\n  [q]     quit\n> "
+        "Choose an action:\n  [1 3]   toggle row(s)\n  [a]     select all\n  [n]     select none\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [j]     add JSON field\n  [Enter] save\n  [s]     skip\n  [q]     quit\n> "
     ));
     assert!(transcript.contains(
         "Choose an action:\n  [1 3]   toggle row(s)\n  [Enter] apply\n  [s]     skip\n  [q]     quit\n> "
     ));
     assert!(transcript.contains(
-        "(no candidates found)\nChoose an action:\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n"
+        "(no candidates found)\nChoose an action:\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [j]     add JSON field\n"
     ));
     assert!(
         !transcript.contains("(no candidates found)\nChoose an action:\n  [1 3]   toggle row(s)")
@@ -363,6 +363,81 @@ fn an_unresolved_manual_source_requires_confirmation() {
     assert_eq!(exit, Exit::Ok);
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("ABSENT_TOKEN"));
+}
+
+#[test]
+fn exact_json_fields_can_be_enrolled_manually_in_both_scopes() {
+    let canary = Canary::generate("JSON_SETUP_TOKEN");
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home().join("global-auth.json"),
+        format!(r#"{{"token":"{}"}}"#, canary.value()),
+    )
+    .expect("global JSON");
+    fixture.write(
+        "project-auth.json",
+        &format!(r#"{{"nested":{{"access/token":"{}"}}}}"#, canary.value()),
+    );
+
+    let script =
+        "j\n~/global-auth.json\n/token\n\nj\nproject-auth.json\n/nested/access~1token\n\n\n";
+    let (exit, transcript) = fixture.run(script, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("source = \"json\""));
+    assert!(global.contains("file = \"~/global-auth.json\""));
+    assert!(global.contains("pointer = \"/token\""));
+    assert!(project.contains("file = \"project-auth.json\""));
+    assert!(project.contains("pointer = \"/nested/access~1token\""));
+    assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("global config", global.as_bytes(), &canary);
+    assert_canary_absent("project config", project.as_bytes(), &canary);
+}
+
+#[test]
+fn unresolved_json_may_be_confirmed_but_malformed_json_cannot() {
+    let fixture = Fixture::new();
+    let missing = fixture.home().join("missing.json");
+    let script = format!("j\n{}\n/token\ny\n\n\n\n", missing.display());
+    let (exit, transcript) = fixture.run(&script, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        std::fs::read_to_string(fixture.global_config())
+            .expect("global config")
+            .contains("/token")
+    );
+
+    let fixture = Fixture::new();
+    fixture.write("broken.json", r#"{"token":}"#);
+    let (exit, transcript) =
+        fixture.run("s\nj\nbroken.json\n/token\n\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("Not added; repair the source"));
+    assert!(
+        !std::fs::read_to_string(fixture.project_config())
+            .expect("project config")
+            .contains("broken.json")
+    );
+}
+
+#[test]
+fn arbitrary_json_files_are_not_discovered_or_scanned() {
+    let canary = Canary::generate("UNDISCOVERED_JSON_TOKEN");
+    let fixture = Fixture::new();
+    fixture.write(
+        "auth.json",
+        &format!(r#"{{"VERY_SECRET_TOKEN":"{}"}}"#, canary.value()),
+    );
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!transcript.contains("VERY_SECRET_TOKEN"));
+    assert!(
+        !std::fs::read_to_string(fixture.project_config())
+            .expect("project config")
+            .contains("auth.json")
+    );
 }
 
 #[test]
