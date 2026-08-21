@@ -395,7 +395,8 @@ occurrences in binary or non-UTF-8 regular files.
 
 Alias-file discovery for these exclusions MUST consider resolvable sources and
 candidates from both enrollment phases even though Candidate Groups themselves
-remain phase-local.
+remain phase-local. Exclusions MUST derive from all aliases known during
+discovery, not only the references currently selected in the setup UI.
 
 **SET-012** Collision output MUST show occurrence counts and affected sanitized
 relative filenames. It MUST NOT show values, matched lines, or snippets. Skipped
@@ -447,6 +448,10 @@ in a group.
 The earliest already enrolled reference in existing config order MUST remain
 first within a group. A wholly new group's canonical reference MUST be selected
 deterministically from candidate rank and source identity.
+
+Each Candidate Group MUST show one masked value preview and a sanitized
+description of every represented source. It MUST NOT show or derive a complete
+value or deterministic value fingerprint.
 
 **SET-017** Environment and discovered dotenv values that parse as absolute
 hierarchical URLs with an authority and a non-empty password in userinfo MUST be
@@ -696,8 +701,8 @@ and synthetic protocol behavior.
 
 **DIA-004** Collision findings MUST be warnings only and MUST NOT change runtime
 enrollment or doctor exit status. Doctor MUST canonicalize equal resolved values
-and exclude every enrolled alias source file using the same grouped semantics as
-`SET-011`.
+in effective-registry order and exclude every enrolled alias source file using
+the same grouped semantics as `SET-011`.
 
 **DIA-005** Doctor MUST offer an optional paid/networked Claude live canary only.
 It MUST be disabled by default, require confirmation, use a conspicuous random
