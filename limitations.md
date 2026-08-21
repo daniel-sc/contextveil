@@ -159,21 +159,21 @@ result, and 201 active values over a 512 KiB payload all complete well inside th
 five-second host bound, and runtime cost is linear in input size rather than
 quadratic.
 
-### LIM-011: Remaining Source Expansion Is Not Yet Implemented
+### LIM-011: Known Source Discovery Is Not Yet Implemented
 
 **Reality:** The current binary resolves inherited environment variables, dotenv
-files, and manually enrolled exact JSON pointers. Credential-bearing URL
-suggestions and coding-agent Known Sources are specified but their separately
-tracked implementation commits have not landed.
+files, and manually enrolled exact JSON pointers, and suggests credential-bearing
+URL values from environment and dotenv discovery. Coding-agent Known Sources are
+specified but their separately tracked implementation commit has not landed.
 
 **Impact:** Until that work ships, Known Source credentials are not suggested
-automatically and URL-bearing values remain subject to ordinary name gating.
+automatically.
 
 **Workaround:** Manually enroll supported environment, dotenv, or exact JSON
-references and manually enroll URL-bearing environment/dotenv names.
+references.
 
-**Verification:** Strict config rejects unknown source types. Issues #7 and #11
-track removal of the remaining limitation.
+**Verification:** Strict config rejects unknown source types. Issue #11 tracks
+removal of the remaining limitation.
 
 ## Host Integration Limits
 
@@ -478,27 +478,28 @@ documented response shape for both events. Confirming that the host honors the
 prompt mutation requires a live Copilot run, which is out of scope for automated
 tests (`TST-008`).
 
-### DEV-003: Remaining Source Expansion Contract Is Not Yet Implemented
+### DEV-003: Known Source Discovery Contract Is Not Yet Implemented
 
-Contract: `SET-002`, `SET-006`, `SET-017` through `SET-020`, `TST-003`
+Contract: `SET-002`, `SET-006`, `SET-018` through `SET-020`, `TST-003`
 
 **Observed behavior:** The current binary accepts environment, dotenv, and exact
-JSON references and groups equal resolved values during setup and doctor. It
-still applies name-gated discovery only.
+JSON references, applies name-gated and credential-bearing URL discovery, and
+groups equal resolved values during setup and doctor. Known Source discovery is
+not yet implemented.
 
 **Reason:** The contract was resolved before implementation so the separately
 reviewable feature commits can share one agreed target while shipping in one
 release.
 
-**Impact:** Credential-bearing URL discovery and coding-agent Known Sources do
-not function until the tracked implementation work lands.
+**Impact:** Coding-agent Known Sources do not function until the tracked
+implementation work lands.
 
 **Workaround:** Use the workarounds in `LIM-011` and do not claim the expanded
 source support in release material yet.
 
-**Verification:** Issues #7 and #11 must add the remaining conformance
-coverage required by the contract. Remove this deviation only after all tracked
-feature commits pass `mise run check` together.
+**Verification:** Issue #11 must add the remaining conformance coverage required
+by the contract. Remove this deviation only after that feature commit passes
+`mise run check` with the existing source-expansion coverage.
 
 **Resolution or accepted status:** Temporarily accepted for the documentation and
 tracking change; it blocks release of the expanded source-support claim.

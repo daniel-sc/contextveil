@@ -11,6 +11,7 @@
 //! `crate::sanitize` (`SEC-006`).
 
 pub mod collision;
+pub mod credential_url;
 pub mod discovery;
 pub mod integrations;
 pub mod preview;
@@ -449,8 +450,8 @@ fn build_items(
         candidates.extend(file_candidates(file, &known, &mut resolver, environment));
     }
 
-    // Rank suggestions by their advisory signals; gating already decided which
-    // candidates exist at all (`SET-006`).
+    // Rank suggestions by their admission and advisory signals (`SET-006`,
+    // `SET-017`).
     candidates.sort_by(|left, right| {
         rank_of(right).cmp(&rank_of(left)).then_with(|| {
             left.members[0]
@@ -470,17 +471,24 @@ fn rank_of(item: &Item) -> u32 {
         None => 0,
         Some(value) => {
             let mut signals = vocabulary::value_signals(value);
-            signals.push(Signal::NameMatches("name"));
+            if let Some(signal) = admission_signal(&item.members[0].source, value) {
+                signals.push(signal);
+            }
             vocabulary::rank(&signals)
         }
     }
 }
 
-/// Name-gated environment variables, in a stable order.
+/// Name-gated and credential-bearing URL environment variables, in stable order.
 fn environment_candidates(environment: &Environment) -> Vec<String> {
     let mut names: Vec<String> = environment
         .names()
-        .filter(|name| vocabulary::gating_term(name).is_some())
+        .filter(|name| {
+            vocabulary::gating_term(name).is_some()
+                || environment
+                    .get_str(name)
+                    .is_some_and(credential_url::is_credential_bearing)
+        })
         .map(str::to_string)
         .collect();
     names.sort();
@@ -499,7 +507,11 @@ fn file_candidates(
     };
     dotenv
         .entries()
-        .filter(|(key, value)| !value.is_empty() && vocabulary::gating_term(key).is_some())
+        .filter(|(key, value)| {
+            !value.is_empty()
+                && (vocabulary::gating_term(key).is_some()
+                    || credential_url::is_credential_bearing(value))
+        })
         .map(|(key, _)| SourceRef::DotenvKey {
             entered: entered.clone(),
             path: file.path.clone(),
@@ -523,7 +535,7 @@ fn item_for(
             suppressed: false,
         }],
         enrolled,
-        // `SET-007`: gated candidates are selected by default; collision
+        // `SET-007`: automatic candidates are selected by default; collision
         // analysis may unselect them afterwards.
         selected: true,
         detail: String::new(),
@@ -545,15 +557,8 @@ fn item_for(
             };
             item.detail = match &value {
                 Some(value) => {
-                    // The gating term explains why the candidate is offered at
-                    // all; value signals only explain its rank (`SET-006`).
-                    let mut signals: Vec<Signal> = source
-                        .id()
-                        .key()
-                        .and_then(vocabulary::gating_term)
-                        .map(Signal::NameMatches)
-                        .into_iter()
-                        .collect();
+                    let mut signals: Vec<Signal> =
+                        admission_signal(&source, value).into_iter().collect();
                     signals.extend(vocabulary::value_signals(value));
                     let described: Vec<String> = signals.iter().map(Signal::describe).collect();
                     if described.is_empty() {
@@ -586,6 +591,17 @@ fn item_for(
         }
     }
     item
+}
+
+fn admission_signal(source: &SourceRef, value: &str) -> Option<Signal> {
+    source
+        .id()
+        .key()
+        .and_then(vocabulary::gating_term)
+        .map(Signal::NameMatches)
+        .or_else(|| {
+            credential_url::is_credential_bearing(value).then_some(Signal::CredentialBearingUrl)
+        })
 }
 
 fn merge_item(items: &mut Vec<Item>, mut incoming: Item) {

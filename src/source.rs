@@ -205,7 +205,7 @@ impl Environment {
 
     /// Every UTF-8 variable name in the snapshot, in unspecified order.
     ///
-    /// Setup inspects these for name-gated candidates (`SET-002`).
+    /// Setup inspects these for name-gated and URL-shaped candidates (`SET-002`).
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.variables.keys().filter_map(|name| name.to_str())
     }
