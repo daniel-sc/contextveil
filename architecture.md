@@ -203,6 +203,12 @@ persisted policy never names a Known Source, so changing a definition cannot
 silently change runtime reads; see
 [`ADR-0001`](docs/adr/0001-persist-explicit-source-references.md).
 
+The closed definitions and strict field vocabularies live in
+`src/setup/known_source.rs`. `src/setup/discovery.rs` performs one shared bounded
+project traversal for dotenv files and the anchored Claude
+`.claude/settings.json` and `.mcp.json` patterns. There is no runtime
+`KnownSource` variant: discovery emits existing `SourceReference` variants only.
+
 The first implementation is a closed list of direct discovery functions with
 small shared helpers. It is not a trait registry, manifest language, plugin API,
 or generic structured-file scanner. Machine stores use exact standard or
@@ -210,12 +216,14 @@ setup-time environment-resolved paths. Project discovery performs one bounded
 walk and recognizes only source-specific anchored patterns. Valid unmatched
 structures are ordinary no-match results.
 
-Codex, OpenCode, Copilot, and Claude primary and MCP stores form the first Known
-Source release. Source-visible schemas use exact structural fields. Private
-schemas use per-tool exact vocabularies and pinned fixtures; they never authorize
-generic recursive secret-name matching in unrelated JSON. Keychains, helper
-execution, decoded representations, and other transformations remain outside
-this discovery layer.
+Codex, OpenCode, Copilot, and Claude representable primary and MCP plaintext
+stores form the first Known Source release. Source-visible schemas use exact
+structural fields. Private schemas use per-tool exact vocabularies and pinned
+fixtures; they never authorize generic recursive secret-name matching in
+unrelated JSON. The maintained matrix and evidence are in
+[`docs/known-sources.md`](docs/known-sources.md). JSONC, raw sidecar formats,
+keychains, helper execution, decoded representations, and other transformations
+remain outside this discovery layer.
 
 ## Matcher
 

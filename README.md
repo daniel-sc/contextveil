@@ -40,10 +40,11 @@ secret or control everything an agent can do.
 
 ## Guided Setup, Boring Runtime
 
-`contextveil setup` does the thoughtful part: it suggests likely environment variables and
-entries in `.env` files, lets you manually add an exact JSON field, shows only
-masked previews, lets you choose what to protect, and installs the coding-agent
-integrations you select. It does not scan arbitrary JSON files or keys.
+`contextveil setup` does the thoughtful part: it suggests likely environment
+variables and entries in `.env` files, recognizes a bounded set of coding-agent
+Known Sources, lets you manually add an exact JSON field, shows only masked
+previews, lets you choose what to protect, and installs the integrations you
+select. It does not scan arbitrary JSON files or keys.
 
 Daily use is boring on purpose: ContextVeil reads the current values, performs
 local exact-text replacement, and exits. There is no daemon, no network request,
@@ -56,7 +57,7 @@ And of course it is fast. You won't notice it, promise!
 flowchart TD
     subgraph setup [Setup: run once, rerun when needed]
         direction LR
-        A[Find likely environment variables and .env entries]
+        A[Find likely environment, .env, and Known Source entries]
         B[You choose what to protect]
         C[Install selected coding-agent integrations]
         D[Store where values live, not the values]
@@ -93,6 +94,26 @@ variable,” “the `STRIPE_KEY` entry in `.env.local`,” or “the exact
 `/tokens/access_token` field in `auth.json`.” It does not copy the value into its
 configuration. Changes to `.env` and JSON files apply on the next supported
 event. Environment changes apply after you restart the coding agent.
+
+### Known Source Discovery
+
+Known Sources are advisory setup shortcuts, not an adapter coverage guarantee.
+They inspect strict JSON at maintained paths and persist the selected exact
+environment or JSON references. Valid unknown schemas silently produce no
+candidate; malformed matched strict JSON is shown as unavailable.
+
+| Coding agent | V1 Known Source locations | Important exclusions |
+| --- | --- | --- |
+| Claude Code | `CLAUDE_CONFIG_DIR` or `~/.claude`: non-macOS `.credentials.json`, `settings.json`, and override-root `.claude.json`; default `~/.claude.json`; project `.claude/settings.json` and `.mcp.json` | macOS primary credentials are keychain-backed and not queried |
+| OpenAI Codex CLI | `CODEX_HOME` or `~/.codex`: `auth.json` and `.credentials.json` | Unknown schemas silently no-match |
+| GitHub Copilot CLI | `COPILOT_HOME` or `~/.copilot`: strict-JSON `config.json` `copilotTokens` and immediate 64-lowercase-hex `mcp-oauth-config` `.tokens.json`/`.json` files | Common JSONC `config.json`, raw `.secret`/`.verifier`, and `mcp-secrets` fallback files are not supported |
+| OpenCode | `${XDG_DATA_HOME:-~/.local/share}/opencode`: `auth.json` and `mcp-auth.json`; whole `OPENCODE_AUTH_CONTENT` | The environment value is enrolled whole, not parsed |
+
+Override values are resolved when setup runs, so changes require a rerun.
+Relative overrides are relative to the setup invocation directory; there is no
+shell or tilde expansion. ContextVeil does not query keychains or execute
+credential helpers. See the [exact field matrix and pinned evidence](docs/known-sources.md)
+and [`LIM-023`](limitations.md#lim-023-known-source-discovery-is-advisory).
 
 ## Quick Start
 
@@ -131,7 +152,8 @@ Setup is interactive and safe to rerun. It walks through:
 4. an offline check that the selected integrations work.
 
 Complete secret values are never displayed. Suggestions are only suggestions;
-you make the final choices.
+you make the final choices. Rerun setup after changing a Known Source path
+override or upgrading a host whose credential schema changed.
 
 ### 3. Check It
 
@@ -152,6 +174,9 @@ Then work normally. ContextVeil stays quiet unless it replaces something - then 
 - **Following rotation.** ContextVeil reads the selected environment variables,
   `.env` entries, and exact JSON fields for each supported event instead of
   keeping copied values.
+- **Guiding source enrollment.** Setup recognizes pinned strict-JSON credential
+  fields for Claude Code, Codex CLI, GitHub Copilot CLI, and OpenCode without
+  turning runtime into a generic credential scanner.
 - **Staying small and local.** Runtime has no network calls, telemetry, account,
   subscription, or persistent logging. Safe and fast by design.
 
@@ -184,6 +209,9 @@ boundary:
 - ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
 - Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warning.)
+- Known Source discovery is version-sensitive setup advice, not an adapter
+  coverage guarantee. It excludes JSONC, unsupported raw sidecars, keychains,
+  helpers, and unknown schemas as detailed in `LIM-023`.
 
 See [limitations.md](limitations.md) for the complete security boundary and
 coding-agent-specific gaps.
@@ -267,6 +295,8 @@ mise run release-check
 - [Limitations](limitations.md): complete security and coding-agent boundaries
 - [Vision](vision.md): product intent and non-goals
 - [Architecture](architecture.md): implementation boundaries
+- [Known Source inventory](docs/known-sources.md): exact discovered fields,
+  source-format boundaries, and pinned upstream evidence
 
 ContextVeil is free and open source under MIT OR Apache-2.0. It needs no account
 or hosted runtime.

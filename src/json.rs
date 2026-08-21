@@ -24,6 +24,11 @@ pub enum PointerError {
     Wildcard,
 }
 
+/// Encodes one object member name as an RFC 6901 reference token.
+pub fn encode_token(token: &str) -> String {
+    token.replace('~', "~0").replace('/', "~1")
+}
+
 /// Validates a plain RFC 6901 pointer and returns its decoded final token.
 pub fn final_token(pointer: &str) -> Result<String, PointerError> {
     if !pointer.starts_with('/') {
@@ -198,6 +203,17 @@ mod tests {
             assert!(final_token(pointer).is_err(), "accepted {pointer:?}");
         }
         assert_eq!(final_token("/tokens/*"), Err(PointerError::Wildcard));
+    }
+
+    #[test]
+    fn reference_tokens_are_encoded_in_rfc6901_order() {
+        assert_eq!(encode_token("plain"), "plain");
+        assert_eq!(encode_token("a/b"), "a~1b");
+        assert_eq!(encode_token("a~b/c"), "a~0b~1c");
+        assert_eq!(
+            final_token(&format!("/{}", encode_token("a~b/c"))),
+            Ok("a~b/c".into())
+        );
     }
 
     #[test]
