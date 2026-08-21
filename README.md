@@ -41,8 +41,9 @@ secret or control everything an agent can do.
 ## Guided Setup, Boring Runtime
 
 `contextveil setup` does the thoughtful part: it suggests likely environment variables and
-entries in `.env` files, shows only masked previews, lets you choose what to
-protect, and installs the coding-agent integrations you select.
+entries in `.env` files, lets you manually add an exact JSON field, shows only
+masked previews, lets you choose what to protect, and installs the coding-agent
+integrations you select. It does not scan arbitrary JSON files or keys.
 
 Daily use is boring on purpose: ContextVeil reads the current values, performs
 local exact-text replacement, and exits. There is no daemon, no network request,
@@ -88,8 +89,9 @@ flowchart TD
 ```
 
 ContextVeil stores where to find each value, such as “the `API_TOKEN` environment
-variable” or “the `STRIPE_KEY` entry in `.env.local`.” It does not copy the value
-into its configuration. Changes to `.env` files apply on the next supported
+variable,” “the `STRIPE_KEY` entry in `.env.local`,” or “the exact
+`/tokens/access_token` field in `auth.json`.” It does not copy the value into its
+configuration. Changes to `.env` and JSON files apply on the next supported
 event. Environment changes apply after you restart the coding agent.
 
 ## Quick Start
@@ -147,8 +149,9 @@ Then work normally. ContextVeil stays quiet unless it replaces something - then 
   There is no runtime guess about whether arbitrary text looks sensitive.
 - **Handling private token formats.** A value does not need to match a known API
   key pattern. If you enroll its source, its current exact value can be matched.
-- **Following rotation.** ContextVeil reads the selected environment variables
-  and `.env` entries for each supported event instead of keeping copied values.
+- **Following rotation.** ContextVeil reads the selected environment variables,
+  `.env` entries, and exact JSON fields for each supported event instead of
+  keeping copied values.
 - **Staying small and local.** Runtime has no network calls, telemetry, account,
   subscription, or persistent logging. Safe and fast by design.
 
@@ -210,7 +213,7 @@ ContextVeil keeps source references in:
 - `.contextveil.toml` at the selected project root for project sources.
 
 The two files are additive. Review `.contextveil.toml` before using an untrusted
-project: it can refer to environment variables or `.env` files outside the
+project: it can refer to environment variables, `.env` files, or JSON files outside the
 project. If a selected config is invalid or unreadable,
 ContextVeil uses none of the sources for that event instead of applying partial redaction.
 

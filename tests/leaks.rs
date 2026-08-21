@@ -21,8 +21,8 @@ struct Machine {
 }
 
 impl Machine {
-    /// A machine with the canary enrolled globally, in a project, and in a
-    /// wildcard dotenv file, so every source kind is exercised.
+    /// A machine with the canary enrolled through environment, dotenv, and JSON
+    /// references, so every source kind is exercised.
     fn new() -> Self {
         let canary = Canary::generate("LEAK_TOKEN");
         // The directory name must not contain any part of the canary: paths are
@@ -46,9 +46,14 @@ impl Machine {
         .expect("global config");
         std::fs::write(
             project.join(".contextveil.toml"),
-            "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n",
+            "version = 1\n\n[[secret]]\nsource = \"json\"\nfile = \"auth.json\"\npointer = \"/tokens/access_token\"\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n",
         )
         .expect("project config");
+        std::fs::write(
+            project.join("auth.json"),
+            format!(r#"{{"tokens":{{"access_token":"{}"}}}}"#, canary.value()),
+        )
+        .expect("JSON source");
         std::fs::write(
             project.join(".env"),
             format!(
@@ -119,10 +124,11 @@ impl Machine {
     /// except the dotenv source that legitimately holds it.
     fn assert_files_clean(&self) {
         let dotenv = self.project().join(".env");
+        let json = self.project().join("auth.json");
         let notes = self.project().join("nested").join("notes.txt");
         let mut checked = 0;
         for path in walk(&self.home()) {
-            if path == dotenv || path == notes {
+            if path == dotenv || path == json || path == notes {
                 continue;
             }
             let Ok(bytes) = std::fs::read(&path) else {

@@ -249,7 +249,7 @@ fn enrollment_phase(
                     item.selected = false;
                 }
             }
-            "e" | "k" | "w" => {
+            "e" | "k" | "w" | "j" => {
                 match add_manual(
                     terminal,
                     answer.trim(),
@@ -314,6 +314,13 @@ fn describe(source: &SourceRef) -> String {
         SourceRef::DotenvAll { entered, .. } => {
             format!("dotenv {} (every key)", sanitize::text(entered))
         }
+        SourceRef::Json {
+            entered, pointer, ..
+        } => format!(
+            "json {} pointer {}",
+            sanitize::text(entered),
+            sanitize::text(pointer)
+        ),
     }
 }
 
@@ -550,6 +557,7 @@ fn render_actions(terminal: &mut Terminal<'_>, item_count: usize) {
     terminal.line("  [e]     add env");
     terminal.line("  [k]     add dotenv key");
     terminal.line("  [w]     add wildcard file");
+    terminal.line("  [j]     add JSON field");
     terminal.line("  [Enter] save");
     terminal.line("  [s]     skip");
     terminal.line("  [q]     quit");
@@ -656,6 +664,41 @@ fn add_manual(
                 SourceRef::DotenvAll { entered, path }
             }
         }
+        "j" => {
+            let entered = terminal.ask("JSON file path:")?;
+            let entered = entered.trim().to_string();
+            if entered.is_empty() {
+                terminal.line("  No path entered.");
+                return Ok(());
+            }
+            let path = match paths::expand(&entered, base, home) {
+                Ok(path) => path,
+                Err(problem) => {
+                    terminal.line(&format!("  That path {}.", problem.reason()));
+                    return Ok(());
+                }
+            };
+            let pointer = terminal.ask("JSON Pointer:")?;
+            if pointer.trim().is_empty() {
+                terminal.line("  No pointer entered.");
+                return Ok(());
+            }
+            let token = match crate::json::final_token(&pointer) {
+                Ok(token) => token,
+                Err(_) => {
+                    terminal.line(
+                        "  Enter a plain RFC 6901 pointer beginning with `/`, with a non-empty final token and no wildcards.",
+                    );
+                    return Ok(());
+                }
+            };
+            SourceRef::Json {
+                entered,
+                path,
+                pointer,
+                token,
+            }
+        }
         _ => return Ok(()),
     };
 
@@ -666,7 +709,12 @@ fn add_manual(
 
     let mut resolver = Resolver::new();
     let mut item = item_for(source, false, &mut resolver, environment);
-    if item.problem.is_some() || item.value.is_none() {
+    if item.problem.is_some() {
+        terminal.line(&format!("  This source is currently {}.", item.detail));
+        terminal.line("  Not added; repair the source and try again.");
+        return Ok(());
+    }
+    if item.value.is_none() {
         // `SET-005`: a currently absent manual source may be saved after an
         // explicit confirmation.
         terminal.line(&format!("  This source is currently {}.", item.detail));
@@ -674,7 +722,6 @@ fn add_manual(
             terminal.line("  Not added.");
             return Ok(());
         }
-        item.problem = None;
     }
     item.selected = true;
     items.push(item);

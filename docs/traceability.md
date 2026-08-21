@@ -65,7 +65,7 @@ plugin suite) passed in full, with no failing test.
 | CFG-003 | Setup project root: nearest `.contextveil.toml`, else Git worktree root, else cwd | src/paths.rs (`setup_project_root`) | paths.rs::project_root_selection_prefers_the_nearest_config, ::project_root_falls_back_to_the_git_worktree_then_the_directory, ::a_git_file_marks_a_worktree_root; tests/setup.rs::the_project_root_is_selected_from_the_working_directory | covered |
 | CFG-004 | Runtime uses at most one, nearest-ancestor project registry; no merging | src/paths.rs (`runtime_project_config`); src/registry.rs (`build`) | registry.rs fixture asserting exactly one project registry is used | covered |
 | CFG-005 | Per-adapter project root selection (Claude/OpenCode stable root; Codex/Copilot may use cwd) | src/adapter/claude.rs (project root from host field); src/adapter/opencode.rs (`Request.project_root`); Codex/Copilot adapters use event `cwd` | claude.rs::the_project_registry_is_selected_from_the_host_project_directory; tests/codex_hook.rs and tests/copilot_hook.rs::a_project_registry_is_selected_from_the_event_cwd | covered |
-| CFG-006 | `version = 1` required; unknown fields/types/malformed entries/duplicate identities invalidate the file, including JSON identities | Existing env/dotenv parsing in src/config.rs; JSON identity is pending | Existing config tests cover env/dotenv only | gap |
+| CFG-006 | `version = 1` required; unknown fields/types/malformed entries/duplicate identities invalidate the file, including JSON identities | src/config.rs (`parse`, `parse_entry`); src/source.rs (`SourceRef::id`) | config.rs strict-field and normalized-identity tests for env, dotenv, and JSON | covered |
 | CFG-007 | An env entry needs `source = "env"` plus non-empty `name`, no dotenv fields | src/config.rs (`parse_entry`, "env" arm) | config.rs::environment_entries_reject_dotenv_fields | covered |
 | CFG-008 | A dotenv entry needs `file` plus exactly one of `key`/`all` | src/config.rs (`parse_entry`, "dotenv" arm) | config.rs::dotenv_entries_require_exactly_one_of_key_or_all | covered |
 | CFG-009 | Global/project may share identity; project may reference external files/env names | src/config.rs (no cross-file identity check); src/registry.rs (`build`) | config.rs::project_config_may_reference_external_paths_and_environment_names; registry.rs::cross_scope_duplicate_identities_are_allowed | covered |
@@ -75,7 +75,7 @@ plugin suite) passed in full, with no failing test.
 | CFG-013 | Missing global config warns but keeps valid project redaction; missing project config is normal | src/registry.rs (`Warning::GlobalConfigMissing`); src/config.rs (`Load::Missing`) | registry.rs::a_missing_global_config_warns_but_keeps_project_redaction, ::a_missing_project_config_leaves_project_enrollment_empty | covered |
 | CFG-014 | Setup must not overwrite invalid existing config; shows sanitized path/reason | src/setup/mod.rs (preflight, invalid-config reporting) | tests/setup.rs::an_invalid_existing_config_is_preserved_byte_for_byte, ::an_invalid_project_config_stops_setup_before_the_global_phase | covered |
 | CFG-015 | Setup preserves existing valid enrollment by default; permits deliberate removal; never auto-removes unresolved entries | src/setup/mod.rs (enrollment-preservation logic) | tests/setup.rs::existing_enrollment_survives_a_rerun_even_when_unresolved, ::an_enrolled_entry_can_be_removed_deliberately | covered |
-| CFG-016 | JSON entries require an explicit file and non-empty plain RFC 6901 pointer, with no wildcards or cross-source fields | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
+| CFG-016 | JSON entries require an explicit file and non-empty plain RFC 6901 pointer, with no wildcards or cross-source fields | src/config.rs (`parse_entry`, JSON arm); src/json.rs (`final_token`) | config.rs::json_entries_are_strict_and_require_a_supported_pointer; json.rs pointer-validation tests | covered |
 
 ## 5. Configuration Schema
 
@@ -97,10 +97,10 @@ for section 5.
 | SRC-008 | No ContextVeil-specific dotenv size cap | src/dotenv.rs (linear parser, no size check) | tests/limits.rs (large-dotenv-file case); covered-by-design: absence of any cap-checking code | covered |
 | SRC-009 | Sources resolved afresh per event; no cross-process cache or rotation history | src/source.rs (`Resolver` constructed per event; a file is read once per event only) | source.rs::a_file_is_read_once_per_event_and_duplicates_are_recorded | covered |
 | SRC-010 | Dotenv changes observable next event; env changes need a harness restart | src/source.rs (doc comment tying this to SRC-009's per-event `Resolver`) | covered-by-design: an architectural consequence of a fresh `Resolver` per event plus process-immutable `Environment::from_process()`; not independently testable in-process (would require spawning a new harness process) | covered-by-design |
-| SRC-011 | JSON resolver uses one exact pointer, rejects duplicate members, and performs no transformation | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
-| SRC-012 | Non-empty selected JSON strings resolve; missing/empty/non-string targets are unresolved | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
-| SRC-013 | Missing JSON files are unresolved; malformed/unreadable/non-UTF-8/duplicate-member files malfunction | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
-| SRC-014 | JSON files are parsed once per event where practical and never cached across hook processes | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
+| SRC-011 | JSON resolver uses one exact pointer, rejects duplicate members, and performs no transformation | src/json.rs (strict visitor, `select`); src/source.rs (`JsonFileState`) | json.rs exact-selection and nested-duplicate tests; source.rs JSON resolver tests | covered |
+| SRC-012 | Non-empty selected JSON strings resolve; missing/empty/non-string targets are unresolved | src/source.rs (`SourceRef::Json` resolution) | source.rs::a_json_pointer_resolves_only_a_non_empty_string | covered |
+| SRC-013 | Missing JSON files are unresolved; malformed/unreadable/non-UTF-8/duplicate-member files malfunction | src/source.rs (`read_json`) | source.rs::missing_malformed_non_utf8_and_duplicate_json_are_classified; tests/diagnose.rs::duplicate_json_members_are_a_secret_safe_doctor_failure | covered |
+| SRC-014 | JSON files are parsed once per event where practical and never cached across hook processes | src/source.rs (`Resolver::json_files`, constructed per event) | source.rs::a_json_file_is_parsed_once_per_event_and_fresh_next_event | covered |
 
 ## 7. Setup Discovery And Enrollment (`SET-*`)
 
@@ -110,7 +110,7 @@ for section 5.
 | SET-002 | Setup auto-inspects the process environment for vocabulary, URL, and Known Source candidates | Name-gated inspection exists; URL and Known Source paths are pending | tests/setup.rs::a_gated_environment_candidate_is_enrolled_by_default covers only the existing path | gap |
 | SET-003 | Recursive project dotenv discovery with documented exclusions; no symlinks/special files | src/setup/discovery.rs (`project_dotenv_files`, `walk`) | discovery.rs::discovery_is_recursive_and_includes_untracked_files, ::excluded_directories_are_never_entered, ::symlinks_and_special_files_are_skipped, ::a_fifo_named_like_a_dotenv_file_is_never_read, ::non_utf8_paths_are_reported_as_unavailable | covered |
 | SET-004 | Global dotenv probing bounded to home + harness config directories, non-recursive | src/setup/discovery.rs (`global_dotenv_files`) | discovery.rs::global_probing_is_bounded_to_the_documented_locations; tests/setup.rs::global_dotenv_probing_covers_the_documented_locations | covered |
-| SET-005 | Manual paths/keys/wildcard/env names and JSON pointers allowed; absent manual sources savable after confirmation | Existing source kinds are implemented; manual JSON is pending | tests/setup.rs::an_unresolved_manual_source_requires_confirmation covers only existing kinds | gap |
+| SET-005 | Manual paths/keys/wildcard/env names and JSON pointers allowed; absent manual sources savable after confirmation | src/setup/mod.rs (`add_manual`) | tests/setup.rs::an_unresolved_manual_source_requires_confirmation, ::exact_json_fields_can_be_enrolled_manually_in_both_scopes, ::unresolved_json_may_be_confirmed_but_malformed_json_cannot | covered |
 | SET-006 | Vocabulary remains the default gate, with bounded URL and Known Source exceptions | Vocabulary is implemented; exceptions are pending | Existing vocabulary unit tests only | gap |
 | SET-007 | Automatic candidates selected by default unless colliding; enrolled groups stay selected | Per-source defaults exist; grouped semantics are pending | tests/setup.rs::a_colliding_candidate_is_visible_but_unselected covers only per-source behavior | gap |
 | SET-008 | User is authoritative: enrollment allowed after a collision warning; no minimum length | src/setup/mod.rs (no length gate anywhere in setup or matcher) | tests/setup.rs::a_collision_can_be_overridden_by_the_user; absence of a length check corroborated by REG-001 | covered |
@@ -120,7 +120,7 @@ for section 5.
 | SET-012 | Collision output shows counts and sanitized filenames only, never values/snippets | src/setup/collision.rs (`Collisions::describe`) | collision.rs::reports_contain_filenames_and_counts_but_never_values, ::filenames_are_sanitized_for_the_terminal | covered |
 | SET-013 | Unavailable non-enrolled files excluded without aborting discovery; enrolled malformed sources must be repaired or removed | src/setup/discovery.rs (`inspect`); src/setup/mod.rs (blocking on enrolled malformed sources) | discovery.rs::malformed_and_unreadable_files_are_marked_unavailable; tests/setup.rs::an_enrolled_malformed_source_must_be_repaired_or_removed, ::an_unavailable_discovered_file_does_not_stop_discovery | covered |
 | SET-014 | Atomic writes; independent phase commits; resumable, rollback-capable integration actions | src/setup/write.rs (`write`); src/setup/integrations.rs (phase commit/rollback) | tests/setup.rs::a_project_phase_failure_keeps_the_committed_global_phase, ::cancelling_the_first_phase_writes_nothing, ::rerunning_setup_with_no_changes_is_idempotent, ::rerunning_setup_leaves_an_installed_integration_byte_identical | covered |
-| SET-015 | Multiline menus list all actions, including manual JSON, and repeat after loop actions | Existing menu behavior is covered; manual JSON action is pending | Existing setup transcript tests | gap |
+| SET-015 | Multiline menus list all actions, including manual JSON, and repeat after loop actions | src/setup/mod.rs (`render_actions`) | tests/setup.rs::setup_lists_number_toggle_and_other_actions_separately, ::setup_repeats_the_action_menu_after_a_toggle | covered |
 | SET-016 | Equal current values form phase-local Candidate Groups with all-alias selection, wildcard handling, and stable canonical order | Not implemented; tracked by issue #8 and limitations.md DEV-003 | None yet | gap |
 | SET-017 | Credential-bearing absolute URL values from env/dotenv become whole-value candidates | Not implemented; tracked by issue #7 and limitations.md DEV-003 | None yet | gap |
 | SET-018 | Known Sources are discovery-only, use bounded paths, and persist explicit references | Not implemented; tracked by issue #11 and ADR-0001 | None yet | gap |
@@ -133,7 +133,7 @@ for section 5.
 | --- | --- | --- | --- | --- |
 | REG-001 | Every non-empty UTF-8 resolved value is an exact match pattern; no heuristics apply at runtime | src/matcher.rs (`Redactor::new`) | src/matcher.rs::matching_is_case_sensitive_and_byte_exact, ::matching_is_substring_matching | covered |
 | REG-002 | Duplicate resolved values collapse to one canonical pattern (first project entry, else first global entry, in file order) | src/matcher.rs (value dedup); src/registry.rs (canonical ordering) | src/matcher.rs::duplicate_values_collapse_to_the_canonical_source; src/registry.rs::equal_values_canonicalize_to_the_first_project_entry; src/diagnose.rs alias-warning test | covered |
-| REG-003 | Source/key names are case-sensitive; labels derive from env name, dotenv key, or final JSON pointer token, never a file path | Env/dotenv labels exist; JSON label derivation is pending | Existing secret.rs tests cover env/dotenv only | gap |
+| REG-003 | Source/key names are case-sensitive; labels derive from env name, dotenv key, or final JSON pointer token, never a file path | src/secret.rs (`SourceId::key`, `label`); src/json.rs (`final_token`) | secret.rs::labels_derive_from_the_key_only; source.rs JSON-label test; config.rs case-sensitive JSON identity test | covered |
 | REG-004 | Labels keep ASCII word characters, collapse other runs to `_` | src/secret.rs (`safe_label`) | src/secret.rs::labels_keep_only_the_allowed_character_set, ::labels_collapse_control_and_escape_sequences | covered |
 
 ## 9. Redaction Semantics (`RED-*`)
@@ -241,19 +241,19 @@ for section 5.
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | TST-001 | Matcher tests cover empty/UTF-8/case/substrings/adjacent/overlap/duplicates/canonical labels/multiline/placeholder-fallback/no-recursion | src/matcher.rs unit tests (the named vectors); tests/matcher_property.rs (the same rules over generated input) | src/matcher.rs test module; tests/matcher_property.rs::the_matcher_agrees_with_the_reference_model | covered |
-| TST-002 | Config/source tests include JSON strictness, pointers, duplicate members, and wrong-type targets in addition to existing coverage | Existing env/dotenv coverage only; JSON cases are pending | Existing tests cited above | gap |
+| TST-002 | Config/source tests include JSON strictness, pointers, duplicate members, and wrong-type targets in addition to existing coverage | src/config.rs, src/json.rs, src/source.rs, src/registry.rs test modules | Strict JSON config, pointer escaping, wrong-type, duplicate-member, freshness, and all-or-nothing tests cited above | covered |
 | TST-003 | Filesystem tests include Known Source paths and grouped collision exclusions in addition to existing coverage | Existing filesystem coverage only; new discovery/group cases are pending | Existing tests cited above | gap |
 | TST-004 | Every shipped adapter path has protocol fixtures for clean, intervened, unresolved, malformed-input, diagnosed-malfunction, timeout mapping, and conflicting-installation states | tests/claude_hook.rs, tests/codex_hook.rs, tests/copilot_hook.rs, tests/opencode/plugin.test.ts | tests/claude_hook.rs doc comment cites this explicitly; timeout-mapping tests cited under RUN-004; conflict tests cited under INT-005 | covered |
 | TST-005 | Tests use generated canaries and assert absence from stdout/stderr/diagnostics/snapshots/model-visible content | src/testing.rs (`Canary`, `assert_canary_absent`) | tests/leaks.rs (entire suite); src/fuzz.rs (canary-absence check for every fuzz target) | covered |
-| TST-006 | Fuzz targets cover the matcher and untrusted JSON/TOML/dotenv input; a bounded smoke task runs through mise | src/fuzz.rs (`TARGETS`); src/bin/fuzz_smoke.rs; fuzz/regressions/{matcher,config,dotenv,claude,codex,copilot,opencode,sanitize}/* | scripts/fuzz-smoke.sh; mise.toml `fuzz-smoke` task; .github/workflows/fuzz.yml | covered |
+| TST-006 | Fuzz targets cover the matcher and untrusted JSON/TOML/dotenv input; a bounded smoke task runs through mise | src/fuzz.rs (`TARGETS`, `json_source`); src/bin/fuzz_smoke.rs; fuzz/regressions/{json-source,matcher,config,dotenv,claude,codex,copilot,opencode,sanitize}/* | scripts/fuzz-smoke.sh; mise.toml `fuzz-smoke` task; .github/workflows/fuzz.yml | covered |
 | TST-007 | Routine CI runs format/lint/test/build through mise; release checks exercise artifacts, checksums, install, upgrade | mise.toml (`format-check`, `lint`, `test`, `build`, `check` tasks) | .github/workflows/ci.yml (`mise run check`, `mise run build`); .github/workflows/release.yml (`mise run release-check`) | covered |
 | TST-008 | Optional paid/networked tests do not gate routine CI; REL-008 gates a release only | Routine workflows invoke offline mise tasks; the live qualification is a documented manual release step | Covered by workflow design and review, not a keyword blacklist | covered-by-design |
 
 ## Gaps and manual items
 
-The source-expansion requirements marked `gap` are intentionally pending under
-`limitations.md` DEV-003. Issues #1, #7, #8, and #11 must close those rows before
-the expanded source-support claim ships.
+The remaining source-expansion requirements marked `gap` are intentionally
+pending under `limitations.md` DEV-003. Issues #7, #8, and #11 must close those
+rows before the expanded discovery and grouping claims ship.
 
 **Manual (verifiable only by a human or a paid/networked run):**
 

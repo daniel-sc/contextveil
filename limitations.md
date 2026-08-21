@@ -159,24 +159,23 @@ result, and 201 active values over a 512 KiB payload all complete well inside th
 five-second host bound, and runtime cost is linear in input size rather than
 quadratic.
 
-### LIM-011: Source Expansion Is Not Yet Implemented
+### LIM-011: Remaining Source Expansion Is Not Yet Implemented
 
-**Reality:** The current binary resolves only inherited environment variables and
-dotenv files. The specification now defines exact-pointer JSON sources,
-credential-bearing URL suggestions, Candidate Groups, and coding-agent Known
-Sources, but their separately tracked implementation commits have not landed.
+**Reality:** The current binary resolves inherited environment variables, dotenv
+files, and manually enrolled exact JSON pointers. Credential-bearing URL
+suggestions, Candidate Groups, and coding-agent Known Sources are specified but
+their separately tracked implementation commits have not landed.
 
-**Impact:** Until that work ships, credentials available only through JSON or
-Known Sources cannot be enrolled directly, URL-bearing values remain subject to
-ordinary name gating, and alias source files can produce false collision warnings.
+**Impact:** Until that work ships, Known Source credentials are not suggested
+automatically, URL-bearing values remain subject to ordinary name gating, and
+alias source files can produce false collision warnings.
 
-**Workaround:** Expose the value through a dedicated environment variable or
-dotenv source without copying it into ContextVeil config, manually enroll
-URL-bearing environment/dotenv names, and override advisory collision warnings
-after reviewing them.
+**Workaround:** Manually enroll supported environment, dotenv, or exact JSON
+references, manually enroll URL-bearing environment/dotenv names, and override
+advisory collision warnings after reviewing them.
 
-**Verification:** Strict config currently rejects unknown source types. Issues
-#1, #7, #8, and #11 track removal of this limitation.
+**Verification:** Strict config rejects unknown source types. Issues #7, #8, and
+#11 track removal of the remaining limitation.
 
 ## Host Integration Limits
 
@@ -481,30 +480,28 @@ documented response shape for both events. Confirming that the host honors the
 prompt mutation requires a live Copilot run, which is out of scope for automated
 tests (`TST-008`).
 
-### DEV-003: Source Expansion Contract Is Not Yet Implemented
+### DEV-003: Remaining Source Expansion Contract Is Not Yet Implemented
 
-Contract: `CFG-006`, `CFG-016`, `SRC-011` through `SRC-014`, `SET-002`,
-`SET-005` through `SET-007`, `SET-011`, `SET-015` through `SET-020`, `REG-003`,
-`DIA-004`, `TST-002`, `TST-003`
+Contract: `SET-002`, `SET-006`, `SET-007`, `SET-011`, `SET-016` through
+`SET-020`, `DIA-004`, `TST-003`
 
-**Observed behavior:** The current binary still accepts and resolves only
-environment and dotenv references. It presents one row per source, applies
-name-gated discovery only, and excludes only one source file from each collision
-search.
+**Observed behavior:** The current binary accepts environment, dotenv, and exact
+JSON references. It still presents one row per source, applies name-gated
+discovery only, and excludes only one source file from each collision search.
 
 **Reason:** The contract was resolved before implementation so the separately
 reviewable feature commits can share one agreed target while shipping in one
 release.
 
-**Impact:** JSON, Candidate Groups, credential-bearing URL discovery, and coding
-agent Known Sources do not function until the tracked implementation work lands.
+**Impact:** Candidate Groups, credential-bearing URL discovery, and coding-agent
+Known Sources do not function until the tracked implementation work lands.
 
 **Workaround:** Use the workarounds in `LIM-011` and do not claim the expanded
 source support in release material yet.
 
-**Verification:** Issues #1, #7, #8, and #11 must add the conformance coverage
-required by the contract. Remove this deviation only after all tracked feature
-commits pass `mise run check` together.
+**Verification:** Issues #7, #8, and #11 must add the remaining conformance
+coverage required by the contract. Remove this deviation only after all tracked
+feature commits pass `mise run check` together.
 
 **Resolution or accepted status:** Temporarily accepted for the documentation and
 tracking change; it blocks release of the expanded source-support claim.
