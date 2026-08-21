@@ -65,7 +65,7 @@ plugin suite) passed in full, with no failing test.
 | CFG-003 | Setup project root: nearest `.contextveil.toml`, else Git worktree root, else cwd | src/paths.rs (`setup_project_root`) | paths.rs::project_root_selection_prefers_the_nearest_config, ::project_root_falls_back_to_the_git_worktree_then_the_directory, ::a_git_file_marks_a_worktree_root; tests/setup.rs::the_project_root_is_selected_from_the_working_directory | covered |
 | CFG-004 | Runtime uses at most one, nearest-ancestor project registry; no merging | src/paths.rs (`runtime_project_config`); src/registry.rs (`build`) | registry.rs fixture asserting exactly one project registry is used | covered |
 | CFG-005 | Per-adapter project root selection (Claude/OpenCode stable root; Codex/Copilot may use cwd) | src/adapter/claude.rs (project root from host field); src/adapter/opencode.rs (`Request.project_root`); Codex/Copilot adapters use event `cwd` | claude.rs::the_project_registry_is_selected_from_the_host_project_directory; tests/codex_hook.rs and tests/copilot_hook.rs::a_project_registry_is_selected_from_the_event_cwd | covered |
-| CFG-006 | `version = 1` required; unknown fields/types/malformed entries/duplicate identities invalidate the file | src/config.rs (`parse`, `parse_entry`); src/paths.rs (identity normalization) | config.rs::the_version_is_required_and_pinned, ::unknown_fields_invalidate_the_file, ::unknown_source_types_invalidate_the_file, ::identity_is_computed_after_expansion_and_normalization, ::duplicate_identities_in_one_file_are_rejected, ::a_keyed_entry_and_a_wildcard_entry_for_one_file_may_coexist | covered |
+| CFG-006 | `version = 1` required; unknown fields/types/malformed entries/duplicate identities invalidate the file, including JSON identities | Existing env/dotenv parsing in src/config.rs; JSON identity is pending | Existing config tests cover env/dotenv only | gap |
 | CFG-007 | An env entry needs `source = "env"` plus non-empty `name`, no dotenv fields | src/config.rs (`parse_entry`, "env" arm) | config.rs::environment_entries_reject_dotenv_fields | covered |
 | CFG-008 | A dotenv entry needs `file` plus exactly one of `key`/`all` | src/config.rs (`parse_entry`, "dotenv" arm) | config.rs::dotenv_entries_require_exactly_one_of_key_or_all | covered |
 | CFG-009 | Global/project may share identity; project may reference external files/env names | src/config.rs (no cross-file identity check); src/registry.rs (`build`) | config.rs::project_config_may_reference_external_paths_and_environment_names; registry.rs::cross_scope_duplicate_identities_are_allowed | covered |
@@ -75,11 +75,13 @@ plugin suite) passed in full, with no failing test.
 | CFG-013 | Missing global config warns but keeps valid project redaction; missing project config is normal | src/registry.rs (`Warning::GlobalConfigMissing`); src/config.rs (`Load::Missing`) | registry.rs::a_missing_global_config_warns_but_keeps_project_redaction, ::a_missing_project_config_leaves_project_enrollment_empty | covered |
 | CFG-014 | Setup must not overwrite invalid existing config; shows sanitized path/reason | src/setup/mod.rs (preflight, invalid-config reporting) | tests/setup.rs::an_invalid_existing_config_is_preserved_byte_for_byte, ::an_invalid_project_config_stops_setup_before_the_global_phase | covered |
 | CFG-015 | Setup preserves existing valid enrollment by default; permits deliberate removal; never auto-removes unresolved entries | src/setup/mod.rs (enrollment-preservation logic) | tests/setup.rs::existing_enrollment_survives_a_rerun_even_when_unresolved, ::an_enrolled_entry_can_be_removed_deliberately | covered |
+| CFG-016 | JSON entries require an explicit file and non-empty plain RFC 6901 pointer, with no wildcards or cross-source fields | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
 
 ## 5. Configuration Schema
 
 Schema requirements are numbered under `CFG-*` above (`CFG-006` through
-`CFG-010` cover the schema itself); there is no separate ID range for section 5.
+`CFG-010` and `CFG-016` cover the schema itself); there is no separate ID range
+for section 5.
 
 ## 6. Source Resolution (`SRC-*`)
 
@@ -95,26 +97,35 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | SRC-008 | No ContextVeil-specific dotenv size cap | src/dotenv.rs (linear parser, no size check) | tests/limits.rs (large-dotenv-file case); covered-by-design: absence of any cap-checking code | covered |
 | SRC-009 | Sources resolved afresh per event; no cross-process cache or rotation history | src/source.rs (`Resolver` constructed per event; a file is read once per event only) | source.rs::a_file_is_read_once_per_event_and_duplicates_are_recorded | covered |
 | SRC-010 | Dotenv changes observable next event; env changes need a harness restart | src/source.rs (doc comment tying this to SRC-009's per-event `Resolver`) | covered-by-design: an architectural consequence of a fresh `Resolver` per event plus process-immutable `Environment::from_process()`; not independently testable in-process (would require spawning a new harness process) | covered-by-design |
+| SRC-011 | JSON resolver uses one exact pointer, rejects duplicate members, and performs no transformation | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
+| SRC-012 | Non-empty selected JSON strings resolve; missing/empty/non-string targets are unresolved | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
+| SRC-013 | Missing JSON files are unresolved; malformed/unreadable/non-UTF-8/duplicate-member files malfunction | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
+| SRC-014 | JSON files are parsed once per event where practical and never cached across hook processes | Not implemented; tracked by issue #1 and limitations.md DEV-003 | None yet | gap |
 
 ## 7. Setup Discovery And Enrollment (`SET-*`)
 
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | SET-001 | Setup presents four phases in order after preflight parse of both config files | src/setup/mod.rs (`run`, preflight) | tests/setup.rs::an_invalid_project_config_stops_setup_before_the_global_phase, ::a_project_phase_failure_keeps_the_committed_global_phase | covered |
-| SET-002 | Setup auto-inspects the process environment for name-gated candidates | src/setup/mod.rs (`environment_candidates`) | tests/setup.rs::a_gated_environment_candidate_is_enrolled_by_default | covered |
+| SET-002 | Setup auto-inspects the process environment for vocabulary, URL, and Known Source candidates | Name-gated inspection exists; URL and Known Source paths are pending | tests/setup.rs::a_gated_environment_candidate_is_enrolled_by_default covers only the existing path | gap |
 | SET-003 | Recursive project dotenv discovery with documented exclusions; no symlinks/special files | src/setup/discovery.rs (`project_dotenv_files`, `walk`) | discovery.rs::discovery_is_recursive_and_includes_untracked_files, ::excluded_directories_are_never_entered, ::symlinks_and_special_files_are_skipped, ::a_fifo_named_like_a_dotenv_file_is_never_read, ::non_utf8_paths_are_reported_as_unavailable | covered |
 | SET-004 | Global dotenv probing bounded to home + harness config directories, non-recursive | src/setup/discovery.rs (`global_dotenv_files`) | discovery.rs::global_probing_is_bounded_to_the_documented_locations; tests/setup.rs::global_dotenv_probing_covers_the_documented_locations | covered |
-| SET-005 | Manual paths/keys/wildcard/env names allowed; absent manual source savable after confirmation | src/setup/mod.rs (`add_manual`) | tests/setup.rs::an_unresolved_manual_source_requires_confirmation | covered |
-| SET-006 | Name-gating vocabulary: exact tokens plus compact-form suffixes, ASCII case folding only | src/setup/vocabulary.rs (`gating_term`) | vocabulary.rs unit tests, including `gating_is_ascii_case_insensitive_only`, `unrelated_names_are_not_gated` (checked against the spec's exact token/suffix lists) | covered |
-| SET-007 | Gated candidates selected by default; colliding candidates visible but unselected | src/setup/mod.rs (`item_for`, collision annotation) | tests/setup.rs::a_colliding_candidate_is_visible_but_unselected | covered |
+| SET-005 | Manual paths/keys/wildcard/env names and JSON pointers allowed; absent manual sources savable after confirmation | Existing source kinds are implemented; manual JSON is pending | tests/setup.rs::an_unresolved_manual_source_requires_confirmation covers only existing kinds | gap |
+| SET-006 | Vocabulary remains the default gate, with bounded URL and Known Source exceptions | Vocabulary is implemented; exceptions are pending | Existing vocabulary unit tests only | gap |
+| SET-007 | Automatic candidates selected by default unless colliding; enrolled groups stay selected | Per-source defaults exist; grouped semantics are pending | tests/setup.rs::a_colliding_candidate_is_visible_but_unselected covers only per-source behavior | gap |
 | SET-008 | User is authoritative: enrollment allowed after a collision warning; no minimum length | src/setup/mod.rs (no length gate anywhere in setup or matcher) | tests/setup.rs::a_collision_can_be_overridden_by_the_user; absence of a length check corroborated by REG-001 | covered |
 | SET-009 | Wildcard enrollment requires an additional explicit confirmation | src/setup/mod.rs (`add_manual`, wildcard branch) | tests/setup.rs::wildcard_enrollment_requires_an_extra_confirmation | covered |
 | SET-010 | Preview masking table by Unicode scalar length; no fingerprint shown | src/setup/preview.rs (`mask`, `describe`) | preview.rs unit tests, including `boundaries_follow_the_specified_table`, `length_is_counted_in_unicode_scalar_values`, `no_fingerprint_is_derived_from_the_value` | covered |
-| SET-011 | Collision analysis: byte-exact counting, excludes the candidate's own file, no symlinks/special files | src/setup/collision.rs (`analyze`, `scan`, `count_occurrences`) | collision.rs::occurrences_are_counted_across_the_project, ::the_candidates_own_source_file_is_excluded_entirely, ::binary_and_non_utf8_files_are_included, ::symlinks_and_special_files_are_skipped | covered |
+| SET-011 | Collision analysis is byte-exact and excludes every whole equal-value alias file | Existing scanner excludes only one source file; grouped exclusions are pending | Existing collision tests cover only one source file | gap |
 | SET-012 | Collision output shows counts and sanitized filenames only, never values/snippets | src/setup/collision.rs (`Collisions::describe`) | collision.rs::reports_contain_filenames_and_counts_but_never_values, ::filenames_are_sanitized_for_the_terminal | covered |
 | SET-013 | Unavailable non-enrolled files excluded without aborting discovery; enrolled malformed sources must be repaired or removed | src/setup/discovery.rs (`inspect`); src/setup/mod.rs (blocking on enrolled malformed sources) | discovery.rs::malformed_and_unreadable_files_are_marked_unavailable; tests/setup.rs::an_enrolled_malformed_source_must_be_repaired_or_removed, ::an_unavailable_discovered_file_does_not_stop_discovery | covered |
 | SET-014 | Atomic writes; independent phase commits; resumable, rollback-capable integration actions | src/setup/write.rs (`write`); src/setup/integrations.rs (phase commit/rollback) | tests/setup.rs::a_project_phase_failure_keeps_the_committed_global_phase, ::cancelling_the_first_phase_writes_nothing, ::rerunning_setup_with_no_changes_is_idempotent, ::rerunning_setup_leaves_an_installed_integration_byte_identical | covered |
-| SET-015 | Multiline action menus put numeric row toggling first, list each available action separately, omit row-specific actions when empty, and repeat after each loop action | src/setup/mod.rs (`render_actions`); src/setup/integrations.rs (`render_actions`) | tests/setup.rs::setup_lists_number_toggle_and_other_actions_separately; existing setup transcript tests exercise repeated selection loops and manual actions | covered |
+| SET-015 | Multiline menus list all actions, including manual JSON, and repeat after loop actions | Existing menu behavior is covered; manual JSON action is pending | Existing setup transcript tests | gap |
+| SET-016 | Equal current values form phase-local Candidate Groups with all-alias selection, wildcard handling, and stable canonical order | Not implemented; tracked by issue #8 and limitations.md DEV-003 | None yet | gap |
+| SET-017 | Credential-bearing absolute URL values from env/dotenv become whole-value candidates | Not implemented; tracked by issue #7 and limitations.md DEV-003 | None yet | gap |
+| SET-018 | Known Sources are discovery-only, use bounded paths, and persist explicit references | Not implemented; tracked by issue #11 and ADR-0001 | None yet | gap |
+| SET-019 | Valid unmatched Known Source JSON is silent; discovery uses exact source-specific fields only | Not implemented; tracked by issue #11 | None yet | gap |
+| SET-020 | Initial Known Sources cover four coding agents' primary and verifiable MCP stores without keychain/helper access | Not implemented; tracked by issue #11 | None yet | gap |
 
 ## 8. Effective Registry (`REG-*`)
 
@@ -122,7 +133,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | --- | --- | --- | --- | --- |
 | REG-001 | Every non-empty UTF-8 resolved value is an exact match pattern; no heuristics apply at runtime | src/matcher.rs (`Redactor::new`) | src/matcher.rs::matching_is_case_sensitive_and_byte_exact, ::matching_is_substring_matching | covered |
 | REG-002 | Duplicate resolved values collapse to one canonical pattern (first project entry, else first global entry, in file order) | src/matcher.rs (value dedup); src/registry.rs (canonical ordering) | src/matcher.rs::duplicate_values_collapse_to_the_canonical_source; src/registry.rs::equal_values_canonicalize_to_the_first_project_entry; src/diagnose.rs alias-warning test | covered |
-| REG-003 | Source/key names are case-sensitive; labels derive from the key/name only, never a path | src/secret.rs (`SourceId::key`, `SourceId::label`) | src/secret.rs::labels_derive_from_the_key_only, ::case_is_preserved_because_names_are_case_sensitive | covered |
+| REG-003 | Source/key names are case-sensitive; labels derive from env name, dotenv key, or final JSON pointer token, never a file path | Env/dotenv labels exist; JSON label derivation is pending | Existing secret.rs tests cover env/dotenv only | gap |
 | REG-004 | Labels keep ASCII word characters, collapse other runs to `_` | src/secret.rs (`safe_label`) | src/secret.rs::labels_keep_only_the_allowed_character_set, ::labels_collapse_control_and_escape_sequences | covered |
 
 ## 9. Redaction Semantics (`RED-*`)
@@ -206,7 +217,7 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | DIA-001 | Status inspects config, resolves sources, reports active/unresolved counts without adapter protocol tests; both select project root via CFG-003 from cwd | src/diagnose.rs (status implementation, project-root selection) | tests/diagnose.rs::status_runs_no_adapter_protocol_test, ::the_project_root_follows_the_working_directory | covered |
 | DIA-002 | Registry and integration health are independent facets; zero active values shown as `INACTIVE` | src/diagnose.rs (registry/integration facets kept separate) | tests/diagnose.rs::a_partially_unresolved_registry_is_healthy, ::a_fully_inactive_registry_is_a_health_failure | covered |
 | DIA-003 | Doctor additionally checks permissions, source errors, aliases, collisions, ownership, disabled hooks, conflicts, executables, timeouts, synthetic protocol behavior | src/diagnose.rs (`inspect` and permission/timeout/synthetic-check helpers, ~line 502, 720) | tests/diagnose.rs::malformed_configuration_fails_doctor_but_not_status, ::status_recognizes_a_hook_that_points_at_the_running_binary, ::an_uninstalled_integration_reports_no_timeout | covered |
-| DIA-004 | Collision findings are warnings only; never change enrollment or doctor exit status | src/diagnose.rs (collision findings marked advisory) | tests/diagnose.rs (collision test asserting exit status is unaffected, ~line 916) | covered |
+| DIA-004 | Collision findings remain advisory and doctor applies grouped alias-file exclusions | Advisory status exists; grouped doctor semantics are pending | Existing diagnostic tests cover only per-source collision behavior | gap |
 | DIA-005 | Optional paid/networked Claude live canary, disabled by default, requires confirmation, uses a random non-credential value, and passes only on a present placeholder | src/diagnose.rs (`LiveCanary` enum, `run_live_canary`); src/cli.rs (`run_doctor` gating); src/integration/claude.rs (`classify_canary`) | tests/diagnose.rs::doctor_is_not_offered_the_live_canary_without_a_terminal; src/integration/claude.rs::tests (reply classification: placeholder, inconclusive, disclosure, bytes, empty value); only the network request itself is exercised by a human (see limitations.md DEV-001) | manual |
 | DIA-006 | Codex, Copilot, OpenCode have offline synthetic verification only; passing it does not remove the experimental label | src/diagnose.rs (`verify_offline` call, ~line 611-628) | src/integration/{codex,copilot,opencode}.rs offline-verification tests; tests/diagnose.rs (experimental label persists after a passing check) | covered |
 | DIA-007 | A previous successful verification is never a permanent certificate | src/integration/state.rs (`Managed` stores only command + approved conflicts, no pass/fail history); src/diagnose.rs (re-derives every check on every run) | covered-by-design — no field anywhere persists a "verified" or "last passed" state, so a stale pass cannot be represented; doctor re-runs synthetic checks from scratch on every invocation | covered-by-design |
@@ -230,8 +241,8 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | TST-001 | Matcher tests cover empty/UTF-8/case/substrings/adjacent/overlap/duplicates/canonical labels/multiline/placeholder-fallback/no-recursion | src/matcher.rs unit tests (the named vectors); tests/matcher_property.rs (the same rules over generated input) | src/matcher.rs test module; tests/matcher_property.rs::the_matcher_agrees_with_the_reference_model | covered |
-| TST-002 | Config/source tests cover strict fields, duplicate identities, cross-scope duplicates, missing sources, non-UTF-8 env, malformed dotenv, duplicate keys, path expansion, wildcard future keys, all-or-nothing behavior | src/config.rs, src/source.rs, src/dotenv.rs unit tests | Test names cited under CFG-006..CFG-010 and SRC-001..SRC-007 above | covered |
-| TST-003 | Filesystem tests cover project-root selection, recursive/ignored discovery, exclusions, symlink traversal, collision source-file exclusion, permissions, atomic writes, invalid-config preservation, repeat setup, partial multi-phase failure | tests/setup.rs | Test names cited under SET-003, SET-011, SET-013, SET-014, CFG-014 above | covered |
+| TST-002 | Config/source tests include JSON strictness, pointers, duplicate members, and wrong-type targets in addition to existing coverage | Existing env/dotenv coverage only; JSON cases are pending | Existing tests cited above | gap |
+| TST-003 | Filesystem tests include Known Source paths and grouped collision exclusions in addition to existing coverage | Existing filesystem coverage only; new discovery/group cases are pending | Existing tests cited above | gap |
 | TST-004 | Every shipped adapter path has protocol fixtures for clean, intervened, unresolved, malformed-input, diagnosed-malfunction, timeout mapping, and conflicting-installation states | tests/claude_hook.rs, tests/codex_hook.rs, tests/copilot_hook.rs, tests/opencode/plugin.test.ts | tests/claude_hook.rs doc comment cites this explicitly; timeout-mapping tests cited under RUN-004; conflict tests cited under INT-005 | covered |
 | TST-005 | Tests use generated canaries and assert absence from stdout/stderr/diagnostics/snapshots/model-visible content | src/testing.rs (`Canary`, `assert_canary_absent`) | tests/leaks.rs (entire suite); src/fuzz.rs (canary-absence check for every fuzz target) | covered |
 | TST-006 | Fuzz targets cover the matcher and untrusted JSON/TOML/dotenv input; a bounded smoke task runs through mise | src/fuzz.rs (`TARGETS`); src/bin/fuzz_smoke.rs; fuzz/regressions/{matcher,config,dotenv,claude,codex,copilot,opencode,sanitize}/* | scripts/fuzz-smoke.sh; mise.toml `fuzz-smoke` task; .github/workflows/fuzz.yml | covered |
@@ -240,12 +251,9 @@ Schema requirements are numbered under `CFG-*` above (`CFG-006` through
 
 ## Gaps and manual items
 
-No `gap` rows were found: every one of the 124 requirement IDs in
-specification.md has either working implementation with regression-catching
-tests (`covered`), is satisfied by the deliberate absence of code
-(`covered-by-design`), or is inherently a human/paid/networked check
-(`manual`). The `manual` and `covered-by-design` rows, and the one caveat
-worth a maintainer's attention, are listed below.
+The source-expansion requirements marked `gap` are intentionally pending under
+`limitations.md` DEV-003. Issues #1, #7, #8, and #11 must close those rows before
+the expanded source-support claim ships.
 
 **Manual (verifiable only by a human or a paid/networked run):**
 

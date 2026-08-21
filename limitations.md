@@ -159,19 +159,24 @@ result, and 201 active values over a 512 KiB payload all complete well inside th
 five-second host bound, and runtime cost is linear in input size rather than
 quadratic.
 
-### LIM-011: Limited Source Formats
+### LIM-011: Source Expansion Is Not Yet Implemented
 
-**Reality:** V1 resolves only inherited environment variables and dotenv files.
-It has no literal-value storage, JSON resolver, keychain integration, secret
-manager, shell-profile evaluation, or provider lookup.
+**Reality:** The current binary resolves only inherited environment variables and
+dotenv files. The specification now defines exact-pointer JSON sources,
+credential-bearing URL suggestions, Candidate Groups, and coding-agent Known
+Sources, but their separately tracked implementation commits have not landed.
 
-**Impact:** Credentials available only through other stores cannot be enrolled
-directly.
+**Impact:** Until that work ships, credentials available only through JSON or
+Known Sources cannot be enrolled directly, URL-bearing values remain subject to
+ordinary name gating, and alias source files can produce false collision warnings.
 
 **Workaround:** Expose the value through a dedicated environment variable or
-dotenv source without copying it into ContextVeil config.
+dotenv source without copying it into ContextVeil config, manually enroll
+URL-bearing environment/dotenv names, and override advisory collision warnings
+after reviewing them.
 
-**Verification:** Strict config rejects unknown source types.
+**Verification:** Strict config currently rejects unknown source types. Issues
+#1, #7, #8, and #11 track removal of this limitation.
 
 ## Host Integration Limits
 
@@ -395,6 +400,26 @@ or persisted. Its discovery half additionally creates the file, which runs only
 where the filesystem accepts a non-UTF-8 name; APFS rejects one, so macOS covers
 the reporting half alone.
 
+### LIM-023: Known Source Discovery Is Advisory
+
+**Reality:** Known Sources inspect only maintained exact paths and bounded project
+patterns. They do not crawl arbitrary structured files, query keychains, execute
+credential helpers, or retain their identity in runtime configuration. Valid
+unrecognized schemas are silently treated as no match, and path overrides are
+resolved only when setup runs.
+
+**Impact:** A new or changed third-party schema, keychain-only credential, unusual
+path, or path override changed after setup may not be suggested. Private Copilot
+and Claude schemas are especially version-sensitive.
+
+**Workaround:** Rerun setup after path changes, use manual exact source references
+for supported resolver types, and use the third-party tool's diagnostics for
+keychain-backed credentials.
+
+**Verification:** Fixtures pin every recognized schema and assert unknown fields
+produce no candidate; discovery tests assert that unrelated JSON files are never
+read.
+
 ## Implementation Deviations
 
 ### DEV-001: The Live Claude Canary Has No Automated Coverage
@@ -455,6 +480,34 @@ assurance matters.
 documented response shape for both events. Confirming that the host honors the
 prompt mutation requires a live Copilot run, which is out of scope for automated
 tests (`TST-008`).
+
+### DEV-003: Source Expansion Contract Is Not Yet Implemented
+
+Contract: `CFG-006`, `CFG-016`, `SRC-011` through `SRC-014`, `SET-002`,
+`SET-005` through `SET-007`, `SET-011`, `SET-015` through `SET-020`, `REG-003`,
+`DIA-004`, `TST-002`, `TST-003`
+
+**Observed behavior:** The current binary still accepts and resolves only
+environment and dotenv references. It presents one row per source, applies
+name-gated discovery only, and excludes only one source file from each collision
+search.
+
+**Reason:** The contract was resolved before implementation so the separately
+reviewable feature commits can share one agreed target while shipping in one
+release.
+
+**Impact:** JSON, Candidate Groups, credential-bearing URL discovery, and coding
+agent Known Sources do not function until the tracked implementation work lands.
+
+**Workaround:** Use the workarounds in `LIM-011` and do not claim the expanded
+source support in release material yet.
+
+**Verification:** Issues #1, #7, #8, and #11 must add the conformance coverage
+required by the contract. Remove this deviation only after all tracked feature
+commits pass `mise run check` together.
+
+**Resolution or accepted status:** Temporarily accepted for the documentation and
+tracking change; it blocks release of the expanded source-support claim.
 
 Add future deviations using this template:
 
