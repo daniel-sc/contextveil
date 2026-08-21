@@ -142,6 +142,54 @@ fn a_gated_environment_candidate_is_enrolled_by_default() {
 }
 
 #[test]
+fn a_database_url_candidate_is_enrolled_as_its_environment_source() {
+    let canary = Canary::generate("DATABASE_URL_PASSWORD");
+    let fixture = Fixture::new();
+    let url = format!("postgresql://app:{}@db.example.test/app", canary.value());
+    let environment = fixture.environment(&[("DATABASE_URL", &url)]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("credential-bearing URL"));
+
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("DATABASE_URL"));
+    assert!(!global.contains("postgresql://"));
+    assert_canary_absent("URL setup transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("URL global config", global.as_bytes(), &canary);
+}
+
+#[test]
+fn non_credential_url_shapes_do_not_bypass_name_gating() {
+    let canary = Canary::generate("REJECTED_URL_PASSWORD");
+    let fixture = Fixture::new();
+    let relative = format!("//user:{}@example.test/path", canary.value());
+    let opaque = format!("scheme:user:{}@example.test", canary.value());
+    let environment = fixture.environment(&[
+        ("RELATIVE_URL", &relative),
+        ("OPAQUE_URI", &opaque),
+        ("HOST_URL", "https://example.test/path"),
+        ("USERINFO_URL", "https://user@example.test/path"),
+        ("EMPTY_USERINFO_URL", "https://user:@example.test/path"),
+    ]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    for name in [
+        "RELATIVE_URL",
+        "OPAQUE_URI",
+        "HOST_URL",
+        "USERINFO_URL",
+        "EMPTY_USERINFO_URL",
+    ] {
+        assert!(!global.contains(name), "{name} must not be enrolled");
+    }
+    assert_canary_absent("rejected URL transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("rejected URL config", global.as_bytes(), &canary);
+}
+
+#[test]
 fn setup_shows_a_masked_preview_and_its_reason() {
     let canary = Canary::generate_with_length("API_KEY", 40);
     let fixture = Fixture::new();
@@ -295,6 +343,49 @@ fn project_dotenv_keys_are_discovered_and_gated() {
 }
 
 #[test]
+fn registry_and_proxy_urls_are_discovered_in_dotenv_files() {
+    let registry = Canary::generate("REGISTRY_URL_PASSWORD");
+    let proxy = Canary::generate("PROXY_URL_PASSWORD");
+    let fixture = Fixture::new();
+    fixture.write(
+        ".env.urls",
+        &format!(
+            "REGISTRY=https://publisher:{}@registry.example.test/package\nPROXY=http://agent:{}@proxy.example.test:8080\nLOG_LEVEL=debug\n",
+            registry.value(),
+            proxy.value()
+        ),
+    );
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(project.contains("key = \"REGISTRY\""));
+    assert!(project.contains("key = \"PROXY\""));
+    assert!(!project.contains("LOG_LEVEL"));
+    assert_canary_absent("dotenv URL transcript", transcript.as_bytes(), &registry);
+    assert_canary_absent("dotenv URL transcript", transcript.as_bytes(), &proxy);
+    assert_canary_absent("dotenv URL config", project.as_bytes(), &registry);
+    assert_canary_absent("dotenv URL config", project.as_bytes(), &proxy);
+}
+
+#[test]
+fn equal_url_candidates_use_the_normal_candidate_group() {
+    let canary = Canary::generate("GROUPED_URL_PASSWORD");
+    let fixture = Fixture::new();
+    let url = format!("https://agent:{}@service.example.test", canary.value());
+    let environment = fixture.environment(&[("PRIMARY_URL", &url), ("SECONDARY_URL", &url)]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(transcript.matches("Candidate group (2 sources)").count(), 1);
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("PRIMARY_URL"));
+    assert!(global.contains("SECONDARY_URL"));
+    assert_canary_absent("grouped URL transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("grouped URL config", global.as_bytes(), &canary);
+}
+
+#[test]
 fn equal_environment_candidates_are_one_group_and_enroll_every_alias() {
     let canary = Canary::generate("GROUPED_ENV_TOKEN");
     let fixture = Fixture::new();
@@ -418,6 +509,25 @@ fn a_colliding_candidate_is_visible_but_unselected() {
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     // `SET-007`: shown, but not enrolled without an explicit choice.
     assert!(!project.contains("APP_SECRET"));
+}
+
+#[test]
+fn a_colliding_url_candidate_is_visible_but_unselected() {
+    let canary = Canary::generate("COLLIDING_URL_PASSWORD");
+    let fixture = Fixture::new();
+    let url = format!("https://agent:{}@service.example.test", canary.value());
+    fixture.write("README.md", &url);
+    let environment = fixture.environment(&[("SERVICE_URL", &url)]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("env SERVICE_URL"));
+    assert!(transcript.contains("collision:"));
+    assert!(transcript.contains("README.md"));
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(!global.contains("SERVICE_URL"));
+    assert_canary_absent("colliding URL transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("colliding URL config", global.as_bytes(), &canary);
 }
 
 #[test]
@@ -638,6 +748,27 @@ fn arbitrary_json_files_are_not_discovered_or_scanned() {
             .expect("project config")
             .contains("auth.json")
     );
+}
+
+#[test]
+fn url_looking_json_fields_are_not_automatic_candidates() {
+    let canary = Canary::generate("JSON_URL_PASSWORD");
+    let fixture = Fixture::new();
+    fixture.write(
+        "auth.json",
+        &format!(
+            r#"{{"endpoint":"https://agent:{}@service.example.test"}}"#,
+            canary.value()
+        ),
+    );
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(!project.contains("auth.json"));
+    assert!(!project.contains("/endpoint"));
+    assert_canary_absent("JSON URL transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("JSON URL config", project.as_bytes(), &canary);
 }
 
 #[test]
