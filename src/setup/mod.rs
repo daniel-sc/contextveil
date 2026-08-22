@@ -32,6 +32,7 @@ use crate::source::{Environment, Resolution, Resolver, SourceRef, Unresolved};
 
 use collision::Collisions;
 use discovery::{Discovered, State};
+use known_source::Rule;
 use ui::{Cancelled, Terminal};
 use vocabulary::Signal;
 
@@ -327,6 +328,7 @@ fn cancelled(terminal: &mut Terminal<'_>) -> PhaseResult {
 
 struct Member {
     source: SourceRef,
+    rules: Vec<Rule>,
     enrolled: bool,
     suppressed: bool,
 }
@@ -351,7 +353,6 @@ struct Item {
     /// Whether the user explicitly chose this row rather than accepting setup's
     /// collision-derived default.
     selection_touched: bool,
-    known_source: bool,
 }
 
 impl Item {
@@ -374,6 +375,18 @@ impl Item {
 
     fn visible(&self) -> bool {
         self.is_wildcard() || self.members.iter().any(|member| !member.suppressed)
+    }
+
+    fn rules(&self) -> Vec<Rule> {
+        let mut rules: Vec<Rule> = self
+            .members
+            .iter()
+            .filter(|member| !member.suppressed)
+            .flat_map(|member| member.rules.iter().copied())
+            .collect();
+        rules.sort_unstable();
+        rules.dedup();
+        rules
     }
 }
 
@@ -437,7 +450,7 @@ fn build_items(
     for source in &existing.sources {
         merge_item(
             &mut items,
-            item_for(source.clone(), true, false, &mut resolver, environment),
+            item_for(source.clone(), true, Vec::new(), &mut resolver, environment),
         );
     }
 
@@ -448,13 +461,17 @@ fn build_items(
         .collect();
     let mut candidates: Vec<Item> = Vec::new();
 
-    let discovered_known = match scope {
+    let mut discovered_known = match scope {
         Scope::Global => known_source::machine(environment, home, invocation_directory),
         Scope::Project => known_source::project(project_root, project_files),
     };
     for source in discovered_known.sources {
-        if known.insert(source.id()) {
-            candidates.push(item_for(source, false, true, &mut resolver, environment));
+        let id = source.id();
+        let rules = discovered_known.rules.remove(&id).unwrap_or_default();
+        if known.insert(id.clone()) {
+            candidates.push(item_for(source, false, rules, &mut resolver, environment));
+        } else {
+            add_rules(&mut items, &id, rules);
         }
     }
 
@@ -463,7 +480,13 @@ fn build_items(
         for name in environment_candidates(environment) {
             let source = SourceRef::Env { name };
             if known.insert(source.id()) {
-                candidates.push(item_for(source, false, false, &mut resolver, environment));
+                candidates.push(item_for(
+                    source,
+                    false,
+                    Vec::new(),
+                    &mut resolver,
+                    environment,
+                ));
             }
         }
     }
@@ -501,14 +524,8 @@ fn rank_of(item: &Item) -> u32 {
     match &item.value {
         None => 0,
         Some(value) => {
-            let mut signals = vocabulary::value_signals(value);
-            if item.known_source {
-                signals.push(Signal::KnownSource);
-            }
-            if let Some(signal) = admission_signal(&item.members[0].source, value) {
-                signals.push(signal);
-            }
-            vocabulary::rank(&signals)
+            let admission = if item.rules().is_empty() { 0 } else { 4 };
+            admission + vocabulary::rank(&vocabulary::value_signals(value))
         }
     }
 }
@@ -552,20 +569,21 @@ fn file_candidates(
             key: key.to_string(),
         })
         .filter(|source| !known.contains(&source.id()))
-        .map(|source| item_for(source, false, false, resolver, environment))
+        .map(|source| item_for(source, false, Vec::new(), resolver, environment))
         .collect()
 }
 
 fn item_for(
     source: SourceRef,
     enrolled: bool,
-    known_source: bool,
+    rules: Vec<Rule>,
     resolver: &mut Resolver,
     environment: &Environment,
 ) -> Item {
     let mut item = Item {
         members: vec![Member {
             source: source.clone(),
+            rules,
             enrolled,
             suppressed: false,
         }],
@@ -580,7 +598,6 @@ fn item_for(
         wildcard_values: Vec::new(),
         collisions: None,
         selection_touched: false,
-        known_source,
     };
 
     match resolver.resolve(&source, environment) {
@@ -593,12 +610,12 @@ fn item_for(
             };
             item.detail = match &value {
                 Some(value) => {
-                    let mut signals: Vec<Signal> =
-                        admission_signal(&source, value).into_iter().collect();
-                    if known_source {
-                        signals.push(Signal::KnownSource);
-                    }
-                    signals.extend(vocabulary::value_signals(value));
+                    item.members[0]
+                        .rules
+                        .extend(admission_rules(&source, value));
+                    item.members[0].rules.sort_unstable();
+                    item.members[0].rules.dedup();
+                    let signals = vocabulary::value_signals(value);
                     let described: Vec<String> = signals.iter().map(Signal::describe).collect();
                     if described.is_empty() {
                         preview::describe(value)
@@ -632,15 +649,30 @@ fn item_for(
     item
 }
 
-fn admission_signal(source: &SourceRef, value: &str) -> Option<Signal> {
-    source
-        .id()
-        .key()
-        .and_then(vocabulary::gating_term)
-        .map(Signal::NameMatches)
-        .or_else(|| {
-            credential_url::is_credential_bearing(value).then_some(Signal::CredentialBearingUrl)
-        })
+fn admission_rules(source: &SourceRef, value: &str) -> Vec<Rule> {
+    let mut rules = Vec::new();
+    let name = match source {
+        SourceRef::Env { name } | SourceRef::DotenvKey { key: name, .. } => Some(name.as_str()),
+        SourceRef::DotenvAll { .. } | SourceRef::Json { .. } => None,
+    };
+    if name.and_then(vocabulary::gating_term).is_some() {
+        rules.push(Rule::SecretLikeName);
+    }
+    if name.is_some() && credential_url::is_credential_bearing(value) {
+        rules.push(Rule::CredentialBearingUrl);
+    }
+    rules
+}
+
+fn add_rules(items: &mut [Item], source: &SourceId, rules: Vec<Rule>) {
+    for member in items.iter_mut().flat_map(|item| &mut item.members) {
+        if member.source.id() == *source {
+            member.rules.extend(rules);
+            member.rules.sort_unstable();
+            member.rules.dedup();
+            return;
+        }
+    }
 }
 
 fn merge_item(items: &mut Vec<Item>, mut incoming: Item) {
@@ -652,7 +684,6 @@ fn merge_item(items: &mut Vec<Item>, mut incoming: Item) {
         existing.enrolled |= incoming.enrolled;
         existing.selected |= incoming.selected;
         existing.selection_touched |= incoming.selection_touched;
-        existing.known_source |= incoming.known_source;
         existing.members.append(&mut incoming.members);
         return;
     }
@@ -805,6 +836,11 @@ fn render(terminal: &mut Terminal<'_>, items: &[Item]) {
         }
         if !item.detail.is_empty() {
             terminal.line(&format!("        {}", item.detail));
+        }
+        let rules = item.rules();
+        if !rules.is_empty() {
+            let names: Vec<&str> = rules.iter().map(|rule| rule.display()).collect();
+            terminal.line(&format!("        rules: {}", names.join(", ")));
         }
         if let Some(collisions) = &item.collisions {
             terminal.line(&format!("        collision: {}", collisions.describe()));
@@ -1018,7 +1054,13 @@ fn add_manual(
     }
 
     let mut resolver = Resolver::new();
-    let mut item = item_for(source, false, false, &mut resolver, context.environment);
+    let mut item = item_for(
+        source,
+        false,
+        Vec::new(),
+        &mut resolver,
+        context.environment,
+    );
     if item.problem.is_some() {
         terminal.line(&format!("  This source is currently {}.", item.detail));
         terminal.line("  Not added; repair the source and try again.");

@@ -49,7 +49,7 @@ supported model-context boundary.
 
 Most secret scanners ask at runtime whether arbitrary text looks secret.
 ContextVeil instead asks the user during setup which local sources should be
-enrolled, using bounded Known Source knowledge where it improves discovery,
+enrolled, using bounded Known Source Rules where they improve discovery,
 then performs literal matching against their current values at runtime and
 redacts matches before covered content enters model context.
 
@@ -94,8 +94,8 @@ The normal journey is:
 
 1. Install the standalone binary.
 2. Run `contextveil setup` from a project directory.
-3. Review global and project candidates from environment, dotenv, and supported
-   Known Sources without exposing complete plaintext values.
+3. Review global and project candidates admitted by supported Known Source Rules
+   without exposing complete plaintext values.
 4. Select supported coding-agent integrations.
 5. Work normally; clean events are silent.
 6. See a concise notification only when ContextVeil redacts a value.
@@ -111,9 +111,10 @@ change.
 - **Boring runtime.** Matching is literal, case-sensitive, and deterministic.
 - **Source references over snapshots.** Values are resolved from explicit local
   source references rather than copied into ContextVeil configuration.
-- **Known sources, not generic crawling.** Setup recognizes bounded secret-bearing
-  stores and schemas. It does not recursively inspect arbitrary JSON, YAML, XML,
-  TOML, or similarly named files for secret-like fields.
+- **Known Source Rules, not generic crawling.** Setup applies maintained,
+  deterministic candidate-admission rules for secret-like names,
+  credential-bearing URLs, and bounded secret-bearing store schemas. It does not
+  recursively classify arbitrary structured files by secret-like field names.
 - **One security core.** Harness adapters translate protocols but do not
   reimplement source resolution or matching.
 - **Silent success.** Runtime produces UI only for intervention or malfunction.
@@ -173,7 +174,7 @@ enter model context and are outside the product boundary. See
 
 ## Evolution
 
-Future work may add source formats, additional Known Sources, stronger host
+Future work may add source formats, additional Known Source Rules, stronger host
 integrations, environment controls, or explicit credential grants. Semantic
 decoding and other derived representations remain separate from exact-value
 redaction unless the product security model is deliberately revised.

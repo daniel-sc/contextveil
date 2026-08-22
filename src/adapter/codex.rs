@@ -396,6 +396,7 @@ mod tests {
         for payload in [
             String::new(),
             String::from("not json"),
+            String::from("{hook_event_name: 'PostToolUse'}"),
             String::from("[]"),
             json!({"hook_event_name": "PreToolUse"}).to_string(),
             format!("{{\"leak\":\"{}\"}}", canary.value()),

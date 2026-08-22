@@ -40,11 +40,11 @@ secret or control everything an agent can do.
 
 ## Guided Setup, Boring Runtime
 
-`contextveil setup` does the thoughtful part: it suggests likely environment
-variables and entries in `.env` files, recognizes a bounded set of coding-agent
-Known Sources, lets you manually add an exact JSON field, shows only masked
-previews, lets you choose what to protect, and installs the integrations you
-select. It does not scan arbitrary JSON files or keys.
+`contextveil setup` does the thoughtful part: maintained Known Source Rules
+suggest secret-like names, credential-bearing URLs, and credentials in a bounded
+set of recognized local stores. You can also add sources manually. Setup shows
+only masked previews, lets you choose what to protect, and installs the
+integrations you select. It does not scan arbitrary structured files or keys.
 
 Daily use is boring on purpose: ContextVeil reads the current values, performs
 local exact-text replacement, and exits. There is no daemon, no network request,
@@ -95,25 +95,21 @@ variable,” “the `STRIPE_KEY` entry in `.env.local`,” or “the exact
 configuration. Changes to `.env` and JSON files apply on the next supported
 event. Environment changes apply after you restart the coding agent.
 
-### Known Source Discovery
+### Known Source Rules
 
-Known Sources are advisory setup shortcuts, not an adapter coverage guarantee.
-They inspect strict JSON at maintained paths and persist the selected exact
-environment or JSON references. Valid unknown schemas silently produce no
-candidate; malformed matched strict JSON is shown as unavailable.
+Known Source Rules are advisory setup shortcuts, not adapter coverage
+guarantees. They suggest candidates from broad categories such as familiar
+secret-like environment names, database or registry URLs containing
+credentials, and recognized credential stores used by supported coding agents.
+Every applicable rule runs independently of the integrations you select.
 
-| Coding agent | V1 Known Source locations | Important exclusions |
-| --- | --- | --- |
-| Claude Code | `CLAUDE_CONFIG_DIR` or `~/.claude`: non-macOS `.credentials.json`, `settings.json`, and override-root `.claude.json`; default `~/.claude.json`; project `.claude/settings.json` and `.mcp.json` | macOS primary credentials are keychain-backed and not queried |
-| OpenAI Codex CLI | `CODEX_HOME` or `~/.codex`: `auth.json` and `.credentials.json` | Unknown schemas silently no-match |
-| GitHub Copilot CLI | `COPILOT_HOME` or `~/.copilot`: strict-JSON `config.json` `copilotTokens` and immediate 64-lowercase-hex `mcp-oauth-config` `.tokens.json`/`.json` files | Common JSONC `config.json`, raw `.secret`/`.verifier`, and `mcp-secrets` fallback files are not supported |
-| OpenCode | `${XDG_DATA_HOME:-~/.local/share}/opencode`: `auth.json` and `mcp-auth.json`; whole `OPENCODE_AUTH_CONTENT` | The environment value is enrolled whole, not parsed |
-
-Override values are resolved when setup runs, so changes require a rerun.
-Relative overrides are relative to the setup invocation directory; there is no
-shell or tilde expansion. ContextVeil does not query keychains or execute
-credential helpers. See the [exact field matrix and pinned evidence](docs/known-sources.md)
-and [`LIM-023`](limitations.md#lim-023-known-source-discovery-is-advisory).
+Manual additions and looking for candidate files are not rules: they do not by
+themselves decide that a source should be suggested. ContextVeil can read JSON
+source documents that use comments and other JSON5 syntax, including common
+Copilot configuration. It still does not query keychains, execute credential
+helpers, or read unsupported raw sidecars. See the
+[supported rule inventory and evidence](docs/known-sources.md) and
+[`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).
 
 ## Quick Start
 
@@ -174,8 +170,8 @@ Then work normally. ContextVeil stays quiet unless it replaces something - then 
 - **Following rotation.** ContextVeil reads the selected environment variables,
   `.env` entries, and exact JSON fields for each supported event instead of
   keeping copied values.
-- **Guiding source enrollment.** Setup recognizes pinned strict-JSON credential
-  fields for Claude Code, Codex CLI, GitHub Copilot CLI, and OpenCode without
+- **Guiding source enrollment.** Setup applies maintained rules for likely names,
+  credential-bearing URLs, and recognized coding-agent credential stores without
   turning runtime into a generic credential scanner.
 - **Staying small and local.** Runtime has no network calls, telemetry, account,
   subscription, or persistent logging. Safe and fast by design.
@@ -209,9 +205,9 @@ boundary:
 - ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
 - Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warning.)
-- Known Source discovery is version-sensitive setup advice, not an adapter
-  coverage guarantee. It excludes JSONC, unsupported raw sidecars, keychains,
-  helpers, and unknown schemas as detailed in `LIM-023`.
+- Known Source Rules are version-sensitive setup advice, not an adapter coverage
+  guarantee. Unsupported raw sidecars, keychains, helpers, and unknown schemas
+  remain outside current coverage as detailed in `LIM-023`.
 
 See [limitations.md](limitations.md) for the complete security boundary and
 coding-agent-specific gaps.
@@ -295,8 +291,8 @@ mise run release-check
 - [Limitations](limitations.md): complete security and coding-agent boundaries
 - [Vision](vision.md): product intent and non-goals
 - [Architecture](architecture.md): implementation boundaries
-- [Known Source inventory](docs/known-sources.md): exact discovered fields,
-  source-format boundaries, and pinned upstream evidence
+- [Known Source Rule inventory](docs/known-sources.md): supported rules, exact
+  scopes, planned non-contract rows, and pinned evidence
 
 ContextVeil is free and open source under MIT OR Apache-2.0. It needs no account
 or hosted runtime.

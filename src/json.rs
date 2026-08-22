@@ -1,15 +1,112 @@
-//! Strict JSON parsing and exact RFC 6901 pointer selection (`SRC-011`).
+//! JSON5 source-document parsing and exact RFC 6901 pointer selection.
 //!
 //! Object members are checked while deserializing because parsing directly into
-//! `serde_json::Value` would discard duplicate names before they can be rejected.
+//! a map would discard duplicate names before they can be rejected.
 
 use std::collections::HashSet;
 use std::fmt;
 
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde_json::{Map, Value};
-
 const DUPLICATE_MARKER: &str = "contextveil duplicate object member";
+const MAX_NESTING_DEPTH: usize = 128;
+
+/// A source-document value that can represent JSON5's non-finite numbers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Null,
+    Bool(bool),
+    Number(f64),
+    String(String),
+    Array(Vec<Value>),
+    Object(Object),
+}
+
+impl Value {
+    pub fn as_object(&self) -> Option<&Object> {
+        match self {
+            Self::Object(object) => Some(object),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::String(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            Self::Number(value)
+                if value.is_finite()
+                    && *value >= 0.0
+                    && value.fract() == 0.0
+                    && *value < 18_446_744_073_709_551_616.0 =>
+            {
+                Some(*value as u64)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self, Self::String(_))
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.as_object()?.get(name)
+    }
+
+    pub fn pointer(&self, pointer: &str) -> Option<&Value> {
+        if pointer.is_empty() {
+            Some(self)
+        } else if pointer.starts_with('/') {
+            select(self, pointer)
+        } else {
+            None
+        }
+    }
+}
+
+/// An insertion-ordered object used to keep Known Source discovery deterministic.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Object(Vec<(String, Value)>);
+
+impl Object {
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.0
+            .iter()
+            .find_map(|(key, value)| (key == name).then_some(value))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
+        self.0.iter().map(|(key, value)| (key, value))
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &Value> {
+        self.0.iter().map(|(_, value)| value)
+    }
+}
+
+impl<'a> IntoIterator for &'a Object {
+    type Item = (&'a String, &'a Value);
+    type IntoIter = std::iter::Map<
+        std::slice::Iter<'a, (String, Value)>,
+        fn(&(String, Value)) -> (&String, &Value),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        fn pair(entry: &(String, Value)) -> (&String, &Value) {
+            (&entry.0, &entry.1)
+        }
+        self.0.iter().map(pair)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseError {
@@ -50,9 +147,10 @@ pub fn final_token(pointer: &str) -> Result<String, PointerError> {
     }
 }
 
-/// Parses one complete JSON document, rejecting duplicate members at any depth.
+/// Parses one complete JSON5 document, rejecting duplicate members at any depth.
 pub fn parse(text: &str) -> Result<Value, ParseError> {
-    serde_json::from_str::<StrictValue>(text)
+    preflight(text)?;
+    json5::from_str::<StrictValue>(text)
         .map(|value| value.0)
         .map_err(|error| {
             if error.to_string().contains(DUPLICATE_MARKER) {
@@ -61,6 +159,70 @@ pub fn parse(text: &str) -> Result<Value, ParseError> {
                 ParseError::Malformed
             }
         })
+}
+
+/// Rejects lexical cases the parser dependency accepts too loosely and bounds
+/// recursion before deserialization reaches the process stack.
+fn preflight(text: &str) -> Result<(), ParseError> {
+    #[derive(Clone, Copy)]
+    enum State {
+        Normal,
+        String(char),
+        LineComment,
+        BlockComment,
+    }
+
+    let mut state = State::Normal;
+    let mut depth = 0usize;
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        match state {
+            State::Normal => match character {
+                '\'' | '"' => state = State::String(character),
+                '/' if characters.peek() == Some(&'/') => {
+                    characters.next();
+                    state = State::LineComment;
+                }
+                '/' if characters.peek() == Some(&'*') => {
+                    characters.next();
+                    state = State::BlockComment;
+                }
+                '{' | '[' => {
+                    depth += 1;
+                    if depth > MAX_NESTING_DEPTH {
+                        return Err(ParseError::Malformed);
+                    }
+                }
+                '}' | ']' => depth = depth.saturating_sub(1),
+                _ => {}
+            },
+            State::String(quote) => match character {
+                '\\' => {
+                    if characters.next() == Some('\r') && characters.peek() == Some(&'\n') {
+                        characters.next();
+                    }
+                }
+                character if character == quote => state = State::Normal,
+                _ => {}
+            },
+            State::LineComment => {
+                if matches!(character, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                    state = State::Normal;
+                }
+            }
+            State::BlockComment => {
+                if character == '*' && characters.peek() == Some(&'/') {
+                    characters.next();
+                    state = State::Normal;
+                }
+            }
+        }
+    }
+    if matches!(state, State::BlockComment) {
+        Err(ParseError::Malformed)
+    } else {
+        Ok(())
+    }
 }
 
 /// Selects exactly one value using an already validated pointer.
@@ -120,7 +282,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     type Value = StrictValue;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a JSON value")
+        formatter.write_str("a JSON5 value")
     }
 
     fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
@@ -128,21 +290,18 @@ impl<'de> Visitor<'de> for StrictVisitor {
     }
 
     fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
-        Ok(StrictValue(Value::Number(value.into())))
+        Ok(StrictValue(Value::Number(value as f64)))
     }
 
     fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-        Ok(StrictValue(Value::Number(value.into())))
+        Ok(StrictValue(Value::Number(value as f64)))
     }
 
     fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        serde_json::Number::from_f64(value)
-            .map(Value::Number)
-            .map(StrictValue)
-            .ok_or_else(|| E::custom("invalid JSON number"))
+        Ok(StrictValue(Value::Number(value)))
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
@@ -177,14 +336,14 @@ impl<'de> Visitor<'de> for StrictVisitor {
         A: MapAccess<'de>,
     {
         let mut names = HashSet::new();
-        let mut values = Map::new();
+        let mut values = Vec::new();
         while let Some(name) = object.next_key::<String>()? {
             if !names.insert(name.clone()) {
                 return Err(serde::de::Error::custom(DUPLICATE_MARKER));
             }
-            values.insert(name, object.next_value::<StrictValue>()?.0);
+            values.push((name, object.next_value::<StrictValue>()?.0));
         }
-        Ok(StrictValue(Value::Object(values)))
+        Ok(StrictValue(Value::Object(Object(values))))
     }
 }
 
@@ -243,8 +402,85 @@ mod tests {
     }
 
     #[test]
+    fn full_json5_forms_parse_and_exact_pointers_still_select() {
+        let value = parse(
+            r#"{
+                // JSON5 source documents may use the complete human-friendly grammar.
+                /* Block comments are part of the grammar too. */
+                unquoted: 'selected',
+                'single-quoted key': 'single-quoted value',
+                hex: 0xdecaf,
+                leadingDecimal: .5,
+                trailingDecimal: 5.,
+                exponent: 1e3,
+                positiveInfinity: +Infinity,
+                negativeInfinity: -Infinity,
+                notANumber: NaN,
+                trailing: [true, null,],
+                multiline: 'line one\
+line two',
+            }"#,
+        )
+        .expect("valid JSON5");
+
+        assert_eq!(
+            select(&value, "/unquoted").and_then(Value::as_str),
+            Some("selected")
+        );
+        assert_eq!(
+            select(&value, "/single-quoted key").and_then(Value::as_str),
+            Some("single-quoted value")
+        );
+        for pointer in [
+            "/hex",
+            "/positiveInfinity",
+            "/negativeInfinity",
+            "/notANumber",
+            "/trailing",
+        ] {
+            assert!(select(&value, pointer).is_some(), "missing {pointer}");
+        }
+        assert!(
+            matches!(select(&value, "/positiveInfinity"), Some(Value::Number(value)) if value.is_infinite())
+        );
+        assert!(
+            matches!(select(&value, "/notANumber"), Some(Value::Number(value)) if value.is_nan())
+        );
+
+        let value = parse("{\\u0061ccess: '\\x76alue',\u{a0}other: 'ok'}")
+            .expect("JSON5 identifier escapes, string escapes, and whitespace");
+        assert_eq!(
+            select(&value, "/access").and_then(Value::as_str),
+            Some("value")
+        );
+    }
+
+    #[test]
+    fn json5_duplicate_members_at_every_depth_are_rejected() {
+        assert_eq!(
+            parse("{token: 1, 'token': 2}"),
+            Err(ParseError::DuplicateMember)
+        );
+        assert_eq!(
+            parse("{selected: 'ok', other: {nested: 1, nested: 2}}"),
+            Err(ParseError::DuplicateMember)
+        );
+    }
+
+    #[test]
     fn malformed_and_trailing_input_are_rejected() {
         assert_eq!(parse("{"), Err(ParseError::Malformed));
         assert_eq!(parse("{} trailing"), Err(ParseError::Malformed));
+        assert_eq!(parse("{} /*"), Err(ParseError::Malformed));
+    }
+
+    #[test]
+    fn excessive_nesting_is_rejected_before_deserialization() {
+        let document = format!(
+            "{}'selected'{}",
+            "[".repeat(MAX_NESTING_DEPTH + 1),
+            "]".repeat(MAX_NESTING_DEPTH + 1)
+        );
+        assert_eq!(parse(&document), Err(ParseError::Malformed));
     }
 }

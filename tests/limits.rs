@@ -151,6 +151,37 @@ fn a_deeply_nested_payload_cannot_exhaust_the_stack() {
 }
 
 #[test]
+fn a_deeply_nested_json_source_is_a_malfunction_not_a_stack_overflow() {
+    let machine = Machine::new();
+    let source = machine.home().join("deep.json");
+    let depth = 20_000;
+    std::fs::write(
+        &source,
+        format!(
+            "{}{{token: 'value'}}{}",
+            "[".repeat(depth),
+            "]".repeat(depth)
+        ),
+    )
+    .expect("write nested JSON source");
+    machine.write_global(&format!(
+        "version = 1\n\n[[secret]]\nsource = \"json\"\nfile = {:?}\npointer = \"/token\"\n",
+        source.to_string_lossy()
+    ));
+
+    let payload = json!({
+        "hook_event_name": "PostToolUse",
+        "tool_response": {"stdout": "ordinary output"},
+    })
+    .to_string();
+    let (output, _) = machine.run_hook(&payload, &[]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let response: Value = serde_json::from_slice(&output.stdout).expect("valid JSON warning");
+    assert!(response["systemMessage"].as_str().is_some());
+}
+
+#[test]
 fn a_moderately_nested_payload_is_still_redacted() {
     let canary = Canary::generate("NESTED_TOKEN");
     let machine = Machine::new();

@@ -23,8 +23,9 @@ contextveil doctor
 ```
 
 Setup guides enrollment from environment variables, dotenv files, manual exact
-JSON fields, and the bounded Known Sources below. Known Source discovery is
-advisory and version-sensitive, not an adapter coverage guarantee.
+JSON fields, and maintained Known Source Rules. These rules are advisory and
+version-sensitive, not adapter coverage guarantees, and every applicable rule
+runs independently of selected integrations.
 
 ## Support matrix
 
@@ -40,24 +41,21 @@ production support promise, and always require an affirmative choice during
 setup. Coverage applies only where a local harness loads and honors the installed
 integration.
 
-## Known Source discovery
+## Known Source Rules
 
-This discovery is advisory and version-sensitive, not an adapter coverage
-guarantee.
+Supported setup-time rules admit candidates from secret-like names,
+credential-bearing URLs, and recognized coding-agent credential store schemas.
+Manual additions and filesystem enumeration are not rules. JSON source documents
+use the full JSON5 grammar, so common comment-bearing Copilot configuration is
+supported; duplicate members remain invalid.
 
-| Coding agent | V1 Known Source locations | Important exclusions |
-| --- | --- | --- |
-| Claude Code | `CLAUDE_CONFIG_DIR` or `~/.claude`: non-macOS `.credentials.json`, `settings.json`, and override-root `.claude.json`; default `~/.claude.json`; project `.claude/settings.json` and `.mcp.json` | macOS primary credentials are keychain-backed and not queried |
-| OpenAI Codex CLI | `CODEX_HOME` or `~/.codex`: `auth.json` and `.credentials.json` | Unknown schemas silently no-match |
-| GitHub Copilot CLI | `COPILOT_HOME` or `~/.copilot`: strict-JSON `config.json` `copilotTokens` and immediate 64-lowercase-hex `mcp-oauth-config` `.tokens.json`/`.json` files | Common JSONC `config.json`, raw `.secret`/`.verifier`, and `mcp-secrets` fallback files are not supported |
-| OpenCode | `${XDG_DATA_HOME:-~/.local/share}/opencode`: `auth.json` and `mcp-auth.json`; whole `OPENCODE_AUTH_CONTENT` | The environment value is enrolled whole, not parsed |
-
-Only strict JSON is parsed. Valid unknown schemas silently no-match; malformed
-matched strict JSON is shown as unavailable. Override values resolve during
-setup, relative overrides use the invocation directory, changes require a rerun,
-and no shell or tilde expansion occurs. OS keychains and credential helpers are not
-queried. See the [exact field matrix and pinned evidence](known-sources.md) and
-[`LIM-023`](../limitations.md#lim-023-known-source-discovery-is-advisory).
+Valid unknown schemas silently no-match; malformed matched JSON sources are
+shown as unavailable. Override values resolve during setup, relative overrides
+use the invocation directory, changes require a rerun, and no shell or tilde
+expansion occurs. Raw sidecars, OS keychains, and credential helpers are not
+covered. Planned npmrc and recognized INI store rows are non-contract and are not
+currently scanned. See the [exact rule inventory and pinned evidence](known-sources.md) and
+[`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory).
 
 ## Tested host versions
 
@@ -96,9 +94,9 @@ most important entries:
 - [`LIM-013`](../limitations.md#lim-013-claude-coverage-gaps) through
   [`LIM-016`](../limitations.md#lim-016-opencode-v1-api-only): per-host coverage
   gaps.
-- [`LIM-023`](../limitations.md#lim-023-known-source-discovery-is-advisory):
-  strict-JSON Known Source discovery is advisory and excludes JSONC, raw
-  sidecars, keychains, helpers, and unknown or changed schemas.
+- [`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory): Known
+  Source Rules are advisory; raw sidecars, keychains, helpers, and unknown or
+  changed schemas remain outside coverage.
 
 ## Reporting a vulnerability
 

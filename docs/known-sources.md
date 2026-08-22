@@ -1,18 +1,25 @@
-# Known Source Discovery
+# Known Source Rule Inventory
 
-Known Source discovery is setup-time assistance for recognized coding-agent
-credential stores. It is advisory and version-sensitive, not a guarantee that
-an adapter covers a host or that every host credential will be enrolled. Review
-the candidates and the [adapter support matrix](../README.md#support-and-security-limits)
-separately.
+A **Known Source Rule** is a maintained, deterministic setup-time rule that
+automatically admits candidates. Rules are advisory and version-sensitive, not
+adapter coverage guarantees. Every applicable rule runs regardless of which
+adapters are selected, installed, or detected. The user still chooses what to
+enroll.
 
-ContextVeil reads only the paths and strict-JSON fields listed below. A selected
-candidate is persisted as an ordinary environment or exact JSON source
-reference; there is no runtime `KnownSource` source type. Valid JSON with no
-recognized schema silently produces no candidate. A recognized file that is
-malformed, non-UTF-8, or unreadable is shown as unavailable during setup.
+This is not a guarantee that an adapter covers a host or that every host
+credential is found; there is no runtime `KnownSource` source type. Selected
+candidates persist as ordinary explicit source references. Private schema
+evidence may come from a shipped artifact, not represented as public source-code contracts.
 
-## Discovery Semantics
+Filesystem enumeration only identifies inputs that rules may inspect. Manual
+environment, dotenv, and JSON source additions are user choices. Neither is a
+Known Source Rule.
+
+`Supported` rows are the V1 contract. `Planned` rows are clearly non-contract
+roadmap notes: setup does not currently scan them, and they provide no current
+coverage.
+
+## Shared Semantics
 
 - `CODEX_HOME`, `COPILOT_HOME`, `CLAUDE_CONFIG_DIR`, and `XDG_DATA_HOME` are
   resolved when setup runs. Changing one requires rerunning setup.
@@ -24,102 +31,46 @@ malformed, non-UTF-8, or unreadable is shown as unavailable during setup.
 - Default machine paths are persisted using `~/...`; override paths are
   persisted as resolved explicit paths.
 - Exact machine file paths may be symlinks when the target is a regular file.
-  The one bounded project traversal does not follow file or directory symlinks
-  and applies the normal project discovery exclusions.
-- Only strict UTF-8 JSON without duplicate object members is accepted. JSONC,
-  comments, wildcard field searches, interpolation, decoding, and generic
-  secret-name matching are not supported.
-- Recognized dynamic object members produce candidates only when every member
-  name is representable by an exact `CFG-016` JSON Pointer. Empty names and `*`
-  are unrepresentable and silently produce no candidate.
+  The bounded project traversal does not follow file or directory symlinks and
+  applies normal project discovery exclusions.
+- Enrolled or discovered documents persisted with `source = "json"` use the
+  full JSON5 grammar. Duplicate object members remain invalid. Selection uses an
+  exact RFC 6901 JSON Pointer and only a non-empty selected string resolves.
+  Documents deeper than 128 object or array containers are malformed.
+  Harness protocols and integration files remain strict unless separately
+  specified. See [`ADR-0002`](adr/0002-json-sources-use-json5.md).
+- Valid recognized-path documents with no matching schema silently produce no
+  candidate. Malformed, non-UTF-8, duplicate-member, or unreadable recognized
+  documents are shown as unavailable.
+- Dynamic object members produce candidates only when each member name can be
+  represented by an exact `CFG-016` JSON Pointer. Empty names and `*` silently
+  produce no candidate.
 
-## Codex
+## Rule Inventory
 
-Root: `CODEX_HOME`, or `~/.codex` when it is unset or empty.
+| Rule scope | Status | Exact admission scope and details | Evidence |
+| --- | --- | --- | --- |
+| Secret-like source names | Supported | Environment and discovered dotenv sources are admitted under `SET-006` when ASCII case-folded tokenization or compact suffix matching finds the exact maintained vocabulary in that requirement. Format, entropy, length, and source type do not independently admit a candidate. | Normative scope: [`SET-006`](../specification.md). Current implementation evidence: `src/setup/vocabulary.rs` and its unit fixtures. |
+| Credential-bearing URLs | Supported | Environment and discovered dotenv values are admitted when they are absolute hierarchical URLs with an authority and non-empty password in userinfo. The complete URL is the candidate. JSON sources and other structured sources are not recursively inspected by this rule. | Normative scope: [`SET-017`](../specification.md). Current implementation evidence: `src/setup/credential_url.rs` and setup fixtures. |
+| Codex primary credentials | Supported | Root is `CODEX_HOME`, or `~/.codex` when unset or empty. In `auth.json`, recognize `/OPENAI_API_KEY`; `/tokens/id_token`; `/tokens/access_token`; `/tokens/refresh_token`; `/personal_access_token`; `/bedrock_api_key/api_key`; and either string `/agent_identity` or `/agent_identity/agent_private_key`. | [`openai/codex@ff0e950`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3); issue-time check [`openai/codex@d9fd91e`](https://github.com/openai/codex/commit/d9fd91edab298c2423c0c82526513e4e000284cf). Current fixtures: `src/setup/known_source.rs`. |
+| Codex MCP credentials | Supported | Under the same root, inspect `.credentials.json`. For each immediate object member, recognize `access_token` and optional string `refresh_token` only when `server_name`, `server_url`, `client_id`, and `access_token` are strings and `refresh_token` is absent, null, or a string. | Same pinned Codex commits above; current schema and filesystem fixtures in `src/setup/known_source.rs`. |
+| OpenCode provider credentials | Supported | Root is `${XDG_DATA_HOME}/opencode`, or `~/.local/share/opencode` when unset or empty. In `auth.json`, for each immediate provider object recognize `key` when `type` is `api`; `access` and `refresh` when `type` is `oauth`; and `token` when `type` is `wellknown`. | OpenCode 1.18.18, [`anomalyco/opencode@31406cc`](https://github.com/anomalyco/opencode/commit/31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d); current fixtures in `src/setup/known_source.rs`. |
+| OpenCode MCP credentials | Supported | Under the same root, inspect `mcp-auth.json`. For each immediate server object recognize `tokens.accessToken`, `tokens.refreshToken`, `clientInfo.clientSecret`, and `codeVerifier`. | Same pinned OpenCode commit above; current schema and filesystem fixtures in `src/setup/known_source.rs`. |
+| OpenCode whole environment credential content | Supported | A non-empty `OPENCODE_AUTH_CONTENT` is admitted as one whole environment source. It is not parsed into derived references. | Same pinned OpenCode commit above; current setup fixtures in `src/setup/known_source.rs` and `tests/setup.rs`. |
+| Copilot token configuration | Supported | Root is `COPILOT_HOME`, or `~/.copilot` when unset or empty. In the JSON source `config.json`, admit every non-empty string value in the immediate `copilotTokens` object. Full JSON5 support includes the common comment-bearing configuration form. | Copilot CLI 1.0.80, [`github/copilot-cli@ef627e1`](https://github.com/github/copilot-cli/commit/ef627e1baad937d3c8da45f8a5541c6fc3c97b6a); official docs [`github/docs@838d187`](https://github.com/github/docs/commit/838d18789ba2c51cfe5544b3e5bf1ca3168c2795). The private structure is derived from the shipped artifact; JSON5 and comment-bearing configuration fixtures are in `src/json.rs` and `src/setup/known_source.rs`. |
+| Copilot MCP OAuth credentials | Supported | Inspect only immediate regular files under `mcp-oauth-config`. For a basename of exactly 64 lowercase hexadecimal characters, `<hash>.tokens.json` recognizes top-level `access_token`, `refresh_token`, and `id_token`; `<hash>.json` recognizes top-level `client_secret`. | Same pinned Copilot release and official docs above; private structures are derived from the shipped artifact; current path/schema fixtures in `src/setup/known_source.rs`. |
+| Claude primary OAuth credentials | Supported | Machine root is `CLAUDE_CONFIG_DIR`, or `~/.claude` when unset or empty. On non-macOS only, machine `.credentials.json` recognizes `/claudeAiOauth/accessToken` and `/claudeAiOauth/refreshToken`. macOS primary credentials are keychain-backed and not queried. | Claude Code 2.1.238, [`anthropics/claude-code@8a8e81d`](https://github.com/anthropics/claude-code/commit/8a8e81d098cbd0fae4ee5b9c853542945fe87016); private structures are derived from the shipped artifact; current fixtures in `src/setup/known_source.rs`. |
+| Claude configured environment credentials | Supported | Machine `<root>/settings.json` and project `.claude/settings.json` at any depth recognize immediate `/env` strings named exactly `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_AWS_API_KEY`, `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `CLAUDE_CODE_OAUTH_TOKEN`, or `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE`. | Same pinned Claude release above; current exact-name and anchored-path fixtures in `src/setup/known_source.rs` and `src/setup/discovery.rs`. |
+| Claude MCP OAuth state | Supported | In non-macOS machine `.credentials.json` and machine `.claude.json`, each immediate `/mcpOAuth` entry recognizes `accessToken`, `refreshToken`, and `clientSecret`; each immediate `/mcpOAuthClientConfig` entry recognizes `clientSecret`. With `CLAUDE_CONFIG_DIR`, the user-state file is `<root>/.claude.json`; otherwise it is `~/.claude.json`. | Same pinned Claude release above; private structures are derived from the shipped artifact; current schema fixtures in `src/setup/known_source.rs`. |
+| Claude MCP server credentials | Supported | In machine `.claude.json` and project `.mcp.json` at any depth, inspect each immediate `mcpServers` member. String header names match case-insensitively only `authorization`, `proxy-authorization`, `x-api-key`, `api-key`, `x-auth-token`, or `x-subscription-token`. String environment names match exactly `API_KEY`, `ACCESS_TOKEN`, `AUTH_TOKEN`, `BEARER_TOKEN`, `CLIENT_SECRET`, `PASSWORD`, `SECRET`, `TOKEN`, or one of the eight Claude names in the preceding row. | Same pinned Claude release above; current exact-field and anchored-path fixtures in `src/setup/known_source.rs` and `src/setup/discovery.rs`. |
+| npmrc credentials | Planned | Non-contract. npmrc files and credential entries are not scanned, admitted, or covered by the current rule inventory. Exact paths, grammar, and credential keys remain undecided. | Roadmap only; no implementation or conformance evidence. |
+| Recognized INI credential stores | Planned | Non-contract. INI files are not generically scanned, and no INI store schema family has current coverage. Any future support must name bounded stores, paths, grammar, and exact credential fields. | Roadmap only; no implementation or conformance evidence. |
 
-| File | Exact recognized JSON fields |
-| --- | --- |
-| `auth.json` | `/OPENAI_API_KEY`; `/tokens/id_token`; `/tokens/access_token`; `/tokens/refresh_token`; `/personal_access_token`; `/bedrock_api_key/api_key`; and either a string `/agent_identity` or `/agent_identity/agent_private_key` |
-| `.credentials.json` | For each immediate object member: `access_token` and optional string `refresh_token`, only when `server_name`, `server_url`, `client_id`, and `access_token` are strings and `refresh_token` is absent, null, or a string |
+## Boundaries
 
-Evidence is pinned to [`openai/codex@ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3).
-The issue-time behavior was also checked at
-[`openai/codex@d9fd91edab298c2423c0c82526513e4e000284cf`](https://github.com/openai/codex/commit/d9fd91edab298c2423c0c82526513e4e000284cf).
-
-## OpenCode
-
-Root: `${XDG_DATA_HOME}/opencode`, or `~/.local/share/opencode` when
-`XDG_DATA_HOME` is unset or empty. A non-empty `OPENCODE_AUTH_CONTENT` is also
-offered as one whole environment source; ContextVeil does not parse it into
-derived references.
-
-| File | Exact recognized JSON fields |
-| --- | --- |
-| `auth.json` | For each immediate provider object: `key` when `type` is `api`; `access` and `refresh` when `type` is `oauth`; `token` when `type` is `wellknown` |
-| `mcp-auth.json` | For each immediate server object: `tokens.accessToken`, `tokens.refreshToken`, `clientInfo.clientSecret`, and `codeVerifier` |
-
-Evidence is pinned to OpenCode 1.18.18 at
-[`anomalyco/opencode@31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d`](https://github.com/anomalyco/opencode/commit/31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d).
-
-## GitHub Copilot CLI
-
-Root: `COPILOT_HOME`, or `~/.copilot` when it is unset or empty.
-
-| File | Exact recognized JSON fields |
-| --- | --- |
-| `config.json` | Every non-empty string value in the immediate `copilotTokens` object |
-| `mcp-oauth-config/<hash>.tokens.json` | Top-level `access_token`, `refresh_token`, and `id_token`, where `<hash>` is exactly 64 lowercase hexadecimal characters |
-| `mcp-oauth-config/<hash>.json` | Top-level `client_secret`, with the same exact filename rule |
-
-Only immediate regular files with those exact names are inspected. Copilot CLI
-1.0.80 commonly writes a comment-bearing JSONC `config.json`; the V1 strict-JSON
-resolver cannot enroll fields from that file and setup shows it as unavailable.
-Raw `.secret` and `.verifier` files and `mcp-secrets` fallback files cannot be
-represented by V1 environment, dotenv, or exact-JSON source references and are
-not discovered.
-
-Release behavior is pinned to GitHub Copilot CLI 1.0.80 at
-[`github/copilot-cli@ef627e1baad937d3c8da45f8a5541c6fc3c97b6a`](https://github.com/github/copilot-cli/commit/ef627e1baad937d3c8da45f8a5541c6fc3c97b6a),
-with official documentation pinned at
-[`github/docs@838d18789ba2c51cfe5544b3e5bf1ca3168c2795`](https://github.com/github/docs/commit/838d18789ba2c51cfe5544b3e5bf1ca3168c2795).
-The private `copilotTokens` and MCP file structures are derived from the shipped
-1.0.80 artifact, not represented as public source-code contracts.
-
-## Claude Code
-
-Machine root: `CLAUDE_CONFIG_DIR`, or `~/.claude` when it is unset or empty.
-With an override, the user-state file is `<root>/.claude.json`; without one, it
-is `~/.claude.json` alongside the default `~/.claude` directory.
-
-| Scope and file | Exact recognized JSON fields |
-| --- | --- |
-| Non-macOS machine `.credentials.json` | `/claudeAiOauth/accessToken`; `/claudeAiOauth/refreshToken`; each immediate entry's `accessToken`, `refreshToken`, and `clientSecret` under `/mcpOAuth`; each immediate entry's `clientSecret` under `/mcpOAuthClientConfig` |
-| Machine `settings.json` | Immediate `/env` strings named `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_AWS_API_KEY`, `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `CLAUDE_CODE_OAUTH_TOKEN`, or `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE` |
-| Machine `.claude.json` | The `mcpOAuth` and `mcpOAuthClientConfig` fields above, plus the exact MCP server fields below |
-| Project `.claude/settings.json` at any depth | The exact `/env` names listed for machine `settings.json` |
-| Project `.mcp.json` at any depth | The exact MCP server fields below |
-
-For each immediate `mcpServers` member, discovery recognizes string header
-values whose names case-insensitively equal `authorization`,
-`proxy-authorization`, `x-api-key`, `api-key`, `x-auth-token`, or
-`x-subscription-token`. It recognizes string environment values whose names
-exactly equal `API_KEY`, `ACCESS_TOKEN`, `AUTH_TOKEN`, `BEARER_TOKEN`,
-`CLIENT_SECRET`, `PASSWORD`, `SECRET`, `TOKEN`, or one of the eight Claude names
-listed in the table. Other settings, headers, and environment names do not
-match.
-
-On macOS, Claude's primary credentials are keychain-backed. ContextVeil does not
-query the keychain, so primary `.credentials.json` discovery is non-macOS only.
-Public release evidence is pinned to Claude Code 2.1.238 at
-[`anthropics/claude-code@8a8e81d098cbd0fae4ee5b9c853542945fe87016`](https://github.com/anthropics/claude-code/commit/8a8e81d098cbd0fae4ee5b9c853542945fe87016).
-The private credential structures are derived from the shipped 2.1.238 artifact,
-not represented as public source-code contracts.
-
-## Permanent Boundary
-
-Known Source discovery does not query OS keychains, execute credential helpers,
-read raw credential sidecars, parse JSONC, or promise coverage for a future host
-version. These are source-format and discovery boundaries, not unimplemented
-parts of the listed V1 contract. Manually enroll a supported environment,
-dotenv, or strict-JSON source when possible, and rerun setup after host or path
-changes. See [`LIM-023`](../limitations.md#lim-023-known-source-discovery-is-advisory).
+Recognized store rules do not query OS keychains, execute credential helpers,
+read raw credential sidecars, decode values, or promise coverage for a future
+host version. Copilot `.secret` and `.verifier` files and `mcp-secrets` fallback
+files remain unsupported. Manually enroll a representable environment, dotenv,
+or JSON source when possible, and rerun setup after host or path changes. See
+[`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory).

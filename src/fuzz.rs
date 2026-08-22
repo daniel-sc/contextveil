@@ -111,7 +111,7 @@ pub fn dotenv(data: &[u8]) {
     }
 }
 
-/// Strict JSON documents and exact pointer traversal (`SRC-011`, `TST-006`).
+/// JSON5 source documents and exact pointer traversal (`SRC-011`, `TST-006`).
 pub fn json_source(data: &[u8]) {
     let Ok(text) = std::str::from_utf8(data) else {
         return;

@@ -229,11 +229,11 @@ enum FileState {
 #[derive(Debug, Clone, PartialEq)]
 enum JsonFileState {
     Missing,
-    Parsed(serde_json::Value),
+    Parsed(json::Value),
     Malfunction(SourceMalfunction),
 }
 
-/// Resolves source references, reading each dotenv file at most once per event.
+/// Resolves source references, reading each dotenv or JSON file once per event.
 #[derive(Debug, Clone, Default)]
 pub struct Resolver {
     files: HashMap<PathBuf, FileState>,
@@ -326,13 +326,13 @@ impl Resolver {
                             source: id,
                             why: Unresolved::PointerAbsent,
                         },
-                        Some(serde_json::Value::String(value)) if value.is_empty() => {
+                        Some(json::Value::String(value)) if value.is_empty() => {
                             Resolution::Unresolved {
                                 source: id,
                                 why: Unresolved::Empty,
                             }
                         }
-                        Some(serde_json::Value::String(value)) => {
+                        Some(json::Value::String(value)) => {
                             Resolution::Resolved(vec![ResolvedSecret::new(id, value.clone())])
                         }
                         Some(_) => Resolution::Unresolved {
@@ -755,6 +755,52 @@ mod tests {
             }
         ));
         for pointer in ["/tokens/null", "/tokens/number", "/tokens"] {
+            assert!(matches!(
+                resolver.resolve(&json_ref(&path, pointer), &environment),
+                Resolution::Unresolved {
+                    why: Unresolved::NotString,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn a_json5_pointer_resolves_strings_and_leaves_every_other_type_unresolved() {
+        let canary = Canary::generate("JSON5_TOKEN");
+        let fixture = Fixture::new();
+        let path = fixture.write(
+            "copilot-config.json",
+            &format!(
+                r#"{{
+                    // Copilot CLI writes comment-bearing configuration.
+                    copilotTokens: {{ 'github.com': '{}', }},
+                    hex: 0x10,
+                    infinity: Infinity,
+                    nan: NaN,
+                    boolean: true,
+                    nothing: null,
+                    array: ['value'],
+                }}"#,
+                canary.value()
+            ),
+        );
+        let environment = Environment::default();
+        let mut resolver = Resolver::new();
+
+        match resolver.resolve(&json_ref(&path, "/copilotTokens/github.com"), &environment) {
+            Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, canary.value()),
+            other => panic!("expected a resolved JSON5 string, got {other:?}"),
+        }
+        for pointer in [
+            "/hex",
+            "/infinity",
+            "/nan",
+            "/boolean",
+            "/nothing",
+            "/array",
+            "/copilotTokens",
+        ] {
             assert!(matches!(
                 resolver.resolve(&json_ref(&path, pointer), &environment),
                 Resolution::Unresolved {

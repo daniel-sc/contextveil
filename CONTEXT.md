@@ -10,10 +10,18 @@ A durable pointer naming where a protected value can be resolved without storing
 the value itself.
 _Avoid_: Secret snapshot, stored secret
 
+**Known Source Rule**:
+A maintained, deterministic setup-time rule that automatically admits
+candidates. The supported rule families are the secret-like name rule, the
+credential-bearing URL rule, and recognized store schema-family rules. Every
+applicable rule runs regardless of which adapters are selected or installed.
+_Avoid_: Detector, source adapter, adapter-specific discovery
+
 **Known Source**:
-A recognized class of secret-bearing local store that ContextVeil knows how to
-discover and interpret.
-_Avoid_: Named source, source adapter
+A local source recognized by a Known Source Rule. Use this shorter phrase only
+when referring to a source or to the inventory collectively, not to the rule
+itself.
+_Avoid_: Rule name, runtime source type
 
 **Enrolled Source**:
 A source reference or file policy the user has chosen to protect.
@@ -23,6 +31,16 @@ _Avoid_: Detected secret, scanned secret
 A source that setup presents for possible enrollment based on discovery and
 advisory heuristics.
 _Avoid_: Detected secret, confirmed secret
+
+Manual source additions and filesystem enumeration make sources available for
+review but are not Known Source Rules because they do not themselves admit a
+candidate.
+
+**JSON Source**:
+An enrolled or discovered UTF-8 JSON5 document persisted with `source = "json"`
+and resolved through one exact RFC 6901 JSON Pointer. `JSON source` is the public
+phrase even though the accepted document grammar is JSON5.
+_Avoid_: JSONC source, JSON5 source type
 
 **Candidate Group**:
 A setup choice within one enrollment scope containing candidate source references
