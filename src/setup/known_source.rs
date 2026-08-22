@@ -1,18 +1,17 @@
-//! Closed, setup-time discovery for supported coding-agent credential stores.
+//! Known Source Rule identities and closed setup-time credential-store discovery.
 //!
-//! Every match becomes an ordinary environment or exact JSON reference. JSONC,
-//! transformed values, keychains, helpers, and broad directory recursion are
+//! Every match becomes an ordinary environment or exact JSON reference.
+//! Transformed values, keychains, helpers, and broad directory recursion are
 //! deliberately outside this module.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
-
-use crate::json;
+use crate::json::{self, Object, Value};
 use crate::paths;
 use crate::sanitize;
+use crate::secret::SourceId;
 use crate::source::{Environment, SourceRef};
 
 use super::discovery::ProjectFiles;
@@ -46,10 +45,68 @@ const MCP_HEADERS: [&str; 6] = [
     "x-subscription-token",
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Rule {
+    SecretLikeName,
+    CredentialBearingUrl,
+    CodexPrimaryCredentials,
+    CodexMcpCredentials,
+    OpenCodeProviderCredentials,
+    OpenCodeMcpCredentials,
+    OpenCodeAuthContent,
+    CopilotTokenConfiguration,
+    CopilotMcpOauthCredentials,
+    ClaudePrimaryOauthCredentials,
+    ClaudeConfiguredEnvironment,
+    ClaudeMcpOauthState,
+    ClaudeMcpServerCredentials,
+}
+
+impl Rule {
+    pub fn display(self) -> &'static str {
+        match self {
+            Self::SecretLikeName => "secret-like source name",
+            Self::CredentialBearingUrl => "credential-bearing URL",
+            Self::CodexPrimaryCredentials => "Codex primary credentials",
+            Self::CodexMcpCredentials => "Codex MCP credentials",
+            Self::OpenCodeProviderCredentials => "OpenCode provider credentials",
+            Self::OpenCodeMcpCredentials => "OpenCode MCP credentials",
+            Self::OpenCodeAuthContent => "OpenCode whole environment credential content",
+            Self::CopilotTokenConfiguration => "Copilot token configuration",
+            Self::CopilotMcpOauthCredentials => "Copilot MCP OAuth credentials",
+            Self::ClaudePrimaryOauthCredentials => "Claude primary OAuth credentials",
+            Self::ClaudeConfiguredEnvironment => "Claude configured environment credentials",
+            Self::ClaudeMcpOauthState => "Claude MCP OAuth state",
+            Self::ClaudeMcpServerCredentials => "Claude MCP server credentials",
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Found {
     pub sources: Vec<SourceRef>,
+    pub rules: HashMap<SourceId, Vec<Rule>>,
     pub notices: Vec<Notice>,
+}
+
+impl Found {
+    fn mark_since(&mut self, start: usize, rule: Rule) {
+        self.mark_since_where(start, rule, |_| true);
+    }
+
+    fn mark_since_where(&mut self, start: usize, rule: Rule, matches: impl Fn(&SourceRef) -> bool) {
+        let ids: Vec<SourceId> = self.sources[start..]
+            .iter()
+            .filter(|source| matches(source))
+            .map(SourceRef::id)
+            .collect();
+        for id in ids {
+            let rules = self.rules.entry(id).or_default();
+            if !rules.contains(&rule) {
+                rules.push(rule);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -68,9 +125,11 @@ pub fn machine(environment: &Environment, home: Option<&Path>, base: &Path) -> F
         .get_str("OPENCODE_AUTH_CONTENT")
         .is_some_and(|value| !value.is_empty())
     {
+        let start = found.sources.len();
         found.sources.push(SourceRef::Env {
             name: "OPENCODE_AUTH_CONTENT".into(),
         });
+        found.mark_since(start, Rule::OpenCodeAuthContent);
     }
     deduplicate(&mut found.sources);
     found
@@ -79,20 +138,24 @@ pub fn machine(environment: &Environment, home: Option<&Path>, base: &Path) -> F
 pub fn project(project_root: &Path, files: &ProjectFiles) -> Found {
     let mut found = Found::default();
     for path in &files.claude_settings {
+        let start = found.sources.len();
         inspect(
             &mut found,
             path,
             project_entry(project_root, path),
             settings_sources,
         );
+        found.mark_since(start, Rule::ClaudeConfiguredEnvironment);
     }
     for path in &files.claude_mcp {
+        let start = found.sources.len();
         inspect(
             &mut found,
             path,
             project_entry(project_root, path),
             mcp_server_sources,
         );
+        found.mark_since(start, Rule::ClaudeMcpServerCredentials);
     }
     deduplicate(&mut found.sources);
     found
@@ -103,6 +166,7 @@ fn codex(found: &mut Found, environment: &Environment, home: Option<&Path>, base
     else {
         return;
     };
+    let start = found.sources.len();
     inspect_at(
         found,
         &root.join("auth.json"),
@@ -135,6 +199,8 @@ fn codex(found: &mut Found, environment: &Environment, home: Option<&Path>, base
             }
         },
     );
+    found.mark_since(start, Rule::CodexPrimaryCredentials);
+    let start = found.sources.len();
     inspect_at(
         found,
         &root.join(".credentials.json"),
@@ -150,7 +216,7 @@ fn codex(found: &mut Found, environment: &Environment, home: Option<&Path>, base
                 };
                 if !["server_name", "server_url", "client_id", "access_token"]
                     .iter()
-                    .all(|field| entry.get(*field).is_some_and(Value::is_string))
+                    .all(|field| entry.get(field).is_some_and(Value::is_string))
                     || !matches!(
                         entry.get("refresh_token"),
                         None | Some(Value::Null) | Some(Value::String(_))
@@ -175,6 +241,7 @@ fn codex(found: &mut Found, environment: &Environment, home: Option<&Path>, base
             }
         },
     );
+    found.mark_since(start, Rule::CodexMcpCredentials);
 }
 
 fn opencode(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
@@ -186,6 +253,7 @@ fn opencode(found: &mut Found, environment: &Environment, home: Option<&Path>, b
         },
         Override::Unavailable => return,
     };
+    let start = found.sources.len();
     inspect_at(
         found,
         &root.0.join("auth.json"),
@@ -193,6 +261,8 @@ fn opencode(found: &mut Found, environment: &Environment, home: Option<&Path>, b
         root.1,
         opencode_auth_sources,
     );
+    found.mark_since(start, Rule::OpenCodeProviderCredentials);
+    let start = found.sources.len();
     inspect_at(
         found,
         &root.0.join("mcp-auth.json"),
@@ -200,6 +270,7 @@ fn opencode(found: &mut Found, environment: &Environment, home: Option<&Path>, b
         root.1,
         opencode_mcp_auth_sources,
     );
+    found.mark_since(start, Rule::OpenCodeMcpCredentials);
 }
 
 fn opencode_auth_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
@@ -231,7 +302,7 @@ fn opencode_auth_sources(value: &Value, path: &Path, entered: &str, out: &mut Ve
             _ => continue,
         };
         for field in fields {
-            add_dynamic(entry.get(*field), path, entered, &[provider, field], out);
+            add_dynamic(entry.get(field), path, entered, &[provider, field], out);
         }
     }
 }
@@ -273,6 +344,7 @@ fn copilot(found: &mut Found, environment: &Environment, home: Option<&Path>, ba
     else {
         return;
     };
+    let start = found.sources.len();
     inspect_at(
         found,
         &root.join("config.json"),
@@ -287,6 +359,7 @@ fn copilot(found: &mut Found, environment: &Environment, home: Option<&Path>, ba
             }
         },
     );
+    found.mark_since(start, Rule::CopilotTokenConfiguration);
     let directory = root.join("mcp-oauth-config");
     if !std::fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
         return;
@@ -309,7 +382,9 @@ fn copilot(found: &mut Found, environment: &Environment, home: Option<&Path>, ba
         } else {
             continue;
         };
+        let start = found.sources.len();
         inspect_at(found, &path, home, default, discover);
+        found.mark_since(start, Rule::CopilotMcpOauthCredentials);
     }
 }
 
@@ -338,22 +413,22 @@ fn copilot_mcp_client_sources(value: &Value, path: &Path, entered: &str, out: &m
     add_if_string(value, path, entered, "/client_secret", out);
 }
 
-fn has_string(object: &serde_json::Map<String, Value>, field: &str) -> bool {
+fn has_string(object: &Object, field: &str) -> bool {
     object.get(field).is_some_and(Value::is_string)
 }
 
-fn has_nonempty_string(object: &serde_json::Map<String, Value>, field: &str) -> bool {
+fn has_nonempty_string(object: &Object, field: &str) -> bool {
     object
         .get(field)
         .and_then(Value::as_str)
         .is_some_and(|value| !value.is_empty())
 }
 
-fn optional_string(object: &serde_json::Map<String, Value>, field: &str) -> bool {
+fn optional_string(object: &Object, field: &str) -> bool {
     object.get(field).is_none_or(Value::is_string)
 }
 
-fn optional_string_map(object: &serde_json::Map<String, Value>, field: &str) -> bool {
+fn optional_string_map(object: &Object, field: &str) -> bool {
     object.get(field).is_none_or(|value| {
         value
             .as_object()
@@ -361,11 +436,7 @@ fn optional_string_map(object: &serde_json::Map<String, Value>, field: &str) -> 
     })
 }
 
-fn optional_object(
-    object: &serde_json::Map<String, Value>,
-    field: &str,
-    valid: impl FnOnce(&serde_json::Map<String, Value>) -> bool,
-) -> bool {
+fn optional_object(object: &Object, field: &str, valid: impl FnOnce(&Object) -> bool) -> bool {
     object
         .get(field)
         .is_none_or(|value| value.as_object().is_some_and(valid))
@@ -385,33 +456,43 @@ fn claude_machine(found: &mut Found, environment: &Environment, home: Option<&Pa
     };
     let default = override_root.is_none();
     #[cfg(not(target_os = "macos"))]
-    inspect_at(
-        found,
-        &root.join(".credentials.json"),
-        home,
-        default,
-        |value, path, entered, out| {
-            for pointer in ["/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"] {
-                add_if_string(value, path, entered, pointer, out);
-            }
-            direct_fields(
-                value,
-                path,
-                entered,
-                "/mcpOAuth",
-                &["accessToken", "refreshToken", "clientSecret"],
-                out,
-            );
-            direct_fields(
-                value,
-                path,
-                entered,
-                "/mcpOAuthClientConfig",
-                &["clientSecret"],
-                out,
-            );
-        },
-    );
+    {
+        let start = found.sources.len();
+        inspect_at(
+            found,
+            &root.join(".credentials.json"),
+            home,
+            default,
+            |value, path, entered, out| {
+                for pointer in ["/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"] {
+                    add_if_string(value, path, entered, pointer, out);
+                }
+                direct_fields(
+                    value,
+                    path,
+                    entered,
+                    "/mcpOAuth",
+                    &["accessToken", "refreshToken", "clientSecret"],
+                    out,
+                );
+                direct_fields(
+                    value,
+                    path,
+                    entered,
+                    "/mcpOAuthClientConfig",
+                    &["clientSecret"],
+                    out,
+                );
+            },
+        );
+        found.mark_since_where(start, Rule::ClaudePrimaryOauthCredentials, |source| {
+            matches!(source, SourceRef::Json { pointer, .. } if pointer.starts_with("/claudeAiOauth/"))
+        });
+        found.mark_since_where(start, Rule::ClaudeMcpOauthState, |source| {
+            matches!(source, SourceRef::Json { pointer, .. } if !pointer.starts_with("/claudeAiOauth/"))
+        });
+    }
+    let start = found.sources.len();
     inspect_at(
         found,
         &root.join("settings.json"),
@@ -419,10 +500,12 @@ fn claude_machine(found: &mut Found, environment: &Environment, home: Option<&Pa
         default,
         settings_sources,
     );
+    found.mark_since(start, Rule::ClaudeConfiguredEnvironment);
     let state = override_root.map_or_else(
         || home.expect("root required home").join(".claude.json"),
         |root| root.join(".claude.json"),
     );
+    let start = found.sources.len();
     inspect_at(found, &state, home, default, |value, path, entered, out| {
         direct_fields(
             value,
@@ -441,6 +524,12 @@ fn claude_machine(found: &mut Found, environment: &Environment, home: Option<&Pa
             out,
         );
         mcp_server_sources(value, path, entered, out);
+    });
+    found.mark_since_where(start, Rule::ClaudeMcpServerCredentials, |source| {
+        matches!(source, SourceRef::Json { pointer, .. } if pointer.starts_with("/mcpServers/"))
+    });
+    found.mark_since_where(start, Rule::ClaudeMcpOauthState, |source| {
+        matches!(source, SourceRef::Json { pointer, .. } if !pointer.starts_with("/mcpServers/"))
     });
 }
 
@@ -514,7 +603,7 @@ fn direct_fields(
                 tokens.extend(prefix[1..].split('/'));
             }
             tokens.extend([name.as_str(), *field]);
-            add_dynamic(entry.get(*field), path, entered, &tokens, out);
+            add_dynamic(entry.get(field), path, entered, &tokens, out);
         }
     }
 }
@@ -535,7 +624,7 @@ fn direct_paths(
             tokens.extend_from_slice(suffix);
             let selected = suffix
                 .iter()
-                .try_fold(entry, |current, token| current.get(*token));
+                .try_fold(entry, |current, token| current.get(token));
             add_dynamic(selected, path, entered, &tokens, out);
         }
     }
@@ -1014,6 +1103,27 @@ mod tests {
             pointers(&machine(&environment, Some(&home), &tree.0)),
             vec!["/copilotTokens/github.com", "/access_token"]
         );
+    }
+
+    #[test]
+    fn copilot_comment_bearing_config_is_inspected_as_json5() {
+        let tree = Tree::new();
+        tree.write(
+            "home/.copilot/config.json",
+            r#"{
+                // Copilot CLI writes this configuration with comments.
+                copilotTokens: {
+                    'github.com': 'token-canary',
+                },
+            }"#,
+        );
+
+        let home = tree.0.join("home");
+        let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
+        let found = machine(&environment, Some(&home), &tree.0);
+
+        assert_eq!(pointers(&found), vec!["/copilotTokens/github.com"]);
+        assert!(found.notices.is_empty());
     }
 
     #[test]

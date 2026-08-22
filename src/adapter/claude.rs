@@ -379,6 +379,7 @@ mod tests {
 
         for payload in [
             String::from("not json at all"),
+            String::from("{hook_event_name: 'PostToolUse'}"),
             String::from("[]"),
             json!({"hook_event_name": "PreToolUse"}).to_string(),
             json!({"tool_response": {"stdout": canary.value()}}).to_string(),

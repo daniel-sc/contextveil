@@ -2,7 +2,8 @@
 //!
 //! `SET-006` fixes the V1 vocabulary exactly. Format, entropy, length, and source
 //! type may rank or explain a name-gated candidate but must never introduce one.
-//! Credential-bearing URLs are the bounded value-shape exception in `SET-017`.
+//! Candidate admission is represented by Known Source Rule identities. These
+//! signals only explain advisory ranking after a rule has admitted a source.
 //! Vocabulary changes are observable setup behavior and must update the
 //! specification and its fixtures in the same change.
 
@@ -38,12 +39,6 @@ const COMPACT_SUFFIXES: [&str; 13] = [
 /// Why a candidate is shown or ranked, in user-facing wording.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Signal {
-    /// The ordinary gating reason.
-    NameMatches(&'static str),
-    /// The bounded whole-value exception in `SET-017`.
-    CredentialBearingUrl,
-    /// Admission by one of the closed coding-agent Known Source definitions.
-    KnownSource,
     /// Advisory only (`SET-006`).
     LongValue,
     HighVariety,
@@ -53,9 +48,6 @@ pub enum Signal {
 impl Signal {
     pub fn describe(&self) -> String {
         match self {
-            Signal::NameMatches(term) => format!("name contains `{term}`"),
-            Signal::CredentialBearingUrl => "credential-bearing URL".to_string(),
-            Signal::KnownSource => "Known Source".to_string(),
             Signal::LongValue => "long value".to_string(),
             Signal::HighVariety => "mixed character classes".to_string(),
             Signal::LooksEncoded => "encoded-looking value".to_string(),
@@ -135,9 +127,6 @@ pub fn rank(signals: &[Signal]) -> u32 {
     signals
         .iter()
         .map(|signal| match signal {
-            Signal::NameMatches(_) => 4,
-            Signal::CredentialBearingUrl => 4,
-            Signal::KnownSource => 4,
             Signal::LongValue => 2,
             Signal::HighVariety => 2,
             Signal::LooksEncoded => 1,

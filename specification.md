@@ -286,22 +286,34 @@ MUST NOT be cached across hook processes or retained as rotation history.
 changes are observable only after the harness is restarted with the new
 environment.
 
-**SRC-011** A JSON resolver MUST read UTF-8 JSON and reject duplicate object
-member names at any nesting depth. It MUST resolve exactly one value selected by
-the configured JSON Pointer and MUST NOT perform wildcard traversal, key-name
-search, interpolation, decoding, or other transformation.
+**SRC-011** A JSON resolver MUST read UTF-8 using the full JSON5 grammar and
+reject duplicate object member names at any nesting depth. Full JSON5 includes
+its object-key, string, number, whitespace, comment, escape, and trailing-comma
+forms; it is not a comments-only JSON extension. The resolver MUST resolve
+exactly one value selected by the configured RFC 6901 JSON Pointer and MUST NOT
+perform wildcard traversal, key-name search, interpolation, decoding, or other
+transformation. The public name for this persisted `source = "json"` variant is
+JSON source.
+
+A JSON source with more than 128 nested object or array containers MUST be
+treated as malformed before recursive deserialization.
 
 **SRC-012** A selected non-empty JSON string is a resolved secret. A missing
 pointer, empty string, `null`, number, boolean, object, or array is unresolved.
 
-**SRC-013** An absent JSON file is unresolved. Permission denial, malformed or
-non-UTF-8 JSON, duplicate object members, or a non-`NotFound` I/O failure is a
-malfunction and MUST disable use of the entire effective registry for that
-event.
+**SRC-013** An absent JSON source file is unresolved. Permission denial,
+malformed or non-UTF-8 JSON5, duplicate object members, or a non-`NotFound` I/O
+failure is a malfunction and MUST disable use of the entire effective registry
+for that event.
 
 **SRC-014** A JSON file referenced by multiple entries MUST be read and parsed
 once per event where practical. Its current contents MUST be resolved afresh for
 every intercepted event and MUST NOT be cached across hook processes.
+
+**SRC-015** JSON5 grammar applies only to enrolled or discovered JSON source
+documents persisted with `source = "json"`. Harness protocols, hook payloads,
+integration configuration files, and other protocol JSON MUST remain strict JSON
+unless their own requirements separately specify another grammar.
 
 ## 7. Setup Discovery And Enrollment
 
@@ -317,7 +329,8 @@ Each config phase MUST present existing entries as selected and provide a
 no-change path.
 
 **SET-002** Setup MUST automatically inspect the current process environment for
-candidates admitted by `SET-006`, `SET-017`, or a Known Source definition.
+candidates admitted by every applicable Known Source Rule. Rule application MUST
+NOT depend on which adapters are selected, installed, or detected.
 
 **SET-003** Project dotenv discovery MUST recursively include regular files named
 `.env` or beginning `.env.`, including ignored and untracked files, when their
@@ -339,11 +352,11 @@ keys, wildcard file enrollment, environment names, and JSON file/pointer pairs.
 A currently absent manual file, key, or pointer MAY be saved after explicit
 unresolved-source confirmation.
 
-**SET-006** Except for `SET-017` and Known Source discovery, automatic
-suggestions MUST be gated by a maintained, case-insensitive secret-name
-vocabulary, including concepts such as token, secret, password, key, and
-credential. Format, entropy, length, and source type MAY rank or explain a
-name-gated candidate but MUST NOT independently introduce one.
+**SET-006** The secret-like name Known Source Rule MUST admit automatic
+candidates using a maintained, case-insensitive vocabulary, including concepts
+such as token, secret, password, key, and credential. Format, entropy, length,
+and source type MAY rank or explain a name-admitted candidate but MUST NOT
+independently introduce one.
 
 V1 name gating uses ASCII case folding. It splits the name into tokens at every
 run of non-ASCII-alphanumeric characters and also creates a compact form by
@@ -451,24 +464,36 @@ deterministically from candidate rank and source identity.
 
 Each Candidate Group MUST show one masked value preview and a sanitized
 description of every represented source. It MUST NOT show or derive a complete
-value or deterministic value fingerprint.
+value or deterministic value fingerprint. It MUST also show the display name of
+each Known Source Rule that admitted at least one represented source, deduplicated
+once per group. Multiple matching rules and aliases MUST contribute one admission
+weight to candidate ranking rather than increasing rank with their count.
 
-**SET-017** Environment and discovered dotenv values that parse as absolute
-hierarchical URLs with an authority and a non-empty password in userinfo MUST be
-automatic candidates even when their source name does not pass `SET-006`. The
+**SET-017** Under the credential-bearing URL Known Source Rule, environment and
+discovered dotenv values that parse as absolute hierarchical URLs with an
+authority and a non-empty password in userinfo MUST be automatic candidates even
+when their source name does not pass `SET-006`. The
 complete URL value, not an extracted or decoded component, is enrolled. This
 value-shape rule MUST NOT recursively inspect JSON or any other structured
 source.
 
-**SET-018** A Known Source is setup-time discovery knowledge only. It MUST
-produce explicit source references and MUST NOT be persisted as runtime
-indirection. Path override environment variables are resolved during setup; a
+**SET-018** A Known Source Rule is a maintained, deterministic setup-time
+automatic candidate-admission rule. The V1 rule inventory consists of the
+secret-like name rule in `SET-006`, the credential-bearing URL rule in `SET-017`,
+and the supported recognized store schema-family rules in
+[`docs/known-sources.md`](docs/known-sources.md). Filesystem enumeration and
+manual source additions are inputs to setup, not Known Source Rules. Every
+applicable rule MUST run independently of adapter selection, installation,
+detection, and runtime coverage.
+
+A recognized store schema-family rule MUST produce explicit source references
+and MUST NOT be persisted as runtime indirection. Path override environment variables are resolved during setup; a
 later override change requires setup to be rerun. Relative override values MUST
 resolve from setup's invocation directory. Override values MUST NOT receive
 shell, environment-variable, glob, or tilde expansion. See
 [`ADR-0001`](docs/adr/0001-persist-explicit-source-references.md).
 
-Known Source discovery MUST inspect exact machine paths, environment-resolved
+Recognized store schema-family rules MUST inspect exact machine paths, environment-resolved
 paths, and source-specific bounded directories only. It MUST NOT recursively
 crawl the home directory or search a project for generic basenames such as
 `auth.json` or `config.json`. One shared project traversal MUST recognize narrowly
@@ -476,19 +501,21 @@ anchored project patterns at any depth using the exclusions in `SET-003`.
 Project traversal MUST NOT follow symlinks. An exact machine file path that is a
 symlink MUST be followed only when its target is a regular file.
 
-**SET-019** Valid JSON at a Known Source location with no recognized credential
-fields MUST be treated as an ordinary silent no-match, without an unsupported
-schema warning. Malformed, non-UTF-8, or unreadable automatically discovered
-files follow `SET-013`. Known Source JSON MUST use the strict JSON semantics in
-`SRC-011`; comment-bearing JSONC is malformed. Recognized fields MUST be exact
+**SET-019** A discovered document evaluated by a recognized store schema-family
+rule and persisted as `source = "json"` MUST use the full JSON5 grammar in
+`SRC-011`. A valid JSON source document at a recognized location with no
+credential fields MUST be treated as an ordinary silent no-match, without an
+unsupported schema warning. Malformed, non-UTF-8, duplicate-member, or unreadable
+automatically discovered files follow `SET-013`. Recognized fields MUST be exact
 and source-specific. A recognized dynamic object member MUST be representable as
 an exact JSON Pointer under `CFG-016`; an unrepresentable member name, including
 an empty name or `*`, MUST silently produce no candidate. Setup MUST NOT
 recursively classify arbitrary JSON strings by generic key substrings.
 
-**SET-020** The first Known Source set MUST cover only these explicitly listed V1
-representable primary and MCP plaintext stores, using the exact field
-vocabularies in [the Known Source inventory](docs/known-sources.md). Dynamic
+**SET-020** The supported recognized store schema-family rules MUST cover only
+the explicitly listed V1-representable primary and MCP plaintext stores, using
+the exact scopes and field vocabularies in
+[the Known Source Rule inventory](docs/known-sources.md). Dynamic
 member names in those vocabularies are recognized only when they are
 representable under `CFG-016`:
 
@@ -496,7 +523,7 @@ representable under `CFG-016`:
 - OpenCode `XDG_DATA_HOME/opencode` or `~/.local/share/opencode` `auth.json` and
   `mcp-auth.json`, plus a non-empty `OPENCODE_AUTH_CONTENT` as one whole
   environment source rather than parsed derived references;
-- GitHub Copilot CLI `COPILOT_HOME` or `~/.copilot` strict-JSON `config.json`
+- GitHub Copilot CLI `COPILOT_HOME` or `~/.copilot` JSON source `config.json`
   `copilotTokens` fields and immediate `mcp-oauth-config` files whose basenames
   are exactly 64 lowercase hexadecimal characters followed by `.tokens.json` or
   `.json`;
@@ -507,10 +534,13 @@ representable under `CFG-016`:
 
 Private or version-sensitive schemas MUST use narrowly recognized structures
 backed by pinned fixtures; unknown structures produce no candidate. ContextVeil
-MUST NOT query OS keychains or execute credential helpers. Copilot JSONC, raw
-`.secret` and `.verifier` files, and `mcp-secrets` fallback files are outside the
-V1 source formats and MUST NOT be claimed as discovered. macOS Claude primary
+MUST NOT query OS keychains or execute credential helpers. Raw `.secret` and
+`.verifier` files and `mcp-secrets` fallback files are outside the V1 source
+formats and MUST NOT be claimed as discovered. macOS Claude primary
 credentials are keychain-backed and MUST NOT be claimed as discovered.
+
+Rows marked `Planned` in the inventory are non-contract roadmap information.
+They MUST NOT be treated as scanned, discovered, or covered by V1.
 
 ## 8. Effective Registry
 
@@ -810,8 +840,8 @@ no recursive replacement.
 
 **TST-002** Config and source tests MUST cover strict unknown fields, duplicate
 identities, cross-scope duplicates, missing sources, empty values, non-UTF-8
-environment values, malformed/invalid-UTF-8 dotenv and JSON, duplicate dotenv
-keys and JSON members, JSON Pointer escaping and wrong-type targets, path
+environment values, malformed/invalid-UTF-8 dotenv and JSON sources, the full
+JSON5 grammar, duplicate dotenv keys and JSON members, JSON Pointer escaping and wrong-type targets, path
 expansion, wildcard future keys, and all-or-nothing malfunction behavior.
 
 **TST-003** Filesystem tests MUST cover project-root selection, recursive ignored
@@ -827,8 +857,9 @@ and conflicting installation states where representable.
 absent from adapter stdout, stderr, diagnostics, snapshots, and returned
 model-visible content after intervention.
 
-**TST-006** Fuzz targets MUST cover the matcher and untrusted JSON, TOML, and
-dotenv inputs. A bounded fuzz smoke task MUST run through mise.
+**TST-006** Fuzz targets MUST cover the matcher and untrusted JSON5 source,
+strict protocol JSON, TOML, and dotenv inputs. A bounded fuzz smoke task MUST run
+through mise.
 
 **TST-007** Routine CI MUST run formatting, linting with warnings denied, tests,
 and builds through mise on supported targets. Release checks MUST exercise built

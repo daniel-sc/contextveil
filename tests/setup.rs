@@ -160,6 +160,30 @@ fn a_database_url_candidate_is_enrolled_as_its_environment_source() {
 }
 
 #[test]
+fn several_matching_rules_contribute_one_admission_weight() {
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[
+        ("A_URL", "https://user:aB3cD4eF5gH6@a.example.test/service"),
+        (
+            "Z_PASSWORD",
+            "https://user:zY8xW7vU6tS5@b.example.test/service",
+        ),
+    ]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        transcript.find("env A_URL").expect("single-rule candidate")
+            < transcript
+                .find("env Z_PASSWORD")
+                .expect("multi-rule candidate"),
+        "rule count changed candidate rank:\n{transcript}"
+    );
+    assert_eq!(transcript.matches("credential-bearing URL").count(), 2);
+    assert_eq!(transcript.matches("secret-like source name").count(), 1);
+}
+
+#[test]
 fn non_credential_url_shapes_do_not_bypass_name_gating() {
     let canary = Canary::generate("REJECTED_URL_PASSWORD");
     let fixture = Fixture::new();
@@ -198,7 +222,7 @@ fn setup_shows_a_masked_preview_and_its_reason() {
     let (_, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     assert!(transcript.contains("(40 characters)"));
-    assert!(transcript.contains("name contains `key`"));
+    assert!(transcript.contains("rules: secret-like source name"));
     // First and last four characters only, per `SET-010`.
     let revealed: String = canary.value().chars().take(4).collect();
     assert!(transcript.contains(&revealed));
@@ -378,6 +402,7 @@ fn equal_url_candidates_use_the_normal_candidate_group() {
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert_eq!(transcript.matches("Candidate group (2 sources)").count(), 1);
+    assert_eq!(transcript.matches("credential-bearing URL").count(), 1);
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("PRIMARY_URL"));
     assert!(global.contains("SECONDARY_URL"));
@@ -397,6 +422,7 @@ fn equal_environment_candidates_are_one_group_and_enroll_every_alias() {
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert_eq!(transcript.matches("Candidate group (2 sources)").count(), 1);
+    assert_eq!(transcript.matches("secret-like source name").count(), 1);
     assert!(transcript.contains("env FIRST_API_TOKEN"));
     assert!(transcript.contains("env SECOND_API_SECRET"));
 
@@ -701,6 +727,7 @@ fn exact_json_fields_can_be_enrolled_manually_in_both_scopes() {
     assert!(global.contains("pointer = \"/token\""));
     assert!(project.contains("file = \"project-auth.json\""));
     assert!(project.contains("pointer = \"/nested/access~1token\""));
+    assert!(!transcript.contains("secret-like source name"));
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     assert_canary_absent("global config", global.as_bytes(), &canary);
     assert_canary_absent("project config", project.as_bytes(), &canary);
@@ -769,6 +796,32 @@ fn url_looking_json_fields_are_not_automatic_candidates() {
     assert!(!project.contains("/endpoint"));
     assert_canary_absent("JSON URL transcript", transcript.as_bytes(), &canary);
     assert_canary_absent("JSON URL config", project.as_bytes(), &canary);
+}
+
+#[test]
+fn a_manually_added_json_url_does_not_match_the_url_rule() {
+    let canary = Canary::generate("MANUAL_JSON_URL_PASSWORD");
+    let fixture = Fixture::new();
+    fixture.write(
+        "auth.json",
+        &format!(
+            r#"{{"endpoint":"https://agent:{}@service.example.test"}}"#,
+            canary.value()
+        ),
+    );
+
+    let (exit, transcript) = fixture.run(
+        "s\nj\nauth.json\n/endpoint\n\n\n",
+        &fixture.environment(&[]),
+    );
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!transcript.contains("credential-bearing URL"));
+    assert!(
+        std::fs::read_to_string(fixture.project_config())
+            .expect("project config")
+            .contains("/endpoint")
+    );
+    assert_canary_absent("manual JSON URL transcript", transcript.as_bytes(), &canary);
 }
 
 #[test]
@@ -1252,7 +1305,10 @@ fn known_sources_persist_explicit_refs_and_bypass_name_gating() {
     std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
     std::fs::write(
         fixture.home().join(".codex/auth.json"),
-        format!(r#"{{"agent_identity":"{}"}}"#, canary.value()),
+        format!(
+            r#"{{"tokens":{{"access_token":"{0}","refresh_token":"{0}"}}}}"#,
+            canary.value()
+        ),
     )
     .expect("codex auth");
 
@@ -1261,8 +1317,10 @@ fn known_sources_persist_explicit_refs_and_bypass_name_gating() {
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("source = \"json\""));
     assert!(global.contains("file = \"~/.codex/auth.json\""));
-    assert!(global.contains("pointer = \"/agent_identity\""));
-    assert!(transcript.contains("Known Source"));
+    assert!(global.contains("pointer = \"/tokens/access_token\""));
+    assert!(global.contains("pointer = \"/tokens/refresh_token\""));
+    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert_eq!(transcript.matches("Codex primary credentials").count(), 1);
     assert_canary_absent("known source transcript", transcript.as_bytes(), &canary);
     assert_canary_absent("known source config", global.as_bytes(), &canary);
 }
@@ -1286,6 +1344,16 @@ fn project_known_source_aliases_form_one_candidate_group() {
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("Candidate group (2 sources)"));
+    assert_eq!(
+        transcript
+            .matches("Claude configured environment credentials")
+            .count(),
+        1
+    );
+    assert_eq!(
+        transcript.matches("Claude MCP server credentials").count(),
+        1
+    );
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("app/.claude/settings.json"));
     assert!(project.contains("app/.mcp.json"));

@@ -64,79 +64,45 @@ fn release_notes_link_the_boundary_and_reporting_documents() {
 }
 
 #[test]
-fn public_known_source_matrices_match_the_v1_boundary() {
-    for (document, heading) in [
-        ("README.md", "### Known Source Discovery"),
-        (
-            "docs/release-notes-template.md",
-            "## Known Source discovery",
-        ),
+fn public_known_source_overview_stays_broad_and_links_the_inventory() {
+    let readme = read("README.md");
+    let overview = section(&readme, "### Known Source Rules");
+    let overview = overview.split_whitespace().collect::<Vec<_>>().join(" ");
+    for marker in [
+        "advisory",
+        "secret-like environment names",
+        "URLs containing credentials",
+        "recognized credential stores",
+        "independently of the integrations",
+        "JSON5",
+        "keychains",
+        "credential helpers",
+        "docs/known-sources.md",
+        "lim-023-known-source-rules-are-advisory",
     ] {
-        let text = read(document);
-        let matrix = section(&text, heading);
-        let normalized = matrix.split_whitespace().collect::<Vec<_>>().join(" ");
-        for (integration, markers) in [
-            (
-                "Claude Code",
-                &["CLAUDE_CONFIG_DIR", ".credentials.json", ".mcp.json"][..],
-            ),
-            (
-                "OpenAI Codex CLI",
-                &["CODEX_HOME", "auth.json", ".credentials.json"][..],
-            ),
-            (
-                "GitHub Copilot CLI",
-                &[
-                    "COPILOT_HOME",
-                    "copilotTokens",
-                    "64-lowercase-hex",
-                    "JSONC",
-                    ".secret",
-                    ".verifier",
-                    "mcp-secrets",
-                ][..],
-            ),
-            (
-                "OpenCode",
-                &[
-                    "XDG_DATA_HOME",
-                    "auth.json",
-                    "mcp-auth.json",
-                    "OPENCODE_AUTH_CONTENT",
-                ][..],
-            ),
-        ] {
-            let row = matrix
-                .lines()
-                .find(|line| line.starts_with(&format!("| {integration} |")))
-                .unwrap_or_else(|| panic!("{document} has no Known Source row for {integration}"));
-            for marker in markers {
-                assert!(
-                    row.contains(marker),
-                    "{document}'s {integration} Known Source row omits `{marker}`"
-                );
-            }
-        }
+        assert!(
+            overview.contains(marker),
+            "README overview omits `{marker}`"
+        );
+    }
 
-        for boundary in [
-            "advisory",
-            "not an adapter coverage guarantee",
-            "strict JSON",
-            "silently no-match",
-            "unavailable",
-            "keychains",
-            "credential helpers",
-            "invocation directory",
-            "rerun",
-            "no shell or tilde expansion",
-        ] {
-            assert!(
-                normalized.contains(boundary),
-                "{document}'s Known Source section omits `{boundary}`"
-            );
-        }
-        assert!(matrix.contains("known-sources.md"));
-        assert!(matrix.contains("lim-023-known-source-discovery-is-advisory"));
+    let release_notes = read("docs/release-notes-template.md");
+    let overview = section(&release_notes, "## Known Source Rules");
+    let overview = overview.split_whitespace().collect::<Vec<_>>().join(" ");
+    for marker in [
+        "secret-like names",
+        "credential-bearing URLs",
+        "recognized coding-agent credential store schemas",
+        "full JSON5 grammar",
+        "Planned npmrc",
+        "recognized INI",
+        "known-sources.md",
+        "lim-023-known-source-rules-are-advisory",
+    ] {
+        assert!(
+            overview.contains(marker),
+            "release-note overview omits `{marker}`"
+        );
     }
 }
 
@@ -160,6 +126,9 @@ fn known_source_inventory_pins_all_evidence() {
         "an adapter covers a host",
         "there is no runtime `KnownSource` source type",
         "Empty names and `*`",
+        "| npmrc credentials | Planned |",
+        "| Recognized INI credential stores | Planned |",
+        "setup does not currently scan them",
     ] {
         assert!(
             text.contains(disclosure),
