@@ -329,6 +329,7 @@ mod tests {
 
         for payload in [
             String::from("not json"),
+            String::from("{version: 1, event: 'chat.message', texts: []}"),
             String::from("{}"),
             json!({"version": 2, "event": "chat.message", "texts": []}).to_string(),
             json!({"version": 1, "event": "session.idle", "texts": []}).to_string(),

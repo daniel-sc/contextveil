@@ -24,7 +24,7 @@ resolved explicitly before implementation continues.
 │ CLI                                                              │
 │ setup | status | doctor                                          │
 ├──────────────────────────────────────────────────────────────────┤
-│ enrollment | discovery | collision analysis | config editing     │
+│ enrollment | Known Source Rules | collision analysis             │
 ├──────────────────────────────────────────────────────────────────┤
 │ config loading | registry composition | source resolution        │
 ├──────────────────────────────────────────────────────────────────┤
@@ -51,8 +51,9 @@ The core owns:
 
 - config validation and project selection;
 - global and project registry composition;
-- environment and dotenv source resolution;
-- candidate scoring and collision analysis;
+- environment, dotenv, and exact-pointer JSON source resolution using JSON5
+  document grammar;
+- candidate grouping, scoring, and collision analysis;
 - canonicalization of duplicate resolved values;
 - exact matching and placeholder selection;
 - structured string-value traversal;
@@ -141,7 +142,10 @@ writer-locking mechanism is tactical.
 
 The minimum conceptual types are:
 
-- `SourceReference`: environment, one dotenv key, or all keys in a dotenv file;
+- `SourceReference`: environment, one dotenv key, all keys in a dotenv file, or
+  one exact JSON file pointer;
+- `KnownSourceRule`: a maintained deterministic setup-time automatic
+  candidate-admission rule, absent from runtime policy;
 - `Registry`: ordered source references from one config scope;
 - `ResolvedSecret`: a non-empty UTF-8 value plus source identity and safe label;
 - `EffectiveRegistry`: project entries followed by global entries for canonical
@@ -160,10 +164,10 @@ trusted machine/user policy. The project file is committable project policy and
 is automatically selected according to the specification.
 
 V1 deliberately allows project config to name environment sources and arbitrary
-dotenv paths. Therefore project config can cause host-file reads or disable the
-effective registry by being invalid. This is an accepted boundary documented in
-[limitations.md](limitations.md), not an invitation for adapters to weaken
-validation.
+supported source paths. Therefore project config can cause host-file reads or
+disable the effective registry by being invalid. This is an accepted boundary
+documented in [limitations.md](limitations.md), not an invitation for adapters to
+weaken validation.
 
 Integration ownership metadata may live in a separate file under the global
 ContextVeil config directory so policy TOML remains comprehensible. It must not
@@ -175,19 +179,63 @@ must not depend on setup having performed a migration.
 
 ## Source Resolvers
 
-V1 has two concrete resolver families:
+The current source expansion has three concrete resolver families:
 
 - environment variables inherited by the hook process;
-- dotenv files parsed without interpolation or execution.
+- dotenv files parsed without interpolation or execution;
+- JSON source documents parsed with the full JSON5 grammar and selected by exact
+  RFC 6901 pointer, without duplicate object members or transformations, and
+  rejected before recursive deserialization beyond 128 nested containers.
 
 Resolvers return resolved, unresolved, or malfunction. They do not decide
 whether a value looks secret. A dotenv file referenced by multiple entries must
 be read and parsed once per event where practical, but caching must not survive
 the process.
 
-Future JSON or other file formats should be implemented as additional source
-variants behind the same registry operation. Do not expose a public plugin API
-or dynamic resolver loading in anticipation.
+Additional file formats should be implemented as explicit source variants behind
+the same registry operation. Exact INI fields and npmrc entries are non-contract
+plans only; neither is currently scanned or covered. Do not expose a public
+plugin API or dynamic resolver loading in anticipation.
+
+## Known Source Rules
+
+Known Source Rules belong to setup, not runtime. A rule is maintained,
+deterministic setup-time logic that automatically admits candidates. V1 has a
+secret-like name rule, a credential-bearing URL rule, and recognized store
+schema-family rules. Filesystem enumeration and manual additions supply possible
+sources but are not rules because they do not themselves admit a candidate.
+Every applicable rule runs independently of adapter selection or installation.
+
+Maintained path and schema knowledge yields ordinary environment, dotenv, or
+JSON source references. The persisted policy never names a Known Source Rule, so
+changing a definition cannot silently change runtime reads; see
+[`ADR-0001`](docs/adr/0001-persist-explicit-source-references.md).
+
+The closed definitions and strict field vocabularies live in
+`src/setup/known_source.rs`. `src/setup/discovery.rs` performs one shared bounded
+project traversal for dotenv files and the anchored Claude
+`.claude/settings.json` and `.mcp.json` patterns. There is no runtime
+Known Source Rule runtime variant: discovery emits existing `SourceReference`
+variants only.
+
+The first implementation is a closed list of direct discovery functions with
+small shared helpers. It is not a trait registry, manifest language, plugin API,
+or generic structured-file scanner. Machine stores use exact standard or
+setup-time environment-resolved paths. Project discovery performs one bounded
+walk and recognizes only source-specific anchored patterns. Valid unmatched
+structures are ordinary no-match results.
+
+Codex, OpenCode, Copilot, and Claude representable primary and MCP plaintext
+stores form the first recognized schema-family release. Source-visible schemas
+use exact structural fields. Private schemas use per-tool exact vocabularies and
+pinned fixtures; they never authorize generic recursive secret-name matching in
+unrelated JSON. The maintained inventory and evidence are in
+[`docs/known-sources.md`](docs/known-sources.md). Enrolled and discovered JSON
+source documents use JSON5 by decision
+[`ADR-0002`](docs/adr/0002-json-sources-use-json5.md); harness protocols and
+integration configuration remain strict JSON unless separately specified. Raw
+sidecar formats, keychains, helper execution, decoded representations, and other
+transformations remain outside this discovery layer.
 
 ## Matcher
 
@@ -302,7 +350,8 @@ for reproducibility.
   adapter boundaries.
 - Leak-regression tests assert canaries are absent from stdout, stderr,
   diagnostics, and returned model content.
-- Fuzz targets cover untrusted JSON, TOML, dotenv, and matcher inputs.
+- Fuzz targets distinguish untrusted JSON5 source documents from strict harness
+  protocol JSON, and also cover TOML, dotenv, and matcher inputs.
 - Live networked tests are optional; Claude resume behavior is a manual release
   qualification.
 

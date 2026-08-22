@@ -1,10 +1,11 @@
 //! Name gating and advisory ranking for setup candidates.
 //!
-//! `SET-006` fixes the V1 vocabulary exactly. A candidate is suggested only
-//! because its name matches; format, entropy, length, and source type may rank
-//! or explain a gated candidate but must never introduce one. Vocabulary
-//! changes are observable setup behavior and must update the specification and
-//! its fixtures in the same change.
+//! `SET-006` fixes the V1 vocabulary exactly. Format, entropy, length, and source
+//! type may rank or explain a name-gated candidate but must never introduce one.
+//! Candidate admission is represented by Known Source Rule identities. These
+//! signals only explain advisory ranking after a rule has admitted a source.
+//! Vocabulary changes are observable setup behavior and must update the
+//! specification and its fixtures in the same change.
 
 /// Whole tokens that gate a name.
 const EXACT_TOKENS: [&str; 8] = [
@@ -38,8 +39,6 @@ const COMPACT_SUFFIXES: [&str; 13] = [
 /// Why a candidate is shown or ranked, in user-facing wording.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Signal {
-    /// The gating reason. Always present for a suggested candidate.
-    NameMatches(&'static str),
     /// Advisory only (`SET-006`).
     LongValue,
     HighVariety,
@@ -49,7 +48,6 @@ pub enum Signal {
 impl Signal {
     pub fn describe(&self) -> String {
         match self {
-            Signal::NameMatches(term) => format!("name contains `{term}`"),
             Signal::LongValue => "long value".to_string(),
             Signal::HighVariety => "mixed character classes".to_string(),
             Signal::LooksEncoded => "encoded-looking value".to_string(),
@@ -124,14 +122,11 @@ pub fn value_signals(value: &str) -> Vec<Signal> {
     signals
 }
 
-/// Ranking score for a gated candidate. Higher sorts first.
-///
-/// This only orders what name gating already admitted.
+/// Ranking score for an admitted candidate. Higher sorts first.
 pub fn rank(signals: &[Signal]) -> u32 {
     signals
         .iter()
         .map(|signal| match signal {
-            Signal::NameMatches(_) => 4,
             Signal::LongValue => 2,
             Signal::HighVariety => 2,
             Signal::LooksEncoded => 1,
@@ -205,8 +200,8 @@ mod tests {
     }
 
     #[test]
-    fn value_shape_never_introduces_a_candidate() {
-        // A high-entropy value with an unrelated name stays ungated.
+    fn advisory_value_shape_does_not_change_name_gating() {
+        // Bounded exceptions such as SET-017 are applied outside the vocabulary.
         assert_eq!(gating_term("DATABASE_URL"), None);
         assert!(!value_signals("aGVsbG8gd29ybGQgZXhhbXBsZQ==").is_empty());
     }

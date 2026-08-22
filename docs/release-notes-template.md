@@ -22,6 +22,11 @@ contextveil setup
 contextveil doctor
 ```
 
+Setup guides enrollment from environment variables, dotenv files, manual exact
+JSON fields, and maintained Known Source Rules. These rules are advisory and
+version-sensitive, not adapter coverage guarantees, and every applicable rule
+runs independently of selected integrations.
+
 ## Support matrix
 
 | Integration | Tier | Covered model-bound content | Failure behavior |
@@ -36,6 +41,22 @@ production support promise, and always require an affirmative choice during
 setup. Coverage applies only where a local harness loads and honors the installed
 integration.
 
+## Known Source Rules
+
+Supported setup-time rules admit candidates from secret-like names,
+credential-bearing URLs, and recognized coding-agent credential store schemas.
+Manual additions and filesystem enumeration are not rules. JSON source documents
+use the full JSON5 grammar, so common comment-bearing Copilot configuration is
+supported; duplicate members remain invalid.
+
+Valid unknown schemas silently no-match; malformed matched JSON sources are
+shown as unavailable. Override values resolve during setup, relative overrides
+use the invocation directory, changes require a rerun, and no shell or tilde
+expansion occurs. Raw sidecars, OS keychains, and credential helpers are not
+covered. Planned npmrc and recognized INI store rows are non-contract and are not
+currently scanned. See the [exact rule inventory and pinned evidence](known-sources.md) and
+[`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory).
+
 ## Tested host versions
 
 Protocol behavior was verified against these host versions. V1 performs no host
@@ -44,10 +65,10 @@ run `contextveil doctor` after upgrading a coding agent.
 
 | Host | Verified against |
 | --- | --- |
-| Claude Code | 2.1.233, by inspecting the shipped binary's own hook protocol strings, and by the live intervention-and-resume qualification recorded in `docs/qualification.md` (`REL-008`) |
-| OpenAI Codex CLI | `openai/codex` source at commit `c6058cca`, `codex-rs/hooks` and `codex-rs/config` |
-| GitHub Copilot CLI | 1.0.80, against the published hooks reference |
-| OpenCode | 1.18.18, by inspecting the installed plugin API types and runtime call sites |
+| Claude Code | Adapter: 2.1.233 live qualification. Known Sources: 2.1.238, public release commit `8a8e81d098cbd0fae4ee5b9c853542945fe87016` plus shipped-artifact-derived private structures |
+| OpenAI Codex CLI | Adapter: `openai/codex` commit `c6058cca`. Known Sources: `ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3` (also issue-time `d9fd91edab298c2423c0c82526513e4e000284cf`) |
+| GitHub Copilot CLI | Adapter and Known Sources: 1.0.80 release commit `ef627e1baad937d3c8da45f8a5541c6fc3c97b6a`, official docs commit `838d18789ba2c51cfe5544b3e5bf1ca3168c2795`, plus shipped-artifact-derived private structures |
+| OpenCode | Adapter and Known Sources: 1.18.18 commit `31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d` |
 
 ## Platforms
 
@@ -73,6 +94,9 @@ most important entries:
 - [`LIM-013`](../limitations.md#lim-013-claude-coverage-gaps) through
   [`LIM-016`](../limitations.md#lim-016-opencode-v1-api-only): per-host coverage
   gaps.
+- [`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory): Known
+  Source Rules are advisory; raw sidecars, keychains, helpers, and unknown or
+  changed schemas remain outside coverage.
 
 ## Reporting a vulnerability
 

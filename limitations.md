@@ -140,7 +140,8 @@ review project policy before starting the harness.
 ### LIM-010: Unbounded Input Size
 
 **Reality:** V1 imposes no ContextVeil-specific size cap on dotenv files or
-intercepted payloads.
+intercepted payloads. JSON source documents are limited to 128 nested object or
+array containers so untrusted source files cannot exhaust the hook process stack.
 
 Setup's collision analysis also reads every readable regular file under the
 project root, so it scales with project size rather than with the number of
@@ -148,7 +149,8 @@ candidates.
 
 **Impact:** Very large files or payloads can consume excessive memory or exceed
 the five-second host timeout, causing fail-open behavior in process-hook hosts.
-Setup can take a noticeable moment on a very large repository.
+Setup can take a noticeable moment on a very large repository. A deeper JSON
+source is a malfunction and disables the effective registry for that event.
 
 **Workaround:** Keep credential files small and rely on normal harness output
 limits. Diagnose slow paths with `contextveil doctor` and benchmarks.
@@ -157,21 +159,7 @@ limits. Diagnose slow paths with `contextveil doctor` and benchmarks.
 maximum: a 4 MiB dotenv file with about 90,000 wildcard keys, a 2 MiB tool
 result, and 201 active values over a 512 KiB payload all complete well inside the
 five-second host bound, and runtime cost is linear in input size rather than
-quadratic.
-
-### LIM-011: Limited Source Formats
-
-**Reality:** V1 resolves only inherited environment variables and dotenv files.
-It has no literal-value storage, JSON resolver, keychain integration, secret
-manager, shell-profile evaluation, or provider lookup.
-
-**Impact:** Credentials available only through other stores cannot be enrolled
-directly.
-
-**Workaround:** Expose the value through a dedicated environment variable or
-dotenv source without copying it into ContextVeil config.
-
-**Verification:** Strict config rejects unknown source types.
+quadratic. A 20,000-level JSON source is rejected without overflowing the stack.
 
 ## Host Integration Limits
 
@@ -394,6 +382,52 @@ expose the credential through an enrolled environment variable.
 or persisted. Its discovery half additionally creates the file, which runs only
 where the filesystem accepts a non-UTF-8 name; APFS rejects one, so macOS covers
 the reporting half alone.
+
+### LIM-023: Known Source Rules Are Advisory
+
+**Reality:** Known Source Rules are setup-time, advisory, and version-sensitive;
+they are not an adapter coverage guarantee or a promise to find every host
+credential. Maintained deterministic rules admit candidates by secret-like name,
+credential-bearing URL, or exact recognized store schema family. Every applicable
+rule runs independently of adapters. Filesystem enumeration and manual additions
+are not rules. Recognized store rules inspect only the exact machine paths and
+bounded project patterns in [`docs/known-sources.md`](docs/known-sources.md), then
+persist ordinary environment or exact JSON references. JSON sources accept the
+full JSON5 grammar while still rejecting duplicate members. Valid unknown schemas
+silently no-match; malformed matched JSON sources are shown as unavailable.
+Recognized dynamic object members are candidates only when their
+names are representable as exact JSON Pointers under `CFG-016`; empty names and
+`*` silently no-match. Keychains and credential helpers are not queried.
+
+Copilot CLI's common comment-bearing `config.json` is supported as a JSON source.
+Its raw `.secret` and `.verifier` files and `mcp-secrets` fallback files are not
+representable by V1 environment, dotenv, or JSON source references and are not
+discovered. On macOS, Claude's primary
+credentials are keychain-backed, so `.credentials.json` primary discovery is
+non-macOS only. Path overrides are resolved during setup; changes require a
+rerun. Relative overrides are invocation-directory relative and receive no
+shell, environment-variable, glob, or tilde expansion. These are source-format
+boundaries, not an implementation-not-present deviation.
+
+**Impact:** Setup may show a malformed matched JSON source as unavailable or silently
+omit a valid but unknown schema or an otherwise recognized dynamic member whose
+name cannot be represented by `CFG-016`. Credentials in Copilot's common
+raw fallback stores, the macOS Claude keychain, a new third-party schema,
+an unusual path, or a changed override are not automatically suggested.
+Installing an adapter does not change this source-discovery boundary.
+
+**Workaround:** Review setup candidates, rerun setup after host or override
+changes, and manually enroll a supported environment, dotenv, or exact JSON
+reference when one represents the value. Use host diagnostics and separate
+keychain controls for keychain- or helper-backed credentials. Raw sidecar stores
+require a future source format or another representable source.
+
+**Verification:** Unit fixtures pin every recognized field vocabulary and host
+version; filesystem and setup tests cover exact and anchored paths, override
+resolution, full JSON5 parsing, common comment-bearing Copilot configuration,
+silent unknown-schema no-match, symlink rules, explicit-reference persistence,
+and canary-free output. Documentation review checks the inventory and pinned
+evidence links.
 
 ## Implementation Deviations
 
