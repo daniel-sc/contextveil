@@ -171,8 +171,16 @@ fn walk(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn no_adapter_discloses_an_enrolled_value() {
+fn every_adapter_redacts_an_enrolled_json_value() {
     let machine = Machine::new();
+    // Leave JSON as the only resolving enrolled source so another source kind
+    // cannot hide a broken JSON runtime path.
+    std::fs::write(
+        machine.home().join(".config/contextveil/config.toml"),
+        "version = 1\n",
+    )
+    .expect("global config");
+    std::fs::remove_file(machine.project().join(".env")).expect("remove dotenv source");
     let value = machine.canary.value().to_string();
     let project = machine.project().to_string_lossy().into_owned();
 

@@ -64,7 +64,7 @@ impl SourceId {
         }
     }
 
-    /// The dotenv file this identity refers to, if any.
+    /// The file this identity refers to, if any.
     pub fn path(&self) -> Option<&PathBuf> {
         match self {
             SourceId::Env { .. } => None,

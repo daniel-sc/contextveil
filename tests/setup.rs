@@ -184,6 +184,26 @@ fn several_matching_rules_contribute_one_admission_weight() {
 }
 
 #[test]
+fn overlapping_known_source_rules_are_all_attributed() {
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[(
+        "OPENCODE_AUTH_CONTENT",
+        "https://user:password@example.test",
+    )]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        transcript.contains("credential-bearing URL"),
+        "{transcript}"
+    );
+    assert!(
+        transcript.contains("OpenCode whole environment credential content"),
+        "{transcript}"
+    );
+}
+
+#[test]
 fn non_credential_url_shapes_do_not_bypass_name_gating() {
     let canary = Canary::generate("REJECTED_URL_PASSWORD");
     let fixture = Fixture::new();
@@ -651,6 +671,27 @@ fn a_wildcard_in_the_other_phase_suppresses_the_same_files_keyed_candidate() {
 }
 
 #[test]
+fn skipping_a_wildcard_toggle_restores_cross_phase_suppression() {
+    let fixture = Fixture::new();
+    let dotenv = fixture.write(".env", "API_TOKEN=value\n");
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    let original = format!(
+        "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"{}\"\nall = true\n",
+        dotenv.display()
+    );
+    std::fs::write(fixture.global_config(), &original).expect("global config");
+
+    let (exit, transcript) = fixture.run("1\ns\n\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        std::fs::read_to_string(fixture.global_config()).expect("global config"),
+        original
+    );
+    assert!(!transcript.contains("key API_TOKEN"), "{transcript}");
+}
+
+#[test]
 fn resolvable_manual_sources_merge_into_an_existing_group() {
     let canary = Canary::generate("MANUAL_GROUP_TOKEN");
     let fixture = Fixture::new();
@@ -680,6 +721,19 @@ fn resolvable_manual_sources_merge_into_an_existing_group() {
     assert!(project.contains("PRIVATE_VALUE"));
     assert!(project.contains("/credential"));
     assert_canary_absent("manual group transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
+fn manual_sources_are_not_attributed_to_automatic_rules() {
+    let fixture = Fixture::new();
+    fixture.write("manual.credentials", "API_TOKEN=value\n");
+
+    let (exit, transcript) = fixture.run(
+        "s\nk\nmanual.credentials\nAPI_TOKEN\n\n\n",
+        &fixture.environment(&[]),
+    );
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!transcript.contains("rules:"), "{transcript}");
 }
 
 #[test]
@@ -840,6 +894,25 @@ fn existing_enrollment_survives_a_rerun_even_when_unresolved() {
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("ROTATED_TOKEN"));
     assert!(transcript.contains("(enrolled)"));
+}
+
+#[test]
+fn existing_unresolved_automatic_sources_keep_their_rule_attribution() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    std::fs::write(
+        fixture.global_config(),
+        "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"API_TOKEN\"\n",
+    )
+    .expect("global config");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[("API_TOKEN", "")]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        transcript.contains("rules: secret-like source name"),
+        "{transcript}"
+    );
 }
 
 #[test]

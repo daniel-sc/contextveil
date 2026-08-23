@@ -127,14 +127,6 @@ fn is_dotenv_file_name(name: &std::ffi::OsStr) -> bool {
     }
 }
 
-/// Recursively discovers project dotenv files (`SET-003`).
-///
-/// Ignored and untracked files are included deliberately: a credential is just
-/// as reachable whether or not version control tracks it.
-pub fn project_dotenv_files(project_root: &Path) -> Vec<Discovered> {
-    project_files(project_root).dotenv
-}
-
 /// Collects dotenv and narrowly anchored Known Source paths in one walk.
 pub fn project_files(project_root: &Path) -> ProjectFiles {
     let mut found = ProjectFiles::default();
@@ -333,7 +325,7 @@ mod tests {
         tree.file("env", "not a dotenv\n");
         tree.file(".environment", "not a dotenv\n");
 
-        let found = project_dotenv_files(&tree.root);
+        let found = project_files(&tree.root).dotenv;
         let names = entries(&found);
         assert!(names.contains(&".env".to_string()));
         assert!(names.contains(&".env.local".to_string()));
@@ -368,7 +360,7 @@ mod tests {
         tree.file("target/debug/.env", "LEAK=1\n");
         tree.file("vendor/.env", "LEAK=1\n");
 
-        let found = project_dotenv_files(&tree.root);
+        let found = project_files(&tree.root).dotenv;
         assert_eq!(entries(&found), vec![".env".to_string()]);
     }
 
@@ -384,10 +376,10 @@ mod tests {
             .expect("file symlink");
         std::os::unix::fs::symlink(&outside, tree.root.join("linked-dir")).expect("dir symlink");
 
-        let found = project_dotenv_files(&tree.root.join("real"));
+        let found = project_files(&tree.root.join("real")).dotenv;
         assert_eq!(entries(&found), vec![".env".to_string()]);
 
-        let all = project_dotenv_files(&tree.root);
+        let all = project_files(&tree.root).dotenv;
         // The symlinked file and the symlinked directory are both skipped; the
         // real file inside `outside/` is still found because it is a real child.
         assert!(!entries(&all).iter().any(|name| name.contains("link")));
@@ -404,7 +396,7 @@ mod tests {
             .expect("mkfifo runs");
         assert!(status.success());
         // Reading this path would block forever, so discovery must skip it.
-        assert!(project_dotenv_files(&tree.root).is_empty());
+        assert!(project_files(&tree.root).dotenv.is_empty());
     }
 
     #[test]
@@ -433,7 +425,7 @@ mod tests {
             return;
         }
 
-        let found = project_dotenv_files(&tree.root);
+        let found = project_files(&tree.root).dotenv;
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].entered, None);
         assert_eq!(found[0].state, State::Unavailable(Unavailable::NonUtf8Path));
@@ -449,7 +441,7 @@ mod tests {
         let binary = tree.root.join(".env.binary");
         std::fs::write(&binary, [b'A', b'=', 0xff, b'\n']).expect("write binary file");
 
-        let found = project_dotenv_files(&tree.root);
+        let found = project_files(&tree.root).dotenv;
         let broken = found
             .iter()
             .find(|item| item.path.ends_with(".env.broken"))
@@ -475,7 +467,7 @@ mod tests {
     fn unavailable_reasons_never_quote_file_content() {
         let tree = Tree::new();
         tree.file(".env.broken", "SECRET_LOOKING_LINE\n");
-        let found = project_dotenv_files(&tree.root);
+        let found = project_files(&tree.root).dotenv;
         let reason = match &found[0].state {
             State::Unavailable(why) => why.reason(),
             State::Available(_) => panic!("expected an unavailable file"),

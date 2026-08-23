@@ -285,6 +285,12 @@ fn enrollment_phase(
                 };
             }
             "s" => {
+                for item in &mut items {
+                    if item.is_wildcard() {
+                        item.selected = item.enrolled;
+                    }
+                }
+                context.aliases.sync_wildcards(scope, &items);
                 terminal.line("Skipped; this file is unchanged.");
                 terminal.blank();
                 return PhaseResult::Kept(existing.sources.clone());
@@ -479,14 +485,14 @@ fn build_items(
         // `SET-002`: the current process environment is inspected automatically.
         for name in environment_candidates(environment) {
             let source = SourceRef::Env { name };
-            if known.insert(source.id()) {
-                candidates.push(item_for(
-                    source,
-                    false,
-                    Vec::new(),
-                    &mut resolver,
-                    environment,
-                ));
+            let id = source.id();
+            let candidate = automatic_item_for(source, &mut resolver, environment);
+            if known.insert(id.clone()) {
+                candidates.push(candidate);
+            } else {
+                let rules = candidate.members[0].rules.clone();
+                add_rules(&mut items, &id, rules.clone());
+                add_rules(&mut candidates, &id, rules);
             }
         }
     }
@@ -498,9 +504,15 @@ fn build_items(
         Scope::Project => project_files.dotenv.clone(),
     };
     for file in &discovered {
-        for candidate in file_candidates(file, &known, &mut resolver, environment) {
-            known.insert(candidate.members[0].source.id());
-            candidates.push(candidate);
+        for candidate in file_candidates(file, &mut resolver, environment) {
+            let id = candidate.members[0].source.id();
+            if known.insert(id.clone()) {
+                candidates.push(candidate);
+            } else {
+                let rules = candidate.members[0].rules.clone();
+                add_rules(&mut items, &id, rules.clone());
+                add_rules(&mut candidates, &id, rules);
+            }
         }
     }
 
@@ -549,7 +561,6 @@ fn environment_candidates(environment: &Environment) -> Vec<String> {
 /// Candidates offered for one discovered dotenv file.
 fn file_candidates(
     file: &Discovered,
-    known: &HashSet<SourceId>,
     resolver: &mut Resolver,
     environment: &Environment,
 ) -> Vec<Item> {
@@ -568,9 +579,18 @@ fn file_candidates(
             path: file.path.clone(),
             key: key.to_string(),
         })
-        .filter(|source| !known.contains(&source.id()))
-        .map(|source| item_for(source, false, Vec::new(), resolver, environment))
+        .map(|source| automatic_item_for(source, resolver, environment))
         .collect()
+}
+
+fn automatic_item_for(
+    source: SourceRef,
+    resolver: &mut Resolver,
+    environment: &Environment,
+) -> Item {
+    let mut item = item_for(source.clone(), false, Vec::new(), resolver, environment);
+    item.members[0].rules = admission_rules(&source, item.value.as_deref());
+    item
 }
 
 fn item_for(
@@ -610,11 +630,6 @@ fn item_for(
             };
             item.detail = match &value {
                 Some(value) => {
-                    item.members[0]
-                        .rules
-                        .extend(admission_rules(&source, value));
-                    item.members[0].rules.sort_unstable();
-                    item.members[0].rules.dedup();
                     let signals = vocabulary::value_signals(value);
                     let described: Vec<String> = signals.iter().map(Signal::describe).collect();
                     if described.is_empty() {
@@ -649,7 +664,7 @@ fn item_for(
     item
 }
 
-fn admission_rules(source: &SourceRef, value: &str) -> Vec<Rule> {
+fn admission_rules(source: &SourceRef, value: Option<&str>) -> Vec<Rule> {
     let mut rules = Vec::new();
     let name = match source {
         SourceRef::Env { name } | SourceRef::DotenvKey { key: name, .. } => Some(name.as_str()),
@@ -658,7 +673,7 @@ fn admission_rules(source: &SourceRef, value: &str) -> Vec<Rule> {
     if name.and_then(vocabulary::gating_term).is_some() {
         rules.push(Rule::SecretLikeName);
     }
-    if name.is_some() && credential_url::is_credential_bearing(value) {
+    if name.is_some() && value.is_some_and(credential_url::is_credential_bearing) {
         rules.push(Rule::CredentialBearingUrl);
     }
     rules
