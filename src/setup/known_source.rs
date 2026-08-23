@@ -653,9 +653,10 @@ fn add_dynamic(
     tokens: &[&str],
     out: &mut Vec<SourceRef>,
 ) {
-    if !value
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty())
+    if tokens.iter().any(|token| token.is_empty() || *token == "*")
+        || !value
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty())
     {
         return;
     }
@@ -696,10 +697,7 @@ where
     F: FnOnce(&Value, &Path, &str, &mut Vec<SourceRef>),
 {
     let Some(entered) = entered else {
-        found.notices.push(Notice {
-            display: sanitize::path(path),
-            reason: "its path is not valid UTF-8",
-        });
+        unavailable(found, path, "its path is not valid UTF-8");
         return;
     };
     match std::fs::metadata(path) {
@@ -707,10 +705,7 @@ where
         Ok(_) => return,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(_) => {
-            found.notices.push(Notice {
-                display: sanitize::path(path),
-                reason: "it could not be read",
-            });
+            unavailable(found, path, "it could not be read");
             return;
         }
     }
@@ -718,10 +713,7 @@ where
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(_) => {
-            found.notices.push(Notice {
-                display: sanitize::path(path),
-                reason: "it could not be read",
-            });
+            unavailable(found, path, "it could not be read");
             return;
         }
     };
@@ -730,10 +722,7 @@ where
         Ok(_) => return,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(_) => {
-            found.notices.push(Notice {
-                display: sanitize::path(path),
-                reason: "it could not be read",
-            });
+            unavailable(found, path, "it could not be read");
             return;
         }
     }
@@ -741,30 +730,28 @@ where
     match file.read_to_end(&mut bytes) {
         Ok(_) => {}
         Err(_) => {
-            found.notices.push(Notice {
-                display: sanitize::path(path),
-                reason: "it could not be read",
-            });
+            unavailable(found, path, "it could not be read");
             return;
         }
     }
     let text = match String::from_utf8(bytes) {
         Ok(text) => text,
         Err(_) => {
-            found.notices.push(Notice {
-                display: sanitize::path(path),
-                reason: "it is not valid UTF-8",
-            });
+            unavailable(found, path, "it is not valid UTF-8");
             return;
         }
     };
     match json::parse(&text) {
         Ok(value) => discover(&value, path, &entered, &mut found.sources),
-        Err(_) => found.notices.push(Notice {
-            display: sanitize::path(path),
-            reason: "it is malformed JSON",
-        }),
+        Err(_) => unavailable(found, path, "it is malformed JSON"),
     }
+}
+
+fn unavailable(found: &mut Found, path: &Path, reason: &'static str) {
+    found.notices.push(Notice {
+        display: sanitize::path(path),
+        reason,
+    });
 }
 
 fn rooted(
@@ -1245,6 +1232,10 @@ mod tests {
         tree.write(
             "home/.copilot/config.json",
             r#"{"copilotTokens":{"*":"value","":"value"}}"#,
+        );
+        tree.write(
+            "home/.local/share/opencode/auth.json",
+            r#"{"":{"type":"api","key":"value"}}"#,
         );
         let home = tree.0.join("home");
         let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);

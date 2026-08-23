@@ -99,8 +99,8 @@ event. Environment changes apply after you restart the coding agent.
 
 Currently, the following secret-like sources are automatically detected and suggested during `contextveil setup`:
 
-- **Environment variables** with secret-like names (e.g., `API_TOKEN`, `STRIPE_KEY`) or values that contain URLs with credentials (e.g., `https://username:password@some-db.com`)
-- **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or values that contain URLs with credentials (e.g., `mysql://u:pass@some-db`)
+- **Environment variables** with secret-like names (e.g., `API_TOKEN`, `STRIPE_KEY`) or complete values that are URLs with credentials (e.g., `https://username:password@some-db.com`)
+- **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or complete values that are URLs with credentials (e.g., `mysql://u:pass@some-db`)
 - **Agent credential files** for Claude Code, Codex, GitHub Copilot and OpenCode. This includes provider credential files and MCP credential files. (Keychain based/sidecars excluded.)
 - **More to come** INI, YAML, TOML, .npmrc, ...
 
