@@ -64,27 +64,13 @@ fn release_notes_link_the_boundary_and_reporting_documents() {
 }
 
 #[test]
-fn public_known_source_overview_stays_broad_and_links_the_inventory() {
+fn public_known_source_documents_link_the_inventory() {
     let readme = read("README.md");
     let overview = section(&readme, "### Known Source Rules");
-    let overview = overview.split_whitespace().collect::<Vec<_>>().join(" ");
-    for marker in [
-        "advisory",
-        "secret-like environment names",
-        "URLs containing credentials",
-        "recognized credential stores",
-        "independently of the integrations",
-        "JSON5",
-        "keychains",
-        "credential helpers",
-        "docs/known-sources.md",
-        "lim-023-known-source-rules-are-advisory",
-    ] {
-        assert!(
-            overview.contains(marker),
-            "README overview omits `{marker}`"
-        );
-    }
+    assert!(
+        overview.contains("(docs/known-sources.md)"),
+        "README overview does not link the known source inventory"
+    );
 
     let release_notes = read("docs/release-notes-template.md");
     let overview = section(&release_notes, "## Known Source Rules");

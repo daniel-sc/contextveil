@@ -23,6 +23,7 @@ mod tests {
         let canary = Canary::generate("URL_PASSWORD");
         for value in [
             format!("postgresql://app:{}@db.example.test/app", canary.value()),
+            format!("mysql://u:{}@some-db", canary.value()),
             format!(
                 "https://publisher:{}@registry.example.test/package",
                 canary.value()

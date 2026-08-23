@@ -40,7 +40,7 @@ secret or control everything an agent can do.
 
 ## Guided Setup, Boring Runtime
 
-`contextveil setup` does the thoughtful part: maintained Known Source Rules
+`contextveil setup` does the thoughtful part: maintained known source rules
 suggest secret-like names, credential-bearing URLs, and credentials in a bounded
 set of recognized local stores. You can also add sources manually. Setup shows
 only masked previews, lets you choose what to protect, and installs the
@@ -97,19 +97,17 @@ event. Environment changes apply after you restart the coding agent.
 
 ### Known Source Rules
 
-Known Source Rules are advisory setup shortcuts, not adapter coverage
-guarantees. They suggest candidates from broad categories such as familiar
-secret-like environment names, database or registry URLs containing
-credentials, and recognized credential stores used by supported coding agents.
-Every applicable rule runs independently of the integrations you select.
+Currently, the following secret-like sources are automatically detected and suggested during `contextveil setup`:
 
-Manual additions and looking for candidate files are not rules: they do not by
-themselves decide that a source should be suggested. ContextVeil can read JSON
-source documents that use comments and other JSON5 syntax, including common
-Copilot configuration. It still does not query keychains, execute credential
-helpers, or read unsupported raw sidecars. See the
-[supported rule inventory and evidence](docs/known-sources.md) and
-[`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).
+- **Environment variables** with secret-like names (e.g., `API_TOKEN`, `STRIPE_KEY`) or values that contain URLs with credentials (e.g., `https://username:password@some-db.com`)
+- **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or values that contain URLs with credentials (e.g., `mysql://u:pass@some-db`)
+- **Agent credential files** for Claude Code, Codex, GitHub Copilot and OpenCode. This includes provider credential files and MCP credential files. (Keychain based/sidecars excluded.)
+- **More to come** INI, YAML, TOML, .npmrc, ...
+
+You can find the full, detailed list of known source rules in the
+[`known-sources.md`](docs/known-sources.md) documentation.
+
+Additionally, you can manually add secret-like sources from environment variables, dotenv files, and JSON (incl. JSON5) files to your configuration.
 
 ## Quick Start
 
@@ -205,7 +203,7 @@ boundary:
 - ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
 - Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warning.)
-- Known Source Rules are version-sensitive setup advice, not an adapter coverage
+- Known source rules are version-sensitive setup advice, not a coverage
   guarantee. Unsupported raw sidecars, keychains, helpers, and unknown schemas
   remain outside current coverage as detailed in `LIM-023`.
 
