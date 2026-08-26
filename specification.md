@@ -355,8 +355,8 @@ unresolved-source confirmation.
 **SET-006** The secret-like name Known Source Rule MUST admit automatic
 candidates using a maintained, case-insensitive vocabulary, including concepts
 such as token, secret, password, key, and credential. Format, entropy, length,
-and source type MAY rank or explain a name-admitted candidate but MUST NOT
-independently introduce one.
+and source type MUST NOT independently introduce a name-admitted candidate or
+assign candidate rank, admission weight, selection preference, or confidence.
 
 V1 name gating uses ASCII case folding. It splits the name into tokens at every
 run of non-ASCII-alphanumeric characters and also creates a compact form by
@@ -372,10 +372,11 @@ Characters outside ASCII are preserved for display but do not match the V1
 vocabulary. Vocabulary changes are observable setup behavior and MUST update
 this requirement and its fixtures.
 
-**SET-007** Automatic candidates SHOULD be selected by default unless collision
-analysis finds another occurrence. Candidates with collisions MUST be visible
-but unselected by default. An already enrolled Candidate Group remains selected
-despite collisions.
+**SET-007** Every wholly new automatically admitted Candidate MUST initially be
+selected. Collision analysis finding another occurrence is the only reason setup
+MUST automatically unselect an otherwise valid new automatic Candidate.
+Candidates with collisions MUST remain visible. Existing enrollment and an
+explicitly added manual Candidate MUST remain selected despite collisions.
 
 **SET-008** The user is authoritative. Setup MUST allow enrollment after a
 collision warning and MUST NOT impose a minimum runtime value length.
@@ -396,7 +397,10 @@ clusters. Preview masking MUST be:
 | 16+ | first 4 and last 4 characters |
 
 The total character length SHOULD be shown. Deterministic value fingerprints
-MUST NOT be shown.
+MUST NOT be shown. Apart from this masked preview and length and the applicable
+Known Source Rule names, setup MUST NOT derive or display value-shape advisory
+details based on length, character classes, entropy, encoding-like form, or
+format.
 
 **SET-011** Collision analysis MUST search readable regular-file bytes under the
 current selected project root using the discovery exclusions. It MUST include
@@ -458,16 +462,52 @@ keyed candidates from its own file, and its current values contribute alias-file
 exclusions for equal-value groups elsewhere without placing the wildcard itself
 in a group.
 
-The earliest already enrolled reference in existing config order MUST remain
-first within a group. A wholly new group's canonical reference MUST be selected
-deterministically from candidate rank and source identity.
+Every Candidate Group has one Group Representative: the represented Source
+Reference with the least Source Identity. Group members MUST be ordered by Source
+Identity after automatic discovery and grouping.
+
+Source Identity order MUST compare source kind first in this V1 sequence:
+
+1. environment;
+2. dotenv key;
+3. dotenv wildcard;
+4. JSON.
+
+A source kind added later in V1 MUST append after every source kind already in
+the contractual sequence when that change lands. Within one source kind, the
+identity fields in `CFG-006` MUST compare in tuple order by exact,
+case-sensitive bytes, with no locale or filesystem case folding. Path fields use
+their normalized absolute identity paths. A derived label or final JSON Pointer
+token is not an identity ordering field.
+
+After automatic discovery and grouping, each enrollment phase MUST show rows in
+two tiers. A row is existing when it represented enrollment at the start of that
+phase; toggling it MUST NOT change its tier during the phase. Existing rows come
+first and wholly new rows second. Rows within each tier MUST be ordered by Group
+Representative. An unresolved Source Reference or dotenv wildcard policy is a
+standalone row and acts as its own representative under the same ordering.
+Discovery iteration order MUST NOT affect grouping, representatives, or this
+initial row order.
+
+A manual addition during an active selection loop MUST NOT reorder the rows or
+group members already displayed in that loop. A resolvable manual alias still
+joins its equal-value group immediately, but its displayed insertion position
+may remain until the phase ends.
+
+On `Save`, setup MUST persist all selected references in Source Identity order,
+including previously enrolled references and references added manually. This
+normalization occurs even when enrollment membership did not change and may
+therefore change the canonical alias selected later under `REG-002`. `Skip`
+remains the exact no-write, no-change path.
 
 Each Candidate Group MUST show one masked value preview and a sanitized
 description of every represented source. It MUST NOT show or derive a complete
 value or deterministic value fingerprint. It MUST also show the display name of
 each Known Source Rule that admitted at least one represented source, deduplicated
-once per group. Multiple matching rules and aliases MUST contribute one admission
-weight to candidate ranking rather than increasing rank with their count.
+once per group and ordered by the fixed inventory order in
+[`docs/known-sources.md`](docs/known-sources.md). A Known Source Rule's identity
+and the number of matching rules MUST NOT affect admission after the first match,
+selection, Group Representative choice, row order, or persistence order.
 
 **SET-017** Under the credential-bearing URL Known Source Rule, environment and
 discovered dotenv values that parse as absolute hierarchical URLs with an
@@ -482,9 +522,11 @@ automatic candidate-admission rule. The V1 rule inventory consists of the
 secret-like name rule in `SET-006`, the credential-bearing URL rule in `SET-017`,
 and the supported recognized store schema-family rules in
 [`docs/known-sources.md`](docs/known-sources.md). Filesystem enumeration and
-manual source additions are inputs to setup, not Known Source Rules. Every
-applicable rule MUST run independently of adapter selection, installation,
-detection, and runtime coverage.
+manual source additions are inputs to setup, not Known Source Rules; explicit
+manual addition admits a Candidate by user action. Every applicable rule MUST run
+independently of adapter selection, installation, detection, and runtime
+coverage. Rule applicability is binary and MUST NOT carry a score, admission
+weight, selection preference, ordering preference, or confidence level.
 
 A recognized store schema-family rule MUST produce explicit source references
 and MUST NOT be persisted as runtime indirection. Path override environment variables are resolved during setup; a

@@ -25,7 +25,8 @@ contextveil doctor
 Setup guides enrollment from environment variables, dotenv files, manual exact
 JSON fields, and maintained Known Source Rules. These rules are advisory and
 version-sensitive, not adapter coverage guarantees, and every applicable rule
-runs independently of selected integrations.
+runs independently of selected integrations. Rule applicability is binary and
+unweighted; matching more rules does not select or order a candidate.
 
 ## Support matrix
 

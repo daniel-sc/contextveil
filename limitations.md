@@ -389,12 +389,14 @@ the reporting half alone.
 they are not an adapter coverage guarantee or a promise to find every host
 credential. Maintained deterministic rules admit candidates by secret-like name,
 credential-bearing URL, or exact recognized store schema family. Every applicable
-rule runs independently of adapters. Filesystem enumeration and manual additions
-are not rules. Recognized store rules inspect only the exact machine paths and
-bounded project patterns in [`docs/known-sources.md`](docs/known-sources.md), then
-persist ordinary environment or exact JSON references. JSON sources accept the
-full JSON5 grammar while still rejecting duplicate members. Valid unknown schemas
-silently no-match; malformed matched JSON sources are shown as unavailable.
+rule runs independently of adapters. Rule applicability is binary and unweighted;
+rule identity and match count do not affect selection or ordering. Filesystem
+enumeration and manual additions are not rules. Recognized store rules inspect
+only the exact machine paths and bounded project patterns in
+[`docs/known-sources.md`](docs/known-sources.md), then persist ordinary environment
+or exact JSON references. JSON sources accept the full JSON5 grammar while still
+rejecting duplicate members. Valid unknown schemas silently no-match; malformed
+matched JSON sources are shown as unavailable.
 Recognized dynamic object members are candidates only when their
 names are representable as exact JSON Pointers under `CFG-016`; empty names and
 `*` silently no-match. Keychains and credential helpers are not queried.

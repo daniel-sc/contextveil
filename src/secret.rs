@@ -4,6 +4,7 @@
 //! only, never from a path, and reduced to a conservative character set before
 //! it can reach a placeholder or a terminal.
 
+use std::cmp::Ordering;
 use std::path::PathBuf;
 
 /// Identity of one enrolled source (`CFG-006`).
@@ -11,7 +12,7 @@ use std::path::PathBuf;
 /// The path is already expanded and lexically normalized, without filesystem
 /// canonicalization or symlink resolution, so identity does not depend on
 /// filesystem state.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceId {
     /// An environment variable inherited by the hook process.
     Env { name: String },
@@ -20,11 +21,7 @@ pub enum SourceId {
     /// Every current key in a dotenv file.
     DotenvAll { path: PathBuf },
     /// One exact RFC 6901 pointer in a JSON file.
-    Json {
-        path: PathBuf,
-        pointer: String,
-        token: String,
-    },
+    Json { path: PathBuf, pointer: String },
 }
 
 impl SourceId {
@@ -43,24 +40,22 @@ impl SourceId {
         SourceId::DotenvAll { path }
     }
 
-    pub fn json(path: PathBuf, pointer: impl Into<String>, token: impl Into<String>) -> Self {
+    pub fn json(path: PathBuf, pointer: impl Into<String>) -> Self {
         SourceId::Json {
             path,
             pointer: pointer.into(),
-            token: token.into(),
         }
     }
 
-    /// The key or name a label derives from. Never a path (`REG-003`).
-    ///
-    /// A wildcard entry has no key of its own; each value it resolves carries
-    /// the identity of the specific key it came from.
-    pub fn key(&self) -> Option<&str> {
+    /// Emit-safe label for this source, when it has a key (`REG-003`).
+    pub fn label(&self) -> Option<String> {
         match self {
-            SourceId::Env { name } => Some(name),
-            SourceId::DotenvKey { key, .. } => Some(key),
+            SourceId::Env { name } => Some(safe_label(name)),
+            SourceId::DotenvKey { key, .. } => Some(safe_label(key)),
             SourceId::DotenvAll { .. } => None,
-            SourceId::Json { token, .. } => Some(token),
+            SourceId::Json { pointer, .. } => crate::json::final_token(pointer)
+                .ok()
+                .map(|token| safe_label(&token)),
         }
     }
 
@@ -74,9 +69,53 @@ impl SourceId {
         }
     }
 
-    /// Emit-safe label for this source, when it has a key.
-    pub fn label(&self) -> Option<String> {
-        self.key().map(safe_label)
+    fn kind_order(&self) -> u8 {
+        match self {
+            SourceId::Env { .. } => 0,
+            SourceId::DotenvKey { .. } => 1,
+            SourceId::DotenvAll { .. } => 2,
+            SourceId::Json { .. } => 3,
+        }
+    }
+}
+
+impl Ord for SourceId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (SourceId::Env { name: left }, SourceId::Env { name: right }) => left.cmp(right),
+            (
+                SourceId::DotenvKey {
+                    path: left_path,
+                    key: left_key,
+                },
+                SourceId::DotenvKey {
+                    path: right_path,
+                    key: right_key,
+                },
+            ) => left_path.cmp(right_path).then(left_key.cmp(right_key)),
+            (SourceId::DotenvAll { path: left }, SourceId::DotenvAll { path: right }) => {
+                left.cmp(right)
+            }
+            (
+                SourceId::Json {
+                    path: left_path,
+                    pointer: left_pointer,
+                },
+                SourceId::Json {
+                    path: right_path,
+                    pointer: right_pointer,
+                },
+            ) => left_path
+                .cmp(right_path)
+                .then(left_pointer.cmp(right_pointer)),
+            _ => self.kind_order().cmp(&other.kind_order()),
+        }
+    }
+}
+
+impl PartialOrd for SourceId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -160,7 +199,7 @@ mod tests {
         // A wildcard entry has no key, so it has no label.
         assert_eq!(SourceId::dotenv_all(PathBuf::from("/x/.env")).label(), None);
         assert_eq!(
-            SourceId::json(PathBuf::from("/secret/auth.json"), "/a~1b", "a/b")
+            SourceId::json(PathBuf::from("/secret/auth.json"), "/a~1b")
                 .label()
                 .as_deref(),
             Some("a_b")
@@ -180,8 +219,37 @@ mod tests {
         );
         assert_ne!(SourceId::env("A"), SourceId::env("a"));
         assert_ne!(
-            SourceId::json(path.clone(), "/A", "A"),
-            SourceId::json(path, "/a", "a")
+            SourceId::json(path.clone(), "/A"),
+            SourceId::json(path, "/a")
+        );
+    }
+
+    #[test]
+    fn identities_use_the_contractual_total_order() {
+        let path = PathBuf::from("/project/source");
+        let mut identities = vec![
+            SourceId::json(path.clone(), "/b"),
+            SourceId::dotenv_all(path.clone()),
+            SourceId::dotenv_key(path.clone(), "B"),
+            SourceId::env("B"),
+            SourceId::json(path.clone(), "/a"),
+            SourceId::dotenv_key(path, "A"),
+            SourceId::env("A"),
+        ];
+
+        identities.sort();
+
+        assert_eq!(
+            identities,
+            vec![
+                SourceId::env("A"),
+                SourceId::env("B"),
+                SourceId::dotenv_key(PathBuf::from("/project/source"), "A"),
+                SourceId::dotenv_key(PathBuf::from("/project/source"), "B"),
+                SourceId::dotenv_all(PathBuf::from("/project/source")),
+                SourceId::json(PathBuf::from("/project/source"), "/a"),
+                SourceId::json(PathBuf::from("/project/source"), "/b"),
+            ]
         );
     }
 

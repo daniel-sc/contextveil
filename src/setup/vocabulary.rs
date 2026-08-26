@@ -1,11 +1,9 @@
-//! Name gating and advisory ranking for setup candidates.
+//! Name gating for setup candidates.
 //!
-//! `SET-006` fixes the V1 vocabulary exactly. Format, entropy, length, and source
-//! type may rank or explain a name-gated candidate but must never introduce one.
-//! Candidate admission is represented by Known Source Rule identities. These
-//! signals only explain advisory ranking after a rule has admitted a source.
-//! Vocabulary changes are observable setup behavior and must update the
-//! specification and its fixtures in the same change.
+//! `SET-006` fixes the V1 vocabulary exactly. Candidate admission is represented
+//! by Known Source Rule identities; value shape never ranks or explains a
+//! candidate. Vocabulary changes are observable setup behavior and must update
+//! the specification and its fixtures in the same change.
 
 /// Whole tokens that gate a name.
 const EXACT_TOKENS: [&str; 8] = [
@@ -35,25 +33,6 @@ const COMPACT_SUFFIXES: [&str; 13] = [
     "authtoken",
     "refreshtoken",
 ];
-
-/// Why a candidate is shown or ranked, in user-facing wording.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Signal {
-    /// Advisory only (`SET-006`).
-    LongValue,
-    HighVariety,
-    LooksEncoded,
-}
-
-impl Signal {
-    pub fn describe(&self) -> String {
-        match self {
-            Signal::LongValue => "long value".to_string(),
-            Signal::HighVariety => "mixed character classes".to_string(),
-            Signal::LooksEncoded => "encoded-looking value".to_string(),
-        }
-    }
-}
 
 /// Returns the vocabulary term that gates `name`, if any.
 ///
@@ -91,47 +70,6 @@ pub fn gating_term(name: &str) -> Option<&'static str> {
     suffixes
         .into_iter()
         .find(|suffix| compact.ends_with(suffix))
-}
-
-/// Advisory signals used to rank an already-gated candidate.
-pub fn value_signals(value: &str) -> Vec<Signal> {
-    let mut signals = Vec::new();
-    let length = value.chars().count();
-    if length >= 24 {
-        signals.push(Signal::LongValue);
-    }
-
-    let has_lower = value.chars().any(|c| c.is_ascii_lowercase());
-    let has_upper = value.chars().any(|c| c.is_ascii_uppercase());
-    let has_digit = value.chars().any(|c| c.is_ascii_digit());
-    let classes = [has_lower, has_upper, has_digit]
-        .into_iter()
-        .filter(|present| *present)
-        .count();
-    if classes >= 3 {
-        signals.push(Signal::HighVariety);
-    }
-
-    let encoded_shape = length >= 16
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '-' | '_' | '.'));
-    if encoded_shape {
-        signals.push(Signal::LooksEncoded);
-    }
-    signals
-}
-
-/// Ranking score for an admitted candidate. Higher sorts first.
-pub fn rank(signals: &[Signal]) -> u32 {
-    signals
-        .iter()
-        .map(|signal| match signal {
-            Signal::LongValue => 2,
-            Signal::HighVariety => 2,
-            Signal::LooksEncoded => 1,
-        })
-        .sum()
 }
 
 #[cfg(test)]
@@ -197,28 +135,5 @@ mod tests {
         assert_eq!(gating_term("TÖKEN"), None);
         assert_eq!(gating_term("secret✓"), Some("secret"));
         assert_eq!(gating_term("prefix✓token"), Some("token"));
-    }
-
-    #[test]
-    fn advisory_value_shape_does_not_change_name_gating() {
-        // Bounded exceptions such as SET-017 are applied outside the vocabulary.
-        assert_eq!(gating_term("DATABASE_URL"), None);
-        assert!(!value_signals("aGVsbG8gd29ybGQgZXhhbXBsZQ==").is_empty());
-    }
-
-    #[test]
-    fn signals_describe_why_a_candidate_ranks_higher() {
-        let signals = value_signals("aB3aB3aB3aB3aB3aB3aB3aB3aB3");
-        assert!(signals.contains(&Signal::LongValue));
-        assert!(signals.contains(&Signal::HighVariety));
-        assert!(signals.contains(&Signal::LooksEncoded));
-        assert!(rank(&signals) > rank(&value_signals("short")));
-    }
-
-    #[test]
-    fn signal_descriptions_never_include_the_value() {
-        for signal in value_signals("aB3aB3aB3aB3aB3aB3aB3aB3aB3") {
-            assert!(!signal.describe().contains("aB3"));
-        }
     }
 }

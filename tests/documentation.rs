@@ -124,14 +124,15 @@ fn known_source_inventory_pins_all_evidence() {
 }
 
 #[test]
-fn completed_known_source_work_has_no_temporary_gap_entries() {
+fn completed_setup_contract_work_has_no_temporary_gap_entries() {
     let limitations = read("limitations.md");
     assert!(!limitations.contains("### LIM-011:"));
     assert!(!limitations.contains("### DEV-003:"));
+    assert!(!limitations.contains("### DEV-004:"));
 
     let traceability = read("docs/traceability.md");
     for requirement in [
-        "SET-002", "SET-006", "SET-018", "SET-019", "SET-020", "TST-003",
+        "SET-002", "SET-006", "SET-016", "SET-018", "SET-019", "SET-020", "TST-003",
     ] {
         let row = traceability
             .lines()

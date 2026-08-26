@@ -4,7 +4,8 @@ A **Known Source Rule** is a maintained, deterministic setup-time rule that
 automatically admits candidates. Rules are advisory and version-sensitive, not
 adapter coverage guarantees. Every applicable rule runs regardless of which
 adapters are selected, installed, or detected. The user still chooses what to
-enroll.
+enroll. Advisory means the user makes that enrollment decision; it does not mean
+that rules assign confidence or weight.
 
 This is not a guarantee that an adapter covers a host or that every host
 credential is found; there is no runtime `KnownSource` source type. Selected
@@ -45,12 +46,16 @@ coverage.
 - Dynamic object members produce candidates only when each member name can be
   represented by an exact `CFG-016` JSON Pointer. Empty names and `*` silently
   produce no candidate.
+- Rule applicability is binary admission and display attribution. A Candidate
+  Group displays deduplicated applicable rule names in the inventory order
+  below. Rule identity and the number of matching rules do not score, select, or
+  order a Candidate or Candidate Group.
 
 ## Rule Inventory
 
 | Rule scope | Status | Exact admission scope and details | Evidence |
 | --- | --- | --- | --- |
-| Secret-like source names | Supported | Environment and discovered dotenv sources are admitted under `SET-006` when ASCII case-folded tokenization or compact suffix matching finds the exact maintained vocabulary in that requirement. Format, entropy, length, and source type do not independently admit a candidate. | Normative scope: [`SET-006`](../specification.md). Current implementation evidence: `src/setup/vocabulary.rs` and its unit fixtures. |
+| Secret-like source names | Supported | Environment and discovered dotenv sources are admitted under `SET-006` when ASCII case-folded tokenization or compact suffix matching finds the exact maintained vocabulary in that requirement. Format, entropy, length, and source type do not independently admit or rank a candidate. | Normative scope: [`SET-006`](../specification.md). Current implementation evidence: `src/setup/vocabulary.rs` and its unit fixtures. |
 | Credential-bearing URLs | Supported | Environment and discovered dotenv values are admitted when they are absolute hierarchical URLs with an authority and non-empty password in userinfo. The complete URL is the candidate. JSON sources and other structured sources are not recursively inspected by this rule. | Normative scope: [`SET-017`](../specification.md). Current implementation evidence: `src/setup/credential_url.rs` and setup fixtures. |
 | Codex primary credentials | Supported | Root is `CODEX_HOME`, or `~/.codex` when unset or empty. In `auth.json`, recognize `/OPENAI_API_KEY`; `/tokens/id_token`; `/tokens/access_token`; `/tokens/refresh_token`; `/personal_access_token`; `/bedrock_api_key/api_key`; and either string `/agent_identity` or `/agent_identity/agent_private_key`. | [`openai/codex@ff0e950`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3); issue-time check [`openai/codex@d9fd91e`](https://github.com/openai/codex/commit/d9fd91edab298c2423c0c82526513e4e000284cf). Current fixtures: `src/setup/known_source.rs`. |
 | Codex MCP credentials | Supported | Under the same root, inspect `.credentials.json`. For each immediate object member, recognize `access_token` and optional string `refresh_token` only when `server_name`, `server_url`, `client_id`, and `access_token` are strings and `refresh_token` is absent, null, or a string. | Same pinned Codex commits above; current schema and filesystem fixtures in `src/setup/known_source.rs`. |
