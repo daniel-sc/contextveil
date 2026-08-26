@@ -284,14 +284,12 @@ fn parse_entry(
             if file.is_empty() || pointer.is_empty() {
                 return Err(EntryProblem::EmptyField);
             }
-            let token =
-                crate::json::final_token(pointer).map_err(|_| EntryProblem::InvalidJsonPointer)?;
+            crate::json::final_token(pointer).map_err(|_| EntryProblem::InvalidJsonPointer)?;
             let path = paths::expand(file, base, home).map_err(EntryProblem::InvalidPath)?;
             Ok(SourceRef::Json {
                 entered: file.to_string(),
                 path,
                 pointer: pointer.to_string(),
-                token,
             })
         }
         _ => Err(EntryProblem::UnknownSourceType),
@@ -380,7 +378,6 @@ pointer = "/tokens/access_token"
                     entered: "~/.codex/auth.json".to_string(),
                     path: PathBuf::from("/home/user/.codex/auth.json"),
                     pointer: "/tokens/access_token".to_string(),
-                    token: "access_token".to_string(),
                 },
             ]
         );

@@ -107,7 +107,8 @@ change.
 ## Principles
 
 - **Local by default.** Runtime resolution and redaction make no network calls.
-- **User-authorized enrollment.** Heuristics suggest; the user decides.
+- **User-authorized enrollment.** Known Source Rules admit setup candidates; the
+  user decides what to enroll.
 - **Boring runtime.** Matching is literal, case-sensitive, and deterministic.
 - **Source references over snapshots.** Values are resolved from explicit local
   source references rather than copied into ContextVeil configuration.

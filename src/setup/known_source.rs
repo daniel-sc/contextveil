@@ -669,14 +669,13 @@ fn add_dynamic(
 }
 
 fn add_source(path: &Path, entered: &str, pointer: String, out: &mut Vec<SourceRef>) {
-    let Ok(token) = json::final_token(&pointer) else {
+    if json::final_token(&pointer).is_err() {
         return;
-    };
+    }
     out.push(SourceRef::Json {
         entered: entered.into(),
         path: path.to_path_buf(),
         pointer,
-        token,
     });
 }
 

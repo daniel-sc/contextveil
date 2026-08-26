@@ -34,7 +34,6 @@ use collision::Collisions;
 use discovery::{Discovered, State};
 use known_source::Rule;
 use ui::{Cancelled, Terminal};
-use vocabulary::Signal;
 
 /// Which registry a phase edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,7 +344,7 @@ struct Item {
     members: Vec<Member>,
     enrolled: bool,
     selected: bool,
-    /// Masked preview and explanatory signals, when the source resolves.
+    /// Masked preview, when the source resolves.
     detail: String,
     /// Why the source cannot be used, when it currently cannot.
     problem: Option<String>,
@@ -516,30 +515,26 @@ fn build_items(
         }
     }
 
-    // Rank suggestions by their admission and advisory signals (`SET-006`,
-    // `SET-017`).
-    candidates.sort_by(|left, right| {
-        rank_of(right).cmp(&rank_of(left)).then_with(|| {
+    for candidate in candidates {
+        merge_item(&mut items, candidate);
+    }
+    sort_initial_items(&mut items);
+    (items, discovered_known.notices)
+}
+
+/// Establishes the two initial display tiers and each group's representative.
+fn sort_initial_items(items: &mut [Item]) {
+    for item in items.iter_mut() {
+        item.members.sort_by_key(|member| member.source.id());
+    }
+    items.sort_by(|left, right| {
+        right.enrolled.cmp(&left.enrolled).then_with(|| {
             left.members[0]
                 .source
                 .id()
                 .cmp(&right.members[0].source.id())
         })
     });
-    for candidate in candidates {
-        merge_item(&mut items, candidate);
-    }
-    (items, discovered_known.notices)
-}
-
-fn rank_of(item: &Item) -> u32 {
-    match &item.value {
-        None => 0,
-        Some(value) => {
-            let admission = if item.rules().is_empty() { 0 } else { 4 };
-            admission + vocabulary::rank(&vocabulary::value_signals(value))
-        }
-    }
 }
 
 /// Name-gated and credential-bearing URL environment variables, in stable order.
@@ -589,7 +584,11 @@ fn automatic_item_for(
     environment: &Environment,
 ) -> Item {
     let mut item = item_for(source.clone(), false, Vec::new(), resolver, environment);
-    item.members[0].rules = admission_rules(&source, item.value.as_deref());
+    let rules = admission_rules(&source, item.value.as_deref());
+    if item.problem.is_none() && !rules.is_empty() {
+        item.selected = true;
+    }
+    item.members[0].rules = rules;
     item
 }
 
@@ -600,6 +599,7 @@ fn item_for(
     resolver: &mut Resolver,
     environment: &Environment,
 ) -> Item {
+    let automatically_admitted = !rules.is_empty();
     let mut item = Item {
         members: vec![Member {
             source: source.clone(),
@@ -608,9 +608,9 @@ fn item_for(
             suppressed: false,
         }],
         enrolled,
-        // `SET-007`: automatic candidates are selected by default; collision
-        // analysis may unselect them afterwards.
-        selected: true,
+        // Name/URL admissions are assigned immediately after resolution by
+        // `automatic_item_for`; manual additions are selected after confirmation.
+        selected: enrolled || automatically_admitted,
         detail: String::new(),
         problem: None,
         value: None,
@@ -629,15 +629,7 @@ fn item_for(
                 secrets.first().map(|secret| secret.value.clone())
             };
             item.detail = match &value {
-                Some(value) => {
-                    let signals = vocabulary::value_signals(value);
-                    let described: Vec<String> = signals.iter().map(Signal::describe).collect();
-                    if described.is_empty() {
-                        preview::describe(value)
-                    } else {
-                        format!("{}; {}", preview::describe(value), described.join(", "))
-                    }
-                }
+                Some(value) => preview::describe(value),
                 None => format!("{} current keys", secrets.len()),
             };
             if matches!(source, SourceRef::DotenvAll { .. }) {
@@ -648,9 +640,6 @@ fn item_for(
         }
         Resolution::Unresolved { why, .. } => {
             item.detail = format!("unresolved: {}", unresolved_reason(why));
-            // An unresolved source is not an error; it is simply not selected by
-            // default unless it is already enrolled (`CFG-015`).
-            item.selected = enrolled;
         }
         Resolution::Malfunction { why, .. } => {
             // `SET-013`: an enrolled malformed or unreadable source must be
@@ -888,7 +877,7 @@ fn blocking_item(items: &[Item]) -> Option<String> {
 }
 
 fn selected_sources(items: &[Item]) -> Vec<SourceRef> {
-    items
+    let mut selected: Vec<SourceRef> = items
         .iter()
         .filter(|item| item.selected && item.visible())
         .flat_map(|item| {
@@ -897,7 +886,9 @@ fn selected_sources(items: &[Item]) -> Vec<SourceRef> {
                 .filter(|member| !member.suppressed)
                 .map(|member| member.source.clone())
         })
-        .collect()
+        .collect();
+    selected.sort_by_key(SourceRef::id);
+    selected
 }
 
 fn toggle(terminal: &mut Terminal<'_>, items: &mut [Item], selection: &str) {
@@ -1040,20 +1031,16 @@ fn add_manual(
                 terminal.line("  No pointer entered.");
                 return Ok(());
             }
-            let token = match crate::json::final_token(&pointer) {
-                Ok(token) => token,
-                Err(_) => {
-                    terminal.line(
+            if crate::json::final_token(&pointer).is_err() {
+                terminal.line(
                         "  Enter a plain RFC 6901 pointer beginning with `/`, with a non-empty final token and no wildcards.",
                     );
-                    return Ok(());
-                }
-            };
+                return Ok(());
+            }
             SourceRef::Json {
                 entered,
                 path,
                 pointer,
-                token,
             }
         }
         _ => return Ok(()),

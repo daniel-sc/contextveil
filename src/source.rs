@@ -41,7 +41,6 @@ pub enum SourceRef {
         entered: String,
         path: PathBuf,
         pointer: String,
-        token: String,
     },
 }
 
@@ -51,12 +50,7 @@ impl SourceRef {
             SourceRef::Env { name } => SourceId::env(name.clone()),
             SourceRef::DotenvKey { path, key, .. } => SourceId::dotenv_key(path.clone(), key),
             SourceRef::DotenvAll { path, .. } => SourceId::dotenv_all(path.clone()),
-            SourceRef::Json {
-                path,
-                pointer,
-                token,
-                ..
-            } => SourceId::json(path.clone(), pointer, token),
+            SourceRef::Json { path, pointer, .. } => SourceId::json(path.clone(), pointer),
         }
     }
 
@@ -304,13 +298,8 @@ impl Resolver {
                     ),
                 }
             }
-            SourceRef::Json {
-                path,
-                pointer,
-                token,
-                ..
-            } => {
-                let id = SourceId::json(path.clone(), pointer, token);
+            SourceRef::Json { path, pointer, .. } => {
+                let id = SourceId::json(path.clone(), pointer);
                 match self.json_file(path) {
                     JsonFileState::Missing => Resolution::Unresolved {
                         source: id,
@@ -499,7 +488,6 @@ mod tests {
             entered: path.to_string_lossy().into_owned(),
             path: path.to_path_buf(),
             pointer: pointer.to_string(),
-            token: crate::json::final_token(pointer).expect("valid test pointer"),
         }
     }
 

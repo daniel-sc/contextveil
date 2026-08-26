@@ -53,7 +53,8 @@ The core owns:
 - global and project registry composition;
 - environment, dotenv, and exact-pointer JSON source resolution using JSON5
   document grammar;
-- candidate grouping, scoring, and collision analysis;
+- candidate grouping, deterministic Source Identity ordering, and collision
+  analysis;
 - canonicalization of duplicate resolved values;
 - exact matching and placeholder selection;
 - structured string-value traversal;
@@ -144,8 +145,12 @@ The minimum conceptual types are:
 
 - `SourceReference`: environment, one dotenv key, all keys in a dotenv file, or
   one exact JSON file pointer;
+- `SourceIdentity`: the value-free equality and deterministic ordering key for a
+  source reference;
 - `KnownSourceRule`: a maintained deterministic setup-time automatic
   candidate-admission rule, absent from runtime policy;
+- `CandidateGroup`: equal-value candidates from one enrollment scope, identified
+  for setup ordering by their least source identity;
 - `Registry`: ordered source references from one config scope;
 - `ResolvedSecret`: a non-empty UTF-8 value plus source identity and safe label;
 - `EffectiveRegistry`: project entries followed by global entries for canonical
@@ -203,8 +208,11 @@ Known Source Rules belong to setup, not runtime. A rule is maintained,
 deterministic setup-time logic that automatically admits candidates. V1 has a
 secret-like name rule, a credential-bearing URL rule, and recognized store
 schema-family rules. Filesystem enumeration and manual additions supply possible
-sources but are not rules because they do not themselves admit a candidate.
-Every applicable rule runs independently of adapter selection or installation.
+sources but are not rules. Filesystem enumeration does not itself admit a
+candidate; explicit manual addition does. Every applicable rule runs
+independently of adapter selection or installation. Rule applicability is binary
+admission and display attribution only: rule identity and match count never
+score, select, or order a candidate.
 
 Maintained path and schema knowledge yields ordinary environment, dotenv, or
 JSON source references. The persisted policy never names a Known Source Rule, so
@@ -369,8 +377,8 @@ upgrade, binary version, checksum, and setup-free invocation tests.
 ## Tactical Discretion
 
 Implementers may choose module layout, parser and terminal libraries, matcher
-implementation, writer locking, scoring weights, directory exclusion details,
-and output wording where the specification is intentionally non-exact.
+implementation, writer locking, directory exclusion details, and output wording
+where the specification is intentionally non-exact.
 
 Prefer a smaller maintainable design over machinery added solely to satisfy an
 internal shape imagined by these documents. A tactical choice that preserves

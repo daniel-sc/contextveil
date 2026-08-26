@@ -11,6 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use contextveil::cli::Exit;
+use contextveil::registry;
+use contextveil::secret::SourceId;
 use contextveil::setup;
 use contextveil::setup::ui::Terminal;
 use contextveil::source::Environment;
@@ -142,6 +144,18 @@ fn a_gated_environment_candidate_is_enrolled_by_default() {
 }
 
 #[test]
+fn an_unresolved_automatic_candidate_remains_selected() {
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[("EMPTY_TOKEN", "")]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("[x] env EMPTY_TOKEN"), "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("EMPTY_TOKEN"), "{global}");
+}
+
+#[test]
 fn a_database_url_candidate_is_enrolled_as_its_environment_source() {
     let canary = Canary::generate("DATABASE_URL_PASSWORD");
     let fixture = Fixture::new();
@@ -160,27 +174,50 @@ fn a_database_url_candidate_is_enrolled_as_its_environment_source() {
 }
 
 #[test]
-fn several_matching_rules_contribute_one_admission_weight() {
+fn rule_count_does_not_change_candidate_order() {
     let fixture = Fixture::new();
     let environment = fixture.environment(&[
-        ("A_URL", "https://user:aB3cD4eF5gH6@a.example.test/service"),
-        (
-            "Z_PASSWORD",
-            "https://user:zY8xW7vU6tS5@b.example.test/service",
-        ),
+        ("A_TOKEN", "aaaaaaaaaaaaaaaaaaaaaaaa:"),
+        ("Z_PASSWORD", "https://user:x@z.example.test"),
     ]);
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(
-        transcript.find("env A_URL").expect("single-rule candidate")
+        transcript
+            .find("env A_TOKEN")
+            .expect("single-rule candidate")
             < transcript
                 .find("env Z_PASSWORD")
                 .expect("multi-rule candidate"),
-        "rule count changed candidate rank:\n{transcript}"
+        "rule count changed candidate order:\n{transcript}"
     );
-    assert_eq!(transcript.matches("credential-bearing URL").count(), 2);
-    assert_eq!(transcript.matches("secret-like source name").count(), 1);
+    assert_eq!(transcript.matches("credential-bearing URL").count(), 1);
+    assert_eq!(transcript.matches("secret-like source name").count(), 2);
+    assert!(
+        transcript.contains("rules: secret-like source name, credential-bearing URL"),
+        "{transcript}"
+    );
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("A_TOKEN"));
+    assert!(global.contains("Z_PASSWORD"));
+}
+
+#[test]
+fn value_shape_does_not_change_candidate_order() {
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[
+        ("A_TOKEN", "short"),
+        ("Z_TOKEN", "aB3aB3aB3aB3aB3aB3aB3aB3aB3aB3aB3aB3"),
+    ]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        transcript.find("env A_TOKEN").expect("short candidate")
+            < transcript.find("env Z_TOKEN").expect("shaped candidate"),
+        "value shape changed candidate order:\n{transcript}"
+    );
 }
 
 #[test]
@@ -234,7 +271,7 @@ fn non_credential_url_shapes_do_not_bypass_name_gating() {
 }
 
 #[test]
-fn setup_shows_a_masked_preview_and_its_reason() {
+fn setup_shows_a_masked_preview_and_rules_without_shape_details() {
     let canary = Canary::generate_with_length("API_KEY", 40);
     let fixture = Fixture::new();
     let environment = fixture.environment(&[("API_KEY", canary.value())]);
@@ -243,6 +280,13 @@ fn setup_shows_a_masked_preview_and_its_reason() {
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     assert!(transcript.contains("(40 characters)"));
     assert!(transcript.contains("rules: secret-like source name"));
+    for removed in [
+        "long value",
+        "mixed character classes",
+        "encoded-looking value",
+    ] {
+        assert!(!transcript.contains(removed), "{transcript}");
+    }
     // First and last four characters only, per `SET-010`.
     let revealed: String = canary.value().chars().take(4).collect();
     assert!(transcript.contains(&revealed));
@@ -306,6 +350,95 @@ fn rerunning_setup_with_no_changes_is_idempotent() {
         first_project
     );
     assert!(transcript.contains("No change"));
+}
+
+#[test]
+fn initial_rows_use_existing_then_new_tiers_but_save_uses_identity_order() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    std::fs::write(
+        fixture.global_config(),
+        "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"Z_TOKEN\"\n",
+    )
+    .expect("global config");
+    let environment = fixture.environment(&[("A_TOKEN", "a-value"), ("Z_TOKEN", "z-value")]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        transcript
+            .find("env Z_TOKEN (enrolled)")
+            .expect("existing row")
+            < transcript.find("env A_TOKEN").expect("new row"),
+        "{transcript}"
+    );
+
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(
+        global.find("A_TOKEN").expect("A identity") < global.find("Z_TOKEN").expect("Z identity"),
+        "{global}"
+    );
+}
+
+#[test]
+fn save_normalizes_source_kinds_and_normalized_identity_fields() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    std::fs::write(
+        fixture.global_config(),
+        r#"version = 1
+
+[[secret]]
+source = "json"
+file = "z.json"
+pointer = "/z"
+
+[[secret]]
+source = "dotenv"
+file = "0.env"
+all = true
+
+[[secret]]
+source = "dotenv"
+file = "b.env"
+key = "A_KEY"
+
+[[secret]]
+source = "dotenv"
+file = "z/../a.env"
+key = "Z_KEY"
+
+[[secret]]
+source = "env"
+name = "Z_TOKEN"
+
+[[secret]]
+source = "env"
+name = "A_TOKEN"
+"#,
+    )
+    .expect("global config");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let ordered = [
+        "name = \"A_TOKEN\"",
+        "name = \"Z_TOKEN\"",
+        "file = \"z/../a.env\"",
+        "file = \"b.env\"",
+        "all = true",
+        "pointer = \"/z\"",
+    ];
+    for pair in ordered.windows(2) {
+        assert!(
+            global.find(pair[0]).expect("earlier identity")
+                < global.find(pair[1]).expect("later identity"),
+            "{global}"
+        );
+    }
 }
 
 #[test]
@@ -457,6 +590,36 @@ fn equal_environment_candidates_are_one_group_and_enroll_every_alias() {
 }
 
 #[test]
+fn group_representatives_ignore_discovery_iteration_order() {
+    fn run_with_tokens(tokens: &str) -> (String, String) {
+        let fixture = Fixture::new();
+        std::fs::create_dir_all(fixture.home().join(".copilot")).expect("copilot directory");
+        std::fs::write(
+            fixture.home().join(".copilot/config.json"),
+            format!(r#"{{"copilotTokens":{{{tokens}}}}}"#),
+        )
+        .expect("copilot config");
+
+        let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+        assert_eq!(exit, Exit::Ok, "{transcript}");
+        let config = std::fs::read_to_string(fixture.global_config()).expect("global config");
+        (config, transcript)
+    }
+
+    let (first, first_transcript) = run_with_tokens(r#""z.example":"same","a.example":"same""#);
+    let (second, second_transcript) = run_with_tokens(r#""a.example":"same","z.example":"same""#);
+
+    assert_eq!(first, second);
+    for output in [&first, &first_transcript, &second_transcript] {
+        assert!(
+            output.find("/copilotTokens/a.example").expect("A pointer")
+                < output.find("/copilotTokens/z.example").expect("Z pointer"),
+            "{output}"
+        );
+    }
+}
+
+#[test]
 fn equal_values_in_different_phases_remain_separate_choices() {
     let canary = Canary::generate("CROSS_PHASE_TOKEN");
     let fixture = Fixture::new();
@@ -587,6 +750,19 @@ fn a_collision_can_be_overridden_by_the_user() {
     assert_eq!(exit, Exit::Ok);
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("APP_SECRET"));
+}
+
+#[test]
+fn a_manual_collision_warns_without_reversing_selection() {
+    let fixture = Fixture::new();
+    fixture.write("notes.txt", "common\n");
+    let environment = fixture.environment(&[("MANUAL_VALUE", "common")]);
+
+    let (exit, transcript) = fixture.run("e\nMANUAL_VALUE\n\n\n\n", &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(transcript.contains("collision:"), "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("MANUAL_VALUE"), "{global}");
 }
 
 #[test]
@@ -721,6 +897,42 @@ fn resolvable_manual_sources_merge_into_an_existing_group() {
     assert!(project.contains("PRIVATE_VALUE"));
     assert!(project.contains("/credential"));
     assert_canary_absent("manual group transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
+fn manual_aliases_keep_current_member_order_then_save_by_identity() {
+    let canary = Canary::generate("MANUAL_ORDER_TOKEN");
+    let fixture = Fixture::new();
+    let environment =
+        fixture.environment(&[("B_TOKEN", canary.value()), ("A_MANUAL", canary.value())]);
+
+    let (exit, transcript) = fixture.run("e\nA_MANUAL\n\n\n\n", &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let grouped = &transcript[transcript
+        .rfind("Candidate group (2 sources)")
+        .expect("group after manual addition")..];
+    assert!(
+        grouped.find("env B_TOKEN").expect("original member")
+            < grouped.find("env A_MANUAL").expect("manual member"),
+        "{grouped}"
+    );
+
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(
+        global.find("A_MANUAL").expect("manual identity")
+            < global.find("B_TOKEN").expect("automatic identity"),
+        "{global}"
+    );
+    let registry = match registry::build(&environment, Some(&fixture.project())) {
+        registry::Outcome::Ready(registry) => registry,
+        registry::Outcome::Malfunction(problem) => panic!("registry malfunction: {problem:?}"),
+    };
+    assert_eq!(
+        registry.redactor.canonical_sources().next(),
+        Some(&SourceId::env("A_MANUAL"))
+    );
+    assert_canary_absent("manual order transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("manual order config", global.as_bytes(), &canary);
 }
 
 #[test]

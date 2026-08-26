@@ -218,7 +218,6 @@ mod tests {
                 entered: "~/.codex/auth.json".to_string(),
                 path: PathBuf::from("/home/user/.codex/auth.json"),
                 pointer: "/tokens/access_token".to_string(),
-                token: "access_token".to_string(),
             },
         ]
     }

@@ -10,6 +10,11 @@ A durable pointer naming where a protected value can be resolved without storing
 the value itself.
 _Avoid_: Secret snapshot, stored secret
 
+**Source Identity**:
+The stable equality and ordering key of a Source Reference. It contains the
+source kind and identifying fields, never a resolved value or advisory detail.
+_Avoid_: Candidate rank, confidence key
+
 **Known Source Rule**:
 A maintained, deterministic setup-time rule that automatically admits
 candidates. The supported rule families are the secret-like name rule, the
@@ -28,13 +33,13 @@ A source reference or file policy the user has chosen to protect.
 _Avoid_: Detected secret, scanned secret
 
 **Candidate**:
-A source that setup presents for possible enrollment based on discovery and
-advisory heuristics.
+A Source Reference that setup presents for possible enrollment after admission
+by a Known Source Rule or explicit manual addition.
 _Avoid_: Detected secret, confirmed secret
 
-Manual source additions and filesystem enumeration make sources available for
-review but are not Known Source Rules because they do not themselves admit a
-candidate.
+Filesystem enumeration supplies inputs to Known Source Rules but does not admit
+a Candidate by itself. Manual addition admits a Candidate but is not a Known
+Source Rule.
 
 **JSON Source**:
 An enrolled or discovered UTF-8 JSON5 document persisted with `source = "json"`
@@ -47,6 +52,12 @@ A setup choice within one enrollment scope containing candidate source reference
 whose currently resolved values are equal. Selecting the group enrolls every
 represented source.
 _Avoid_: Duplicate secret, merged source
+
+**Group Representative**:
+The least Source Reference in a Candidate Group under Source Identity order. It
+identifies the group for deterministic setup presentation and is distinct from
+runtime canonicalization in the Effective Registry.
+_Avoid_: Canonical source, preferred source
 
 **Resolved Secret**:
 The current non-empty textual value obtained from an enrolled source.
