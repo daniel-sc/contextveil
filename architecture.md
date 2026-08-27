@@ -219,22 +219,25 @@ or JSON source references. The persisted policy never names a Known Source Rule,
 so changing a definition cannot silently change runtime reads; see
 [`ADR-0001`](docs/adr/0001-persist-explicit-source-references.md).
 
-The closed definitions and bounded field vocabularies live in
-`src/setup/known_source.rs`. `src/setup/discovery.rs` performs one shared bounded
+The closed location and field definitions live as data in
+`src/setup/known_source.rs`; one bounded probe engine evaluates them. The engine
+supports exact pointers, immediate dynamic members, bounded maps, and bounded
+filename predicates. `src/setup/discovery.rs` performs one shared bounded
 project traversal for dotenv files and the anchored Claude
 `.claude/settings.json` and `.mcp.json` patterns. There is no runtime
 Known Source Rule runtime variant: discovery emits existing `SourceReference`
 variants only.
 
-The first implementation is a closed list of direct discovery functions with
-small shared helpers. It is not a trait registry, manifest language, plugin API,
-or generic structured-file scanner. Machine stores use exact standard or
-setup-time environment-resolved paths. Project discovery performs one bounded
-walk and recognizes only source-specific anchored patterns. Valid unmatched
-structures are ordinary no-match results.
+The definitions are not a trait registry, manifest language, plugin API, or
+generic structured-file scanner. Machine stores use exact standard or setup-time
+environment-resolved paths. Project discovery performs one bounded walk and
+recognizes only source-specific anchored patterns. Valid unmatched structures are
+ordinary no-match results.
 
 Codex, OpenCode, Copilot, and Claude representable primary and MCP plaintext
-stores form the first recognized credential-document release. Probes inspect only
+stores form the first recognized credential-document release. Claude primary
+plaintext OAuth fields are excluded on macOS because that host uses the keychain.
+Probes inspect only
 the exact locations, bounded containers, and maintained credential leaves in the
 inventory; they do not validate unrelated sibling fields or complete vendor
 schemas, and never authorize generic recursive secret-name matching in unrelated

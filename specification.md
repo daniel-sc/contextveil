@@ -570,8 +570,9 @@ Codex uses `~/.codex` and `CODEX_HOME`; OpenCode uses
 `~/.copilot` and `COPILOT_HOME`; Claude uses `~/.claude`, `~/.claude.json`, and
 the corresponding `CLAUDE_CONFIG_DIR` paths. The inventory defines the exact
 primary, provider, MCP, token, header, and environment leaves and the bounded
-Copilot filename patterns. Claude plaintext `.credentials.json` is inspected on
-every supported platform when present. `OPENCODE_AUTH_CONTENT` remains one whole
+Copilot filename patterns. Claude plaintext `.credentials.json` primary fields
+are inspected only on non-macOS platforms; macOS primary credentials are
+keychain-backed and remain unqueried. `OPENCODE_AUTH_CONTENT` remains one whole
 environment source. ContextVeil MUST NOT query OS keychains or execute
 credential helpers. Raw `.secret`, `.verifier`, and `mcp-secrets` fallback files,
 unlisted locations, and unlisted fields remain outside discovery.
