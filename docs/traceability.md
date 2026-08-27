@@ -134,7 +134,7 @@ for section 5.
 | --- | --- | --- | --- | --- |
 | REG-001 | Every non-empty UTF-8 resolved value is an exact match pattern; no heuristics apply at runtime | src/matcher.rs (`Redactor::new`) | src/matcher.rs::matching_is_case_sensitive_and_byte_exact, ::matching_is_substring_matching | covered |
 | REG-002 | Duplicate resolved values collapse to one canonical pattern (first project entry, else first global entry, in file order) | src/matcher.rs (value dedup); src/registry.rs (canonical ordering) | src/matcher.rs::duplicate_values_collapse_to_the_canonical_source; src/registry.rs::equal_values_canonicalize_to_the_first_project_entry; src/diagnose.rs alias-warning test | covered |
-| REG-003 | Source/key names are case-sensitive; labels derive from env name, dotenv key, or final JSON pointer token, never a file path | src/secret.rs (`SourceId::key`, `label`); src/json.rs (`final_token`) | secret.rs::labels_derive_from_the_key_only; source.rs JSON-label test; config.rs case-sensitive JSON identity test | covered |
+| REG-003 | Source/key names are case-sensitive; labels derive from env name, dotenv key, or final JSON pointer token, never a file path | src/secret.rs (`SourceId::label`); src/json.rs (`final_token`) | secret.rs::labels_derive_from_the_key_only; source.rs JSON-label test; config.rs case-sensitive JSON identity test | covered |
 | REG-004 | Labels keep ASCII word characters, collapse other runs to `_` | src/secret.rs (`safe_label`) | src/secret.rs::labels_keep_only_the_allowed_character_set, ::labels_collapse_control_and_escape_sequences | covered |
 
 ## 9. Redaction Semantics (`RED-*`)

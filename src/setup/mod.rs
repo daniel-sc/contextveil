@@ -464,8 +464,6 @@ fn build_items(
         .flat_map(|item| &item.members)
         .map(|member| member.source.id())
         .collect();
-    let mut candidates: Vec<Item> = Vec::new();
-
     let mut discovered_known = match scope {
         Scope::Global => known_source::machine(environment, home, invocation_directory),
         Scope::Project => known_source::project(project_root, project_files),
@@ -474,7 +472,10 @@ fn build_items(
         let id = source.id();
         let rules = discovered_known.rules.remove(&id).unwrap_or_default();
         if known.insert(id.clone()) {
-            candidates.push(item_for(source, false, rules, &mut resolver, environment));
+            merge_item(
+                &mut items,
+                item_for(source, false, rules, &mut resolver, environment),
+            );
         } else {
             add_rules(&mut items, &id, rules);
         }
@@ -487,11 +488,10 @@ fn build_items(
             let id = source.id();
             let candidate = automatic_item_for(source, &mut resolver, environment);
             if known.insert(id.clone()) {
-                candidates.push(candidate);
+                merge_item(&mut items, candidate);
             } else {
                 let rules = candidate.members[0].rules.clone();
-                add_rules(&mut items, &id, rules.clone());
-                add_rules(&mut candidates, &id, rules);
+                add_rules(&mut items, &id, rules);
             }
         }
     }
@@ -506,18 +506,14 @@ fn build_items(
         for candidate in file_candidates(file, &mut resolver, environment) {
             let id = candidate.members[0].source.id();
             if known.insert(id.clone()) {
-                candidates.push(candidate);
+                merge_item(&mut items, candidate);
             } else {
                 let rules = candidate.members[0].rules.clone();
-                add_rules(&mut items, &id, rules.clone());
-                add_rules(&mut candidates, &id, rules);
+                add_rules(&mut items, &id, rules);
             }
         }
     }
 
-    for candidate in candidates {
-        merge_item(&mut items, candidate);
-    }
     sort_initial_items(&mut items);
     (items, discovered_known.notices)
 }
