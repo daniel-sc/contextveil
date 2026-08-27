@@ -206,20 +206,20 @@ plugin API or dynamic resolver loading in anticipation.
 
 Known Source Rules belong to setup, not runtime. A rule is maintained,
 deterministic setup-time logic that automatically admits candidates. V1 has a
-secret-like name rule, a credential-bearing URL rule, and recognized store
-schema-family rules. Filesystem enumeration and manual additions supply possible
+secret-like name rule, a credential-bearing URL rule, and recognized credential
+document rules. Filesystem enumeration and manual additions supply possible
 sources but are not rules. Filesystem enumeration does not itself admit a
 candidate; explicit manual addition does. Every applicable rule runs
 independently of adapter selection or installation. Rule applicability is binary
 admission and display attribution only: rule identity and match count never
 score, select, or order a candidate.
 
-Maintained path and schema knowledge yields ordinary environment, dotenv, or
-JSON source references. The persisted policy never names a Known Source Rule, so
-changing a definition cannot silently change runtime reads; see
+Maintained bounded locations and field probes yield ordinary environment, dotenv,
+or JSON source references. The persisted policy never names a Known Source Rule,
+so changing a definition cannot silently change runtime reads; see
 [`ADR-0001`](docs/adr/0001-persist-explicit-source-references.md).
 
-The closed definitions and strict field vocabularies live in
+The closed definitions and bounded field vocabularies live in
 `src/setup/known_source.rs`. `src/setup/discovery.rs` performs one shared bounded
 project traversal for dotenv files and the anchored Claude
 `.claude/settings.json` and `.mcp.json` patterns. There is no runtime
@@ -234,10 +234,11 @@ walk and recognizes only source-specific anchored patterns. Valid unmatched
 structures are ordinary no-match results.
 
 Codex, OpenCode, Copilot, and Claude representable primary and MCP plaintext
-stores form the first recognized schema-family release. Source-visible schemas
-use exact structural fields. Private schemas use per-tool exact vocabularies and
-pinned fixtures; they never authorize generic recursive secret-name matching in
-unrelated JSON. The maintained inventory and evidence are in
+stores form the first recognized credential-document release. Probes inspect only
+the exact locations, bounded containers, and maintained credential leaves in the
+inventory; they do not validate unrelated sibling fields or complete vendor
+schemas, and never authorize generic recursive secret-name matching in unrelated
+JSON. The maintained inventory and historical evidence are in
 [`docs/known-sources.md`](docs/known-sources.md). Enrolled and discovered JSON
 source documents use JSON5 by decision
 [`ADR-0002`](docs/adr/0002-json-sources-use-json5.md); harness protocols and

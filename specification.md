@@ -520,7 +520,7 @@ source.
 **SET-018** A Known Source Rule is a maintained, deterministic setup-time
 automatic candidate-admission rule. The V1 rule inventory consists of the
 secret-like name rule in `SET-006`, the credential-bearing URL rule in `SET-017`,
-and the supported recognized store schema-family rules in
+and the recognized credential document rules in
 [`docs/known-sources.md`](docs/known-sources.md). Filesystem enumeration and
 manual source additions are inputs to setup, not Known Source Rules; explicit
 manual addition admits a Candidate by user action. Every applicable rule MUST run
@@ -528,58 +528,53 @@ independently of adapter selection, installation, detection, and runtime
 coverage. Rule applicability is binary and MUST NOT carry a score, admission
 weight, selection preference, ordering preference, or confidence level.
 
-A recognized store schema-family rule MUST produce explicit source references
-and MUST NOT be persisted as runtime indirection. Path override environment variables are resolved during setup; a
-later override change requires setup to be rerun. Relative override values MUST
-resolve from setup's invocation directory. Override values MUST NOT receive
-shell, environment-variable, glob, or tilde expansion. See
+A recognized credential document rule MUST produce ordinary exact source
+references and MUST NOT be persisted as runtime indirection. All default and
+valid override machine roots are additive. Path override environment variables
+are resolved during setup; a later override change requires setup to be rerun.
+Relative override values MUST resolve from setup's invocation directory and
+receive lexical `.`/`..` normalization only. Override values MUST NOT receive
+shell, environment-variable, glob, or tilde expansion. Default paths persist as
+`~/...`; override paths persist as resolved explicit paths. Duplicate normalized
+roots and duplicate resulting source identities MUST be inspected or retained
+only once. See
 [`ADR-0001`](docs/adr/0001-persist-explicit-source-references.md).
 
-Recognized store schema-family rules MUST inspect exact machine paths, environment-resolved
-paths, and source-specific bounded directories only. It MUST NOT recursively
-crawl the home directory or search a project for generic basenames such as
-`auth.json` or `config.json`. One shared project traversal MUST recognize narrowly
-anchored project patterns at any depth using the exclusions in `SET-003`.
+Recognized credential document rules MUST inspect only explicit machine roots,
+setup-time override roots, explicit filenames, bounded directories, and the
+anchored project patterns in `SET-003`. They MUST NOT recursively crawl a home
+or project directory for generic filenames or field names. One shared project
+traversal MUST recognize narrowly anchored project patterns at any depth using
+the exclusions in `SET-003`.
 Project traversal MUST NOT follow symlinks. An exact machine file path that is a
-symlink MUST be followed only when its target is a regular file.
+symlink MUST be followed only when its target is a regular file. An invalid
+override MUST produce a safe unavailable notice without suppressing default-root
+discovery.
 
-**SET-019** A discovered document evaluated by a recognized store schema-family
-rule and persisted as `source = "json"` MUST use the full JSON5 grammar in
-`SRC-011`. A valid JSON source document at a recognized location with no
-credential fields MUST be treated as an ordinary silent no-match, without an
-unsupported schema warning. Malformed, non-UTF-8, duplicate-member, or unreadable
-automatically discovered files follow `SET-013`. Recognized fields MUST be exact
-and source-specific. A recognized dynamic object member MUST be representable as
-an exact JSON Pointer under `CFG-016`; an unrepresentable member name, including
-an empty name or `*`, MUST silently produce no candidate. Setup MUST NOT
-recursively classify arbitrary JSON strings by generic key substrings.
+**SET-019** A recognized credential document uses JSON5 and the duplicate-member
+and nesting behavior in `SRC-011`. Any bounded probe that reaches a listed field
+and selects a non-empty string MUST admit a Candidate; unrelated surrounding or
+sibling schema MUST NOT be validated. Missing, empty, null, numeric, boolean,
+array, or object targets silently no-match, and one unusable field MUST NOT
+suppress another usable field in the same document. Malformed, non-UTF-8,
+duplicate-member, or unreadable recognized documents follow `SET-013`. Dynamic
+names MUST be representable as exact JSON Pointers under `CFG-016`; empty names
+and `*` silently no-match. Setup MUST NOT recursively classify arbitrary JSON
+strings by generic key substrings.
 
-**SET-020** The supported recognized store schema-family rules MUST cover only
-the explicitly listed V1-representable primary and MCP plaintext stores, using
-the exact scopes and field vocabularies in
-[the Known Source Rule inventory](docs/known-sources.md). Dynamic
-member names in those vocabularies are recognized only when they are
-representable under `CFG-016`:
-
-- Codex `CODEX_HOME` or `~/.codex` `auth.json` and `.credentials.json`;
-- OpenCode `XDG_DATA_HOME/opencode` or `~/.local/share/opencode` `auth.json` and
-  `mcp-auth.json`, plus a non-empty `OPENCODE_AUTH_CONTENT` as one whole
-  environment source rather than parsed derived references;
-- GitHub Copilot CLI `COPILOT_HOME` or `~/.copilot` JSON source `config.json`
-  `copilotTokens` fields and immediate `mcp-oauth-config` files whose basenames
-  are exactly 64 lowercase hexadecimal characters followed by `.tokens.json` or
-  `.json`;
-- Claude Code `CLAUDE_CONFIG_DIR` or `~/.claude` machine files, the default
-  `~/.claude.json` or override-root `.claude.json`, and project-anchored
-  `.claude/settings.json` and `.mcp.json`; primary `.credentials.json` discovery
-  is non-macOS only.
-
-Private or version-sensitive schemas MUST use narrowly recognized structures
-backed by pinned fixtures; unknown structures produce no candidate. ContextVeil
-MUST NOT query OS keychains or execute credential helpers. Raw `.secret` and
-`.verifier` files and `mcp-secrets` fallback files are outside the V1 source
-formats and MUST NOT be claimed as discovered. macOS Claude primary
-credentials are keychain-backed and MUST NOT be claimed as discovered.
+**SET-020** The supported recognized credential document rules MUST cover only
+the exact locations, bounded containers, and credential leaves listed in
+[`docs/known-sources.md`](docs/known-sources.md). Those locations are additive:
+Codex uses `~/.codex` and `CODEX_HOME`; OpenCode uses
+`~/.local/share/opencode` and `${XDG_DATA_HOME}/opencode`; Copilot uses
+`~/.copilot` and `COPILOT_HOME`; Claude uses `~/.claude`, `~/.claude.json`, and
+the corresponding `CLAUDE_CONFIG_DIR` paths. The inventory defines the exact
+primary, provider, MCP, token, header, and environment leaves and the bounded
+Copilot filename patterns. Claude plaintext `.credentials.json` is inspected on
+every supported platform when present. `OPENCODE_AUTH_CONTENT` remains one whole
+environment source. ContextVeil MUST NOT query OS keychains or execute
+credential helpers. Raw `.secret`, `.verifier`, and `mcp-secrets` fallback files,
+unlisted locations, and unlisted fields remain outside discovery.
 
 Rows marked `Planned` in the inventory are non-contract roadmap information.
 They MUST NOT be treated as scanned, discovered, or covered by V1.
@@ -887,9 +882,12 @@ JSON5 grammar, duplicate dotenv keys and JSON members, JSON Pointer escaping and
 expansion, wildcard future keys, and all-or-nothing malfunction behavior.
 
 **TST-003** Filesystem tests MUST cover project-root selection, recursive ignored
-file discovery, Known Source exact and anchored paths, exclusions, symlink
-traversal, grouped collision source-file exclusion, permissions, atomic writes,
-invalid-config preservation, repeat setup, and partial multi-phase failure.
+file discovery, additive Known Source default and override locations, bounded
+permissive field probes without sibling-schema gating, exact and anchored paths,
+exclusions, symlink traversal, grouped collision source-file exclusion,
+permissions, atomic writes, invalid-config preservation, repeat setup, and
+partial multi-phase failure. They MUST retain malformed-file, JSON Pointer, and
+secret-leak coverage.
 
 **TST-004** Every shipped adapter path MUST have protocol fixtures for clean,
 intervened, unresolved, malformed-input, diagnosed-malfunction, timeout mapping,

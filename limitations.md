@@ -385,51 +385,30 @@ the reporting half alone.
 
 ### LIM-023: Known Source Rules Are Advisory
 
-**Reality:** Known Source Rules are setup-time, advisory, and version-sensitive;
-they are not an adapter coverage guarantee or a promise to find every host
-credential. Maintained deterministic rules admit candidates by secret-like name,
-credential-bearing URL, or exact recognized store schema family. Every applicable
-rule runs independently of adapters. Rule applicability is binary and unweighted;
-rule identity and match count do not affect selection or ordering. Filesystem
-enumeration and manual additions are not rules. Recognized store rules inspect
-only the exact machine paths and bounded project patterns in
-[`docs/known-sources.md`](docs/known-sources.md), then persist ordinary environment
-or exact JSON references. JSON sources accept the full JSON5 grammar while still
-rejecting duplicate members. Valid unknown schemas silently no-match; malformed
-matched JSON sources are shown as unavailable.
-Recognized dynamic object members are candidates only when their
-names are representable as exact JSON Pointers under `CFG-016`; empty names and
-`*` silently no-match. Keychains and credential helpers are not queried.
+**Reality:** Known Source Rules are setup-time, advisory, and version-sensitive.
+Bounded recognized credential document rules probe maintained locations and fields
+without validating a complete vendor schema. A relevant bounded field can suggest
+an inactive, stale, or non-secret string. Every applicable rule runs independently
+of adapters, and new automatic suggestions are selected by default unless a
+collision is found. Defaults and valid override locations are both inspected;
+exact references are persisted only after user review.
 
-Copilot CLI's common comment-bearing `config.json` is supported as a JSON source.
-Its raw `.secret` and `.verifier` files and `mcp-secrets` fallback files are not
-representable by V1 environment, dotenv, or JSON source references and are not
-discovered. On macOS, Claude's primary
-credentials are keychain-backed, so `.credentials.json` primary discovery is
-non-macOS only. Path overrides are resolved during setup; changes require a
-rerun. Relative overrides are invocation-directory relative and receive no
-shell, environment-variable, glob, or tilde expansion. These are source-format
-boundaries, not an implementation-not-present deviation.
+**Impact:** Host changes can move credentials to unknown locations or introduce
+new field names. Unknown fields, raw sidecars, OS keychains, and credential
+helpers remain undiscovered. JSON documents still use full JSON5 with duplicate
+members rejected, and dynamic names that cannot become exact RFC 6901 pointers
+are skipped. No complete vendor schema is validated.
 
-**Impact:** Setup may show a malformed matched JSON source as unavailable or silently
-omit a valid but unknown schema or an otherwise recognized dynamic member whose
-name cannot be represented by `CFG-016`. Credentials in Copilot's common
-raw fallback stores, the macOS Claude keychain, a new third-party schema,
-an unusual path, or a changed override are not automatically suggested.
-Installing an adapter does not change this source-discovery boundary.
+**Workaround:** Review masked candidates before saving, heed collision warnings,
+and rerun setup after host path or field inventory updates. Manually enroll a
+representable environment, dotenv, or exact JSON reference when needed. Use
+separate keychain or helper controls for sources outside the inventory.
 
-**Workaround:** Review setup candidates, rerun setup after host or override
-changes, and manually enroll a supported environment, dotenv, or exact JSON
-reference when one represents the value. Use host diagnostics and separate
-keychain controls for keychain- or helper-backed credentials. Raw sidecar stores
-require a future source format or another representable source.
-
-**Verification:** Unit fixtures pin every recognized field vocabulary and host
-version; filesystem and setup tests cover exact and anchored paths, override
-resolution, full JSON5 parsing, common comment-bearing Copilot configuration,
-silent unknown-schema no-match, symlink rules, explicit-reference persistence,
-and canary-free output. Documentation review checks the inventory and pinned
-evidence links.
+**Verification:** Probe fixtures cover independent non-empty string admission,
+bounded traversal, dynamic pointer escaping, additive defaults and overrides,
+malformed-file isolation, exact-reference persistence, automatic selection and
+collision behavior, filesystem boundaries, and canary-free output. The maintained
+inventory is [`docs/known-sources.md`](docs/known-sources.md).
 
 ## Implementation Deviations
 

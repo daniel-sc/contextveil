@@ -1611,6 +1611,124 @@ fn known_sources_persist_explicit_refs_and_bypass_name_gating() {
 }
 
 #[test]
+fn known_source_defaults_and_overrides_are_discovered_additively() {
+    let codex_default = Canary::generate("CODEX_DEFAULT");
+    let codex_override = Canary::generate("CODEX_OVERRIDE");
+    let opencode_default = Canary::generate("OPENCODE_DEFAULT");
+    let opencode_override = Canary::generate("OPENCODE_OVERRIDE");
+    let copilot_default = Canary::generate("COPILOT_DEFAULT");
+    let copilot_override = Canary::generate("COPILOT_OVERRIDE");
+    let claude_default = Canary::generate("CLAUDE_DEFAULT");
+    let claude_override = Canary::generate("CLAUDE_OVERRIDE");
+    let fixture = Fixture::new();
+
+    for (relative, contents) in [
+        (
+            ".codex/auth.json",
+            format!(r#"{{"OPENAI_API_KEY":"{}"}}"#, codex_default.value()),
+        ),
+        (
+            ".local/share/opencode/auth.json",
+            format!(r#"{{"provider":{{"key":"{}"}}}}"#, opencode_default.value()),
+        ),
+        (
+            ".copilot/config.json",
+            format!(
+                r#"{{"copilotTokens":{{"default":"{}"}}}}"#,
+                copilot_default.value()
+            ),
+        ),
+        (
+            ".claude/settings.json",
+            format!(
+                r#"{{"env":{{"ANTHROPIC_API_KEY":"{}"}}}}"#,
+                claude_default.value()
+            ),
+        ),
+    ] {
+        let path = fixture.home().join(relative);
+        std::fs::create_dir_all(path.parent().expect("machine source parent")).expect("directory");
+        std::fs::write(path, contents).expect("machine source");
+    }
+    for (relative, contents) in [
+        (
+            "override/codex/auth.json",
+            format!(r#"{{"OPENAI_API_KEY":"{}"}}"#, codex_override.value()),
+        ),
+        (
+            "override/opencode/auth.json",
+            format!(
+                r#"{{"provider":{{"key":"{}"}}}}"#,
+                opencode_override.value()
+            ),
+        ),
+        (
+            "override/copilot/config.json",
+            format!(
+                r#"{{"copilotTokens":{{"override":"{}"}}}}"#,
+                copilot_override.value()
+            ),
+        ),
+        (
+            "override/claude/settings.json",
+            format!(
+                r#"{{"env":{{"ANTHROPIC_API_KEY":"{}"}}}}"#,
+                claude_override.value()
+            ),
+        ),
+    ] {
+        fixture.write(relative, &contents);
+    }
+
+    let environment = fixture.environment(&[
+        ("CODEX_HOME", "override/codex"),
+        ("XDG_DATA_HOME", "override"),
+        ("COPILOT_HOME", "override/copilot"),
+        ("CLAUDE_CONFIG_DIR", "override/claude"),
+    ]);
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+
+    for path in [
+        "~/.codex/auth.json",
+        "~/.local/share/opencode/auth.json",
+        "~/.copilot/config.json",
+        "~/.claude/settings.json",
+    ] {
+        assert!(
+            global.contains(path),
+            "missing default path {path}: {global}"
+        );
+    }
+    for path in [
+        fixture.project().join("override/codex/auth.json"),
+        fixture.project().join("override/opencode/auth.json"),
+        fixture.project().join("override/copilot/config.json"),
+        fixture.project().join("override/claude/settings.json"),
+    ] {
+        let path = path.to_string_lossy();
+        assert!(
+            global.contains(path.as_ref()),
+            "missing override path {path}: {global}"
+        );
+    }
+    for canary in [
+        &codex_default,
+        &codex_override,
+        &opencode_default,
+        &opencode_override,
+        &copilot_default,
+        &copilot_override,
+        &claude_default,
+        &claude_override,
+    ] {
+        assert_canary_absent("additive setup transcript", transcript.as_bytes(), canary);
+        assert_canary_absent("additive setup config", global.as_bytes(), canary);
+    }
+}
+
+#[test]
 fn project_known_source_aliases_form_one_candidate_group() {
     let canary = Canary::generate("PROJECT_KNOWN_ALIAS");
     let fixture = Fixture::new();
@@ -1847,7 +1965,7 @@ fn relative_known_source_overrides_use_the_setup_invocation_directory() {
 
 #[test]
 #[cfg(unix)]
-fn non_utf8_known_source_override_is_unavailable_without_default_fallback() {
+fn non_utf8_known_source_override_keeps_default_discovery() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
@@ -1872,7 +1990,7 @@ fn non_utf8_known_source_override_is_unavailable_without_default_fallback() {
     assert!(transcript.contains("unavailable: CODEX_HOME"));
     assert!(transcript.contains("override is not valid UTF-8"));
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
-    assert!(!global.contains(".codex/auth.json"));
+    assert!(global.contains("~/.codex/auth.json"));
     assert_canary_absent(
         "non-UTF-8 override transcript",
         transcript.as_bytes(),

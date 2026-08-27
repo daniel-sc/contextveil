@@ -45,17 +45,21 @@ integration.
 ## Known Source Rules
 
 Supported setup-time rules admit candidates from secret-like names,
-credential-bearing URLs, and recognized coding-agent credential store schemas.
-Manual additions and filesystem enumeration are not rules. JSON source documents
-use the full JSON5 grammar, so common comment-bearing Copilot configuration is
+credential-bearing URLs, and bounded recognized credential document rules. Manual
+additions and filesystem enumeration are not rules. JSON source documents use
+the full JSON5 grammar, so common comment-bearing Copilot configuration is
 supported; duplicate members remain invalid.
 
-Valid unknown schemas silently no-match; malformed matched JSON sources are
-shown as unavailable. Override values resolve during setup, relative overrides
-use the invocation directory, changes require a rerun, and no shell or tilde
-expansion occurs. Raw sidecars, OS keychains, and credential helpers are not
-covered. Planned npmrc and recognized INI store rows are non-contract and are not
-currently scanned. See the [exact rule inventory and pinned evidence](known-sources.md) and
+New automatic suggestions are selected by default unless a collision is found;
+review masked candidates before saving because rules are advisory.
+
+Relevant bounded fields admit independently without unrelated sibling-schema
+validation. Missing or unusable fields silently no-match; malformed matched JSON
+sources are shown as unavailable. Default and valid override roots are both
+inspected. Override values resolve during setup, relative overrides use the
+invocation directory, changes require a rerun, and no shell or tilde expansion
+occurs. Raw sidecars, OS keychains, and credential helpers are not covered. See
+the [exact rule inventory](known-sources.md) and
 [`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory).
 
 ## Tested host versions
@@ -66,9 +70,9 @@ run `contextveil doctor` after upgrading a coding agent.
 
 | Host | Verified against |
 | --- | --- |
-| Claude Code | Adapter: 2.1.233 live qualification. Known Sources: 2.1.238, public release commit `8a8e81d098cbd0fae4ee5b9c853542945fe87016` plus shipped-artifact-derived private structures |
+| Claude Code | Adapter: 2.1.233 live qualification. Known Sources: 2.1.238 and public release commit `8a8e81d098cbd0fae4ee5b9c853542945fe87016` |
 | OpenAI Codex CLI | Adapter: `openai/codex` commit `c6058cca`. Known Sources: `ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3` (also issue-time `d9fd91edab298c2423c0c82526513e4e000284cf`) |
-| GitHub Copilot CLI | Adapter and Known Sources: 1.0.80 release commit `ef627e1baad937d3c8da45f8a5541c6fc3c97b6a`, official docs commit `838d18789ba2c51cfe5544b3e5bf1ca3168c2795`, plus shipped-artifact-derived private structures |
+| GitHub Copilot CLI | Adapter and Known Sources: 1.0.80 release commit `ef627e1baad937d3c8da45f8a5541c6fc3c97b6a` and official docs commit `838d18789ba2c51cfe5544b3e5bf1ca3168c2795` |
 | OpenCode | Adapter and Known Sources: 1.18.18 commit `31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d` |
 
 ## Platforms
@@ -97,7 +101,7 @@ most important entries:
   gaps.
 - [`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory): Known
   Source Rules are advisory; raw sidecars, keychains, helpers, and unknown or
-  changed schemas remain outside coverage.
+  changed locations or fields remain outside coverage.
 
 ## Reporting a vulnerability
 

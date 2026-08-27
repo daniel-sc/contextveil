@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Some recognized credential stores, including common GitHub Copilot CLI
+Some recognized credential documents, including common GitHub Copilot CLI
 configuration, use comments or other JSON5 syntax. Treating those documents as
 strict JSON excludes a normal credential location even though ContextVeil's
 source model already persists an exact file and RFC 6901 pointer.
@@ -32,8 +32,8 @@ otherwise.
 
 ## Consequences
 
-- Comment-bearing Copilot configuration can participate in recognized store
-  schema-family rules.
+- Comment-bearing Copilot configuration can participate in recognized credential
+  document rules.
 - One grammar applies consistently to manual and discovered JSON sources.
 - Source parsing and strict protocol parsing must remain separate boundaries.
 - Existing JSON documents remain valid JSON5; duplicate-member rejection and

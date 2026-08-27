@@ -40,11 +40,13 @@ secret or control everything an agent can do.
 
 ## Guided Setup, Boring Runtime
 
-`contextveil setup` does the thoughtful part: maintained known source rules
-suggest secret-like names, credential-bearing URLs, and credentials in a bounded
-set of recognized local stores. You can also add sources manually. Setup shows
-only masked previews, lets you choose what to protect, and installs the
-integrations you select. It does not scan arbitrary structured files or keys.
+`contextveil setup` does the thoughtful part: it checks bounded known credential
+files and probes maintained credential fields, alongside secret-like names and
+credential-bearing URLs. These probes may suggest stale or non-secret strings.
+New suggestions are automatically selected unless collisions are found. You can
+also add sources manually. Setup shows only masked previews, lets you choose what
+to protect, and installs the integrations you select. It does not scan arbitrary
+structured files or keys.
 
 Daily use is boring on purpose: ContextVeil reads the current values, performs
 local exact-text replacement, and exits. There is no daemon, no network request,
@@ -101,7 +103,7 @@ Currently, the following secret-like sources are automatically detected and sugg
 
 - **Environment variables** with secret-like names (e.g., `API_TOKEN`, `STRIPE_KEY`) or complete values that are URLs with credentials (e.g., `https://username:password@some-db.com`)
 - **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or complete values that are URLs with credentials (e.g., `mysql://u:pass@some-db`)
-- **Agent credential files** for Claude Code, Codex, GitHub Copilot and OpenCode. This includes provider credential files and MCP credential files. (Keychain based/sidecars excluded.)
+- **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot and OpenCode. Maintained credential fields are probed without modeling complete vendor schemas. (Keychain based/sidecars excluded.)
 - **More to come** INI, YAML, TOML, .npmrc, ...
 
 You can find the full, detailed list of known source rules in the
@@ -147,7 +149,7 @@ Setup is interactive and safe to rerun. It walks through:
 
 Complete secret values are never displayed. Suggestions are only suggestions;
 you make the final choices. Rerun setup after changing a Known Source path
-override or upgrading a host whose credential schema changed.
+override or when known host locations or fields change.
 
 ### 3. Check It
 
@@ -204,8 +206,10 @@ boundary:
   and other coding-agent hooks may see the original content before redaction.
 - Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warning.)
 - Known source rules are version-sensitive setup advice, not a coverage
-  guarantee. Unsupported raw sidecars, keychains, helpers, and unknown schemas
-  remain outside current coverage as detailed in `LIM-023`.
+  guarantee. They may suggest stale or non-secret values and automatically select
+  new suggestions unless collisions are found; review masked candidates before
+  saving. Unsupported raw sidecars, keychains, helpers, unknown fields, and new
+  locations remain outside current coverage as detailed in `LIM-023`.
 
 See [limitations.md](limitations.md) for the complete security boundary and
 coding-agent-specific gaps.
@@ -289,8 +293,8 @@ mise run release-check
 - [Limitations](limitations.md): complete security and coding-agent boundaries
 - [Vision](vision.md): product intent and non-goals
 - [Architecture](architecture.md): implementation boundaries
-- [Known Source Rule inventory](docs/known-sources.md): supported rules, exact
-  scopes, planned non-contract rows, and pinned evidence
+- [Known Source Rule inventory](docs/known-sources.md): supported bounded rules,
+  exact locations and fields, and non-contract boundaries
 
 ContextVeil is free and open source under MIT OR Apache-2.0. It needs no account
 or hosted runtime.
