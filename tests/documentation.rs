@@ -78,12 +78,12 @@ fn public_known_source_documents_link_the_inventory() {
     for marker in [
         "secret-like names",
         "credential-bearing URLs",
-        "recognized coding-agent credential store schemas",
+        "recognized credential document rules",
         "full JSON5 grammar",
-        "Planned npmrc",
-        "recognized INI",
+        "bounded",
+        "selected by default",
         "known-sources.md",
-        "lim-023-known-source-rules-are-advisory",
+        "LIM-023",
     ] {
         assert!(
             overview.contains(marker),
@@ -93,28 +93,18 @@ fn public_known_source_documents_link_the_inventory() {
 }
 
 #[test]
-fn known_source_inventory_pins_all_evidence() {
+fn known_source_inventory_describes_bounded_advisory_rules() {
     let text = read("docs/known-sources.md");
-    for link in [
-        "https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3",
-        "https://github.com/openai/codex/commit/d9fd91edab298c2423c0c82526513e4e000284cf",
-        "https://github.com/anomalyco/opencode/commit/31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d",
-        "https://github.com/github/copilot-cli/commit/ef627e1baad937d3c8da45f8a5541c6fc3c97b6a",
-        "https://github.com/github/docs/commit/838d18789ba2c51cfe5544b3e5bf1ca3168c2795",
-        "https://github.com/anthropics/claude-code/commit/8a8e81d098cbd0fae4ee5b9c853542945fe87016",
-    ] {
-        assert!(text.contains(link), "Known Source inventory omits `{link}`");
-    }
     for disclosure in [
-        "artifact, not represented as public source-code contracts",
-        "advisory and version-sensitive",
-        "not a guarantee that",
-        "an adapter covers a host",
-        "there is no runtime `KnownSource` source type",
-        "Empty names and `*`",
-        "| npmrc credentials | Planned |",
-        "| Recognized INI credential stores | Planned |",
-        "setup does not currently scan them",
+        "bounded location",
+        "non-empty string",
+        "additively",
+        "Default paths persist",
+        "override paths",
+        "JSON5",
+        "Dynamic names",
+        "keychains",
+        "LIM-023",
     ] {
         assert!(
             text.contains(disclosure),

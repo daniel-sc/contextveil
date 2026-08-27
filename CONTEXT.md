@@ -18,9 +18,12 @@ _Avoid_: Candidate rank, confidence key
 **Known Source Rule**:
 A maintained, deterministic setup-time rule that automatically admits
 candidates. The supported rule families are the secret-like name rule, the
-credential-bearing URL rule, and recognized store schema-family rules. Every
+credential-bearing URL rule, and recognized credential document rules. Every
 applicable rule runs regardless of which adapters are selected or installed.
 _Avoid_: Detector, source adapter, adapter-specific discovery
+
+Recognized credential document rules are bounded location and field probes that
+admit non-empty string values without validating unrelated surrounding schema.
 
 **Known Source**:
 A local source recognized by a Known Source Rule. Use this shorter phrase only

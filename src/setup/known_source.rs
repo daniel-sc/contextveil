@@ -1,4 +1,4 @@
-//! Known Source Rule identities and closed setup-time credential-store discovery.
+//! Known Source Rule identities and bounded setup-time credential discovery.
 //!
 //! Every match becomes an ordinary environment or exact JSON reference.
 //! Transformed values, keychains, helpers, and broad directory recursion are
@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::json::{self, Object, Value};
+use crate::json::{self, Value};
 use crate::paths;
 use crate::sanitize;
 use crate::secret::SourceId;
@@ -162,325 +162,220 @@ pub fn project(project_root: &Path, files: &ProjectFiles) -> Found {
 }
 
 fn codex(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    let Some((root, default)) = rooted(found, environment, "CODEX_HOME", home, ".codex", base)
-    else {
-        return;
-    };
-    let start = found.sources.len();
-    inspect_at(
-        found,
-        &root.join("auth.json"),
-        home,
-        default,
-        |value, path, entered, out| {
-            for pointer in [
-                "/OPENAI_API_KEY",
-                "/tokens/id_token",
-                "/tokens/access_token",
-                "/tokens/refresh_token",
-                "/personal_access_token",
-                "/bedrock_api_key/api_key",
-            ] {
-                add_if_string(value, path, entered, pointer, out);
-            }
-            if value
-                .pointer("/agent_identity")
-                .is_some_and(Value::is_string)
-            {
-                add_if_string(value, path, entered, "/agent_identity", out);
-            } else {
-                add_if_string(
+    for root in candidate_roots(
+        home.map(|home| home.join(".codex")),
+        environment.get("CODEX_HOME"),
+        None,
+        "CODEX_HOME",
+        base,
+        &mut found.notices,
+    ) {
+        let start = found.sources.len();
+        inspect_at(
+            found,
+            &root.path.join("auth.json"),
+            home,
+            root.default,
+            |value, path, entered, out| {
+                probe_exact(
                     value,
                     path,
                     entered,
-                    "/agent_identity/agent_private_key",
+                    &[
+                        "/OPENAI_API_KEY",
+                        "/tokens/id_token",
+                        "/tokens/access_token",
+                        "/tokens/refresh_token",
+                        "/personal_access_token",
+                        "/bedrock_api_key/api_key",
+                        "/agent_identity",
+                        "/agent_identity/agent_private_key",
+                    ],
                     out,
                 );
-            }
-        },
-    );
-    found.mark_since(start, Rule::CodexPrimaryCredentials);
-    let start = found.sources.len();
-    inspect_at(
-        found,
-        &root.join(".credentials.json"),
-        home,
-        default,
-        |value, path, entered, out| {
-            let Some(entries) = value.as_object() else {
-                return;
-            };
-            for (name, entry) in entries {
-                let Some(entry) = entry.as_object() else {
-                    continue;
-                };
-                if !["server_name", "server_url", "client_id", "access_token"]
-                    .iter()
-                    .all(|field| entry.get(field).is_some_and(Value::is_string))
-                    || !matches!(
-                        entry.get("refresh_token"),
-                        None | Some(Value::Null) | Some(Value::String(_))
-                    )
-                {
-                    continue;
-                }
-                add_dynamic(
-                    entry.get("access_token"),
+            },
+        );
+        found.mark_since(start, Rule::CodexPrimaryCredentials);
+
+        let start = found.sources.len();
+        inspect_at(
+            found,
+            &root.path.join(".credentials.json"),
+            home,
+            root.default,
+            |value, path, entered, out| {
+                probe_immediate_children(
+                    value,
+                    "",
+                    &[&["access_token"], &["refresh_token"]],
                     path,
                     entered,
-                    &[name, "access_token"],
                     out,
                 );
-                add_dynamic(
-                    entry.get("refresh_token"),
-                    path,
-                    entered,
-                    &[name, "refresh_token"],
-                    out,
-                );
-            }
-        },
-    );
-    found.mark_since(start, Rule::CodexMcpCredentials);
+            },
+        );
+        found.mark_since(start, Rule::CodexMcpCredentials);
+    }
 }
 
 fn opencode(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    let root = match path_override(found, environment, "XDG_DATA_HOME", base) {
-        Override::Path(path) => (path.join("opencode"), false),
-        Override::Absent => match home {
-            Some(home) => (home.join(".local/share/opencode"), true),
-            None => return,
-        },
-        Override::Unavailable => return,
-    };
-    let start = found.sources.len();
-    inspect_at(
-        found,
-        &root.0.join("auth.json"),
-        home,
-        root.1,
-        opencode_auth_sources,
-    );
-    found.mark_since(start, Rule::OpenCodeProviderCredentials);
-    let start = found.sources.len();
-    inspect_at(
-        found,
-        &root.0.join("mcp-auth.json"),
-        home,
-        root.1,
-        opencode_mcp_auth_sources,
-    );
-    found.mark_since(start, Rule::OpenCodeMcpCredentials);
+    for root in candidate_roots(
+        home.map(|home| home.join(".local/share/opencode")),
+        environment.get("XDG_DATA_HOME"),
+        Some(Path::new("opencode")),
+        "XDG_DATA_HOME",
+        base,
+        &mut found.notices,
+    ) {
+        let start = found.sources.len();
+        inspect_at(
+            found,
+            &root.path.join("auth.json"),
+            home,
+            root.default,
+            opencode_auth_sources,
+        );
+        found.mark_since(start, Rule::OpenCodeProviderCredentials);
+        let start = found.sources.len();
+        inspect_at(
+            found,
+            &root.path.join("mcp-auth.json"),
+            home,
+            root.default,
+            opencode_mcp_auth_sources,
+        );
+        found.mark_since(start, Rule::OpenCodeMcpCredentials);
+    }
 }
 
 fn opencode_auth_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    let Some(providers) = value.as_object() else {
-        return;
-    };
-    for (provider, entry) in providers {
-        let Some(entry) = entry.as_object() else {
-            continue;
-        };
-        let fields: &[&str] = match entry.get("type").and_then(Value::as_str) {
-            Some("api")
-                if has_nonempty_string(entry, "key") && optional_string_map(entry, "metadata") =>
-            {
-                &["key"]
-            }
-            Some("oauth")
-                if has_string(entry, "refresh")
-                    && has_string(entry, "access")
-                    && entry.get("expires").and_then(Value::as_u64).is_some()
-                    && optional_string(entry, "accountId")
-                    && optional_string(entry, "enterpriseUrl") =>
-            {
-                &["refresh", "access"]
-            }
-            Some("wellknown") if has_string(entry, "key") && has_string(entry, "token") => {
-                &["token"]
-            }
-            _ => continue,
-        };
-        for field in fields {
-            add_dynamic(entry.get(field), path, entered, &[provider, field], out);
-        }
-    }
+    probe_immediate_children(
+        value,
+        "",
+        &[&["key"], &["token"], &["access"], &["refresh"]],
+        path,
+        entered,
+        out,
+    );
 }
 
 fn opencode_mcp_auth_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    let Some(entries) = value.as_object() else {
-        return;
-    };
-    if !entries.values().all(|entry| {
-        let Some(entry) = entry.as_object() else {
-            return false;
-        };
-        optional_object(entry, "tokens", |tokens| {
-            has_string(tokens, "accessToken") && optional_string(tokens, "refreshToken")
-        }) && optional_object(entry, "clientInfo", |client| {
-            has_string(client, "clientId") && optional_string(client, "clientSecret")
-        }) && optional_string(entry, "codeVerifier")
-            && optional_string(entry, "oauthState")
-            && optional_string(entry, "serverUrl")
-    }) {
-        return;
-    }
-    direct_paths(
+    probe_immediate_children(
         value,
-        path,
-        entered,
+        "",
         &[
             &["tokens", "accessToken"],
             &["tokens", "refreshToken"],
             &["clientInfo", "clientSecret"],
             &["codeVerifier"],
         ],
+        path,
+        entered,
         out,
     );
 }
 
 fn copilot(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    let Some((root, default)) = rooted(found, environment, "COPILOT_HOME", home, ".copilot", base)
-    else {
-        return;
-    };
-    let start = found.sources.len();
-    inspect_at(
-        found,
-        &root.join("config.json"),
-        home,
-        default,
-        |value, path, entered, out| {
-            let Some(tokens) = value.get("copilotTokens").and_then(Value::as_object) else {
-                return;
-            };
-            for (name, value) in tokens {
-                add_dynamic(Some(value), path, entered, &["copilotTokens", name], out);
-            }
-        },
-    );
-    found.mark_since(start, Rule::CopilotTokenConfiguration);
-    let directory = root.join("mcp-oauth-config");
-    if !std::fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+    for root in candidate_roots(
+        home.map(|home| home.join(".copilot")),
+        environment.get("COPILOT_HOME"),
+        None,
+        "COPILOT_HOME",
+        base,
+        &mut found.notices,
+    ) {
+        let start = found.sources.len();
+        inspect_at(
+            found,
+            &root.path.join("config.json"),
+            home,
+            root.default,
+            |value, path, entered, out| {
+                probe_immediate_string_map(value, "/copilotTokens", path, entered, out);
+            },
+        );
+        found.mark_since(start, Rule::CopilotTokenConfiguration);
+
+        let directory = root.path.join("mcp-oauth-config");
+        if !std::fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
             continue;
         }
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+        let Ok(entries) = std::fs::read_dir(directory) else {
             continue;
         };
-        let discover = if name.strip_suffix(".tokens.json").is_some_and(is_hex64) {
-            copilot_mcp_tokens_sources as fn(&Value, &Path, &str, &mut Vec<SourceRef>)
-        } else if name.strip_suffix(".json").is_some_and(is_hex64) {
-            copilot_mcp_client_sources
-        } else {
-            continue;
-        };
-        let start = found.sources.len();
-        inspect_at(found, &path, home, default, discover);
-        found.mark_since(start, Rule::CopilotMcpOauthCredentials);
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            let discover = if name.strip_suffix(".tokens.json").is_some_and(is_hex64) {
+                copilot_mcp_tokens_sources as fn(&Value, &Path, &str, &mut Vec<SourceRef>)
+            } else if name.strip_suffix(".json").is_some_and(is_hex64) {
+                copilot_mcp_client_sources
+            } else {
+                continue;
+            };
+            let start = found.sources.len();
+            inspect_at(found, &path, home, root.default, discover);
+            found.mark_since(start, Rule::CopilotMcpOauthCredentials);
+        }
     }
 }
 
 fn copilot_mcp_tokens_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    let Some(tokens) = value.as_object() else {
-        return;
-    };
-    if !has_string(tokens, "access_token")
-        || !optional_string(tokens, "refresh_token")
-        || !optional_string(tokens, "id_token")
-    {
-        return;
-    }
-    for field in ["access_token", "refresh_token", "id_token"] {
-        add_if_string(value, path, entered, &format!("/{field}"), out);
-    }
+    probe_exact(
+        value,
+        path,
+        entered,
+        &["/access_token", "/refresh_token", "/id_token"],
+        out,
+    );
 }
 
 fn copilot_mcp_client_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    let Some(client) = value.as_object() else {
-        return;
-    };
-    if !has_string(client, "client_id") || !optional_string(client, "client_secret") {
-        return;
-    }
-    add_if_string(value, path, entered, "/client_secret", out);
-}
-
-fn has_string(object: &Object, field: &str) -> bool {
-    object.get(field).is_some_and(Value::is_string)
-}
-
-fn has_nonempty_string(object: &Object, field: &str) -> bool {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty())
-}
-
-fn optional_string(object: &Object, field: &str) -> bool {
-    object.get(field).is_none_or(Value::is_string)
-}
-
-fn optional_string_map(object: &Object, field: &str) -> bool {
-    object.get(field).is_none_or(|value| {
-        value
-            .as_object()
-            .is_some_and(|values| values.values().all(Value::is_string))
-    })
-}
-
-fn optional_object(object: &Object, field: &str, valid: impl FnOnce(&Object) -> bool) -> bool {
-    object
-        .get(field)
-        .is_none_or(|value| value.as_object().is_some_and(valid))
+    probe_exact(value, path, entered, &["/client_secret"], out);
 }
 
 fn claude_machine(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    let override_root = match path_override(found, environment, "CLAUDE_CONFIG_DIR", base) {
-        Override::Path(path) => Some(path),
-        Override::Absent => None,
-        Override::Unavailable => return,
-    };
-    let Some(root) = override_root
-        .clone()
-        .or_else(|| home.map(|home| home.join(".claude")))
-    else {
-        return;
-    };
-    let default = override_root.is_none();
-    #[cfg(not(target_os = "macos"))]
-    {
+    for root in candidate_roots(
+        home.map(|home| home.join(".claude")),
+        environment.get("CLAUDE_CONFIG_DIR"),
+        None,
+        "CLAUDE_CONFIG_DIR",
+        base,
+        &mut found.notices,
+    ) {
         let start = found.sources.len();
         inspect_at(
             found,
-            &root.join(".credentials.json"),
+            &root.path.join(".credentials.json"),
             home,
-            default,
+            root.default,
             |value, path, entered, out| {
-                for pointer in ["/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"] {
-                    add_if_string(value, path, entered, pointer, out);
-                }
-                direct_fields(
+                probe_exact(
                     value,
                     path,
                     entered,
-                    "/mcpOAuth",
-                    &["accessToken", "refreshToken", "clientSecret"],
+                    &["/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"],
                     out,
                 );
-                direct_fields(
+                probe_immediate_children(
                     value,
+                    "/mcpOAuth",
+                    &[&["accessToken"], &["refreshToken"], &["clientSecret"]],
                     path,
                     entered,
+                    out,
+                );
+                probe_immediate_children(
+                    value,
                     "/mcpOAuthClientConfig",
-                    &["clientSecret"],
+                    &[&["clientSecret"]],
+                    path,
+                    entered,
                     out,
                 );
             },
@@ -491,46 +386,55 @@ fn claude_machine(found: &mut Found, environment: &Environment, home: Option<&Pa
         found.mark_since_where(start, Rule::ClaudeMcpOauthState, |source| {
             matches!(source, SourceRef::Json { pointer, .. } if !pointer.starts_with("/claudeAiOauth/"))
         });
+        let start = found.sources.len();
+        inspect_at(
+            found,
+            &root.path.join("settings.json"),
+            home,
+            root.default,
+            settings_sources,
+        );
+        found.mark_since(start, Rule::ClaudeConfiguredEnvironment);
+        let start = found.sources.len();
+        let state = if root.default {
+            home.expect("default Claude root requires home")
+                .join(".claude.json")
+        } else {
+            root.path.join(".claude.json")
+        };
+        let state = paths::normalize(&state);
+        inspect_at(
+            found,
+            &state,
+            home,
+            root.default,
+            |value, path, entered, out| {
+                probe_immediate_children(
+                    value,
+                    "/mcpOAuth",
+                    &[&["accessToken"], &["refreshToken"], &["clientSecret"]],
+                    path,
+                    entered,
+                    out,
+                );
+                probe_immediate_children(
+                    value,
+                    "/mcpOAuthClientConfig",
+                    &[&["clientSecret"]],
+                    path,
+                    entered,
+                    out,
+                );
+                mcp_server_sources(value, path, entered, out);
+            },
+        );
+        found.mark_since_where(start, Rule::ClaudeMcpServerCredentials, |source| {
+            matches!(source, SourceRef::Json { pointer, .. } if pointer.starts_with("/mcpServers/"))
+        });
+        found.mark_since_where(start, Rule::ClaudeMcpOauthState, |source| {
+            matches!(source, SourceRef::Json { pointer, .. } if !pointer.starts_with("/mcpServers/"))
+        });
     }
-    let start = found.sources.len();
-    inspect_at(
-        found,
-        &root.join("settings.json"),
-        home,
-        default,
-        settings_sources,
-    );
-    found.mark_since(start, Rule::ClaudeConfiguredEnvironment);
-    let state = override_root.map_or_else(
-        || home.expect("root required home").join(".claude.json"),
-        |root| root.join(".claude.json"),
-    );
-    let start = found.sources.len();
-    inspect_at(found, &state, home, default, |value, path, entered, out| {
-        direct_fields(
-            value,
-            path,
-            entered,
-            "/mcpOAuth",
-            &["accessToken", "refreshToken", "clientSecret"],
-            out,
-        );
-        direct_fields(
-            value,
-            path,
-            entered,
-            "/mcpOAuthClientConfig",
-            &["clientSecret"],
-            out,
-        );
-        mcp_server_sources(value, path, entered, out);
-    });
-    found.mark_since_where(start, Rule::ClaudeMcpServerCredentials, |source| {
-        matches!(source, SourceRef::Json { pointer, .. } if pointer.starts_with("/mcpServers/"))
-    });
-    found.mark_since_where(start, Rule::ClaudeMcpOauthState, |source| {
-        matches!(source, SourceRef::Json { pointer, .. } if !pointer.starts_with("/mcpServers/"))
-    });
 }
 
 fn settings_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
@@ -580,54 +484,73 @@ fn mcp_server_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<S
     }
 }
 
-fn direct_fields(
+fn probe_exact(
     value: &Value,
     path: &Path,
     entered: &str,
-    prefix: &str,
-    fields: &[&str],
+    pointers: &[&str],
     out: &mut Vec<SourceRef>,
 ) {
-    let selected = if prefix.is_empty() {
-        Some(value)
-    } else {
-        value.pointer(prefix)
-    };
-    let Some(entries) = selected.and_then(Value::as_object) else {
+    for pointer in pointers {
+        add_if_string(value, path, entered, pointer, out);
+    }
+}
+
+fn probe_immediate_children(
+    value: &Value,
+    container: &str,
+    leaves: &[&[&str]],
+    path: &Path,
+    entered: &str,
+    out: &mut Vec<SourceRef>,
+) {
+    let Some(entries) = value.pointer(container).and_then(Value::as_object) else {
         return;
     };
     for (name, entry) in entries {
-        for field in fields {
-            let mut tokens = Vec::new();
-            if !prefix.is_empty() {
-                tokens.extend(prefix[1..].split('/'));
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        for leaf in leaves {
+            let mut tokens = container_tokens(container);
+            tokens.push(name.as_str());
+            tokens.extend_from_slice(leaf);
+            let mut selected = None;
+            for (index, token) in leaf.iter().enumerate() {
+                selected = if index == 0 {
+                    entry.get(token)
+                } else {
+                    selected.and_then(|value: &Value| value.get(token))
+                };
             }
-            tokens.extend([name.as_str(), *field]);
-            add_dynamic(entry.get(field), path, entered, &tokens, out);
+            add_dynamic(selected, path, entered, &tokens, out);
         }
     }
 }
 
-fn direct_paths(
+fn probe_immediate_string_map(
     value: &Value,
+    container: &str,
     path: &Path,
     entered: &str,
-    fields: &[&[&str]],
     out: &mut Vec<SourceRef>,
 ) {
-    let Some(entries) = value.as_object() else {
+    let Some(entries) = value.pointer(container).and_then(Value::as_object) else {
         return;
     };
-    for (name, entry) in entries {
-        for suffix in fields {
-            let mut tokens = vec![name.as_str()];
-            tokens.extend_from_slice(suffix);
-            let selected = suffix
-                .iter()
-                .try_fold(entry, |current, token| current.get(token));
-            add_dynamic(selected, path, entered, &tokens, out);
-        }
+    for (name, value) in entries {
+        let mut tokens = container_tokens(container);
+        tokens.push(name.as_str());
+        add_dynamic(Some(value), path, entered, &tokens, out);
     }
+}
+
+fn container_tokens(container: &str) -> Vec<&str> {
+    container
+        .strip_prefix('/')
+        .into_iter()
+        .flat_map(|container| container.split('/'))
+        .collect()
 }
 
 fn add_if_string(
@@ -753,61 +676,67 @@ fn unavailable(found: &mut Found, path: &Path, reason: &'static str) {
     });
 }
 
-fn rooted(
-    found: &mut Found,
-    environment: &Environment,
-    variable: &str,
-    home: Option<&Path>,
-    fallback: &str,
-    base: &Path,
-) -> Option<(PathBuf, bool)> {
-    match path_override(found, environment, variable, base) {
-        Override::Path(path) => Some((path, false)),
-        Override::Absent => home.map(|home| (home.join(fallback), true)),
-        Override::Unavailable => None,
+#[derive(Debug)]
+struct Root {
+    path: PathBuf,
+    default: bool,
+}
+
+fn candidate_roots(
+    default: Option<PathBuf>,
+    override_value: Option<&std::ffi::OsStr>,
+    override_suffix: Option<&Path>,
+    override_name: &str,
+    invocation_directory: &Path,
+    notices: &mut Vec<Notice>,
+) -> Vec<Root> {
+    let mut roots = Vec::new();
+    if let Some(path) = default {
+        roots.push(Root {
+            path: paths::normalize(&path),
+            default: true,
+        });
     }
-}
 
-enum Override {
-    Absent,
-    Path(PathBuf),
-    Unavailable,
-}
-
-fn path_override(
-    found: &mut Found,
-    environment: &Environment,
-    name: &str,
-    base: &Path,
-) -> Override {
-    match environment.get(name) {
-        None => Override::Absent,
-        Some(value) => match value.to_str() {
-            Some("") => Override::Absent,
-            Some(value) => Override::Path(explicit_path(value, base)),
-            None => {
-                found.notices.push(Notice {
-                    display: name.to_string(),
-                    reason: "its override is not valid UTF-8",
-                });
-                Override::Unavailable
+    if let Some(value) = override_value {
+        match value.to_str() {
+            Some("") => {}
+            Some(value) => {
+                let mut path = explicit_path(value, invocation_directory);
+                if let Some(suffix) = override_suffix {
+                    path.push(suffix);
+                }
+                let path = paths::normalize(&path);
+                if !roots.iter().any(|root| root.path == path) {
+                    roots.push(Root {
+                        path,
+                        default: false,
+                    });
+                }
             }
-        },
+            None => notices.push(Notice {
+                display: override_name.to_string(),
+                reason: "its override is not valid UTF-8",
+            }),
+        }
     }
+
+    roots
 }
 
 fn explicit_path(value: &str, base: &Path) -> PathBuf {
     let path = Path::new(value);
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
+    if path.is_absolute() {
+        paths::normalize(path)
     } else {
-        base.join(path)
-    };
-    paths::normalize(&absolute)
+        paths::normalize(&base.join(path))
+    }
 }
 
 fn home_entry(home: Option<&Path>, path: &Path) -> Option<String> {
     let home = home?;
+    let home = paths::normalize(home);
+    let path = paths::normalize(path);
     path.strip_prefix(home)
         .ok()?
         .to_str()
@@ -934,7 +863,25 @@ mod tests {
     }
 
     #[test]
-    fn codex_schema_matrix_recognizes_primary_and_fallback_tokens_only() {
+    fn candidate_roots_are_additive_and_deduplicate_normalized_paths() {
+        let mut notices = Vec::new();
+        let roots = candidate_roots(
+            Some(PathBuf::from("/home/default/../default")),
+            Some(std::ffi::OsStr::new("./default")),
+            None,
+            "CODEX_HOME",
+            Path::new("/home"),
+            &mut notices,
+        );
+
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, PathBuf::from("/home/default"));
+        assert!(roots[0].default);
+        assert!(notices.is_empty());
+    }
+
+    #[test]
+    fn codex_probes_each_bounded_credential_field_independently() {
         let tree = Tree::new();
         tree.write("home/.codex/auth.json", r#"{"OPENAI_API_KEY":"a","tokens":{"access_token":"b"},"agent_identity":{"agent_private_key":"c"},"ignored":"d"}"#);
         tree.write(
@@ -960,28 +907,25 @@ mod tests {
             "/valid/refresh_token",
             "/without_refresh/access_token",
             "/null_refresh/access_token",
+            "/incomplete/access_token",
+            "/wrong_type/access_token",
+            "/bad_refresh/access_token",
         ] {
             assert!(
                 pointers.iter().any(|pointer| pointer == expected),
                 "missing {expected}: {pointers:?}"
             );
         }
-        for rejected in [
-            "/ignored",
-            "/incomplete/access_token",
-            "/wrong_type/access_token",
-            "/bad_refresh/access_token",
-        ] {
-            assert!(
-                !pointers.iter().any(|pointer| pointer == rejected),
-                "accepted {rejected}"
-            );
-        }
+        let rejected = "/ignored";
+        assert!(
+            !pointers.iter().any(|pointer| pointer == rejected),
+            "accepted {rejected}"
+        );
         assert!(found.notices.is_empty());
     }
 
     #[test]
-    fn opencode_auth_schema_matrix_is_pinned() {
+    fn opencode_auth_probes_direct_fields_without_schema_gating() {
         let tree = Tree::new();
         tree.write(
             "home/.local/share/opencode/auth.json",
@@ -1003,45 +947,58 @@ mod tests {
             machine_pointers(&tree),
             vec![
                 "/api/key",
-                "/oauth/refresh",
+                "/oauth/token",
                 "/oauth/access",
+                "/oauth/refresh",
+                "/wellknown/key",
                 "/wellknown/token",
+                "/wellknown/access",
+                "/incomplete_oauth/access",
+                "/incomplete_oauth/refresh",
+                "/incomplete_wellknown/token",
+                "/wrong_metadata/key",
+                "/wrong_expires/access",
+                "/wrong_expires/refresh",
+                "/wrong_optional/access",
+                "/wrong_optional/refresh",
+                "/unknown/key",
+                "/unknown/token",
             ]
         );
     }
 
     #[test]
-    fn opencode_auth_valid_no_match_and_unknown_fields_do_not_match() {
+    fn opencode_auth_stays_bounded_and_ignores_unlisted_fields() {
         let tree = Tree::new();
         tree.write(
             "home/.local/share/opencode/auth.json",
             r#"{
                 "oauth":{"type":"oauth","refresh":"","access":"","expires":12,"extraToken":"ignored"},
-                "wellknown":{"type":"wellknown","key":"identifier","token":"","secret":"ignored"},
-                "unknown":{"type":"future","key":"ignored"}
+                "wellknown":{"type":"wellknown","key":"","token":"","secret":"ignored"},
+                "unknown":{"type":"future","nested":{"key":"ignored"}}
             }"#,
         );
         assert!(machine_pointers(&tree).is_empty());
     }
 
     #[test]
-    fn opencode_mcp_auth_schema_matrix_is_all_or_nothing() {
+    fn opencode_mcp_probes_each_server_entry_independently() {
         let tree = Tree::new();
         let path = "home/.local/share/opencode/mcp-auth.json";
         tree.write(
             path,
             r#"{
-                "srv/name":{"tokens":{"accessToken":"access-canary","refreshToken":"refresh-canary","nearby":"ignored"},"clientInfo":{"clientId":"client","clientSecret":"secret-canary","nearby":"ignored"},"codeVerifier":"verifier-canary","oauthState":"state-is-not-a-credential","serverUrl":"https://example.test","accessToken":"ignored"},
+                "a~b/srv":{"tokens":{"accessToken":"access-canary","refreshToken":"refresh-canary","nearby":"ignored"},"clientInfo":{"clientId":"client","clientSecret":"secret-canary","nearby":"ignored"},"codeVerifier":"verifier-canary","oauthState":"state-is-not-a-credential","serverUrl":"https://example.test","accessToken":"ignored"},
                 "optional":{"unknown":{"clientSecret":"ignored"}}
             }"#,
         );
         assert_eq!(
             machine_pointers(&tree),
             vec![
-                "/srv~1name/tokens/accessToken",
-                "/srv~1name/tokens/refreshToken",
-                "/srv~1name/clientInfo/clientSecret",
-                "/srv~1name/codeVerifier",
+                "/a~0b~1srv/tokens/accessToken",
+                "/a~0b~1srv/tokens/refreshToken",
+                "/a~0b~1srv/clientInfo/clientSecret",
+                "/a~0b~1srv/codeVerifier",
             ]
         );
 
@@ -1049,13 +1006,19 @@ mod tests {
             path,
             r#"{"valid":{"tokens":{"accessToken":"access-canary"}},"incomplete":{"tokens":{"refreshToken":"refresh-canary"}}}"#,
         );
-        assert!(machine_pointers(&tree).is_empty());
+        assert_eq!(
+            machine_pointers(&tree),
+            vec![
+                "/valid/tokens/accessToken",
+                "/incomplete/tokens/refreshToken"
+            ]
+        );
 
         tree.write(
             path,
             r#"{"valid":{"tokens":{"accessToken":"access-canary"}},"wrong":{"clientInfo":{"clientId":7}}}"#,
         );
-        assert!(machine_pointers(&tree).is_empty());
+        assert_eq!(machine_pointers(&tree), vec!["/valid/tokens/accessToken"]);
 
         tree.write(
             path,
@@ -1068,7 +1031,7 @@ mod tests {
     }
 
     #[test]
-    fn copilot_schema_matrix_recognizes_primary_and_hashed_mcp_fields_only() {
+    fn copilot_probes_bounded_token_containers_and_hashed_files() {
         let tree = Tree::new();
         tree.write(
             "home/.copilot/config.json",
@@ -1113,7 +1076,7 @@ mod tests {
     }
 
     #[test]
-    fn copilot_mcp_tokens_schema_matrix_rejects_the_whole_file() {
+    fn copilot_mcp_token_fields_are_independent() {
         let tree = Tree::new();
         let hash = "b".repeat(64);
         let path = format!("home/.copilot/mcp-oauth-config/{hash}.tokens.json");
@@ -1127,13 +1090,13 @@ mod tests {
         );
 
         tree.write(&path, r#"{"refresh_token":"refresh-canary"}"#);
-        assert!(machine_pointers(&tree).is_empty());
+        assert_eq!(machine_pointers(&tree), vec!["/refresh_token"]);
 
         tree.write(
             &path,
             r#"{"access_token":"access-canary","refresh_token":7}"#,
         );
-        assert!(machine_pointers(&tree).is_empty());
+        assert_eq!(machine_pointers(&tree), vec!["/access_token"]);
 
         tree.write(
             &path,
@@ -1146,7 +1109,7 @@ mod tests {
     }
 
     #[test]
-    fn copilot_mcp_client_schema_matrix_recognizes_only_client_secret() {
+    fn copilot_mcp_client_secret_does_not_require_client_id() {
         let tree = Tree::new();
         let hash = "c".repeat(64);
         let path = format!("home/.copilot/mcp-oauth-config/{hash}.json");
@@ -1157,7 +1120,7 @@ mod tests {
         assert_eq!(machine_pointers(&tree), vec!["/client_secret"]);
 
         tree.write(&path, r#"{"client_secret":"secret-canary"}"#);
-        assert!(machine_pointers(&tree).is_empty());
+        assert_eq!(machine_pointers(&tree), vec!["/client_secret"]);
 
         tree.write(&path, r#"{"client_id":"client-canary","client_secret":7}"#);
         assert!(machine_pointers(&tree).is_empty());
@@ -1173,7 +1136,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_schema_matrix_recognizes_platform_primary_and_mcp_fields_only() {
+    fn claude_probes_bounded_primary_oauth_and_mcp_fields() {
         let tree = Tree::new();
         tree.write(
             "home/.claude/.credentials.json",
@@ -1203,18 +1166,10 @@ mod tests {
                 "missing {expected}: {pointers:?}"
             );
         }
-        #[cfg(not(target_os = "macos"))]
         for expected in ["/claudeAiOauth/accessToken", "/mcpOAuth/srv/clientSecret"] {
             assert!(
                 pointers.iter().any(|pointer| pointer == expected),
                 "missing {expected}: {pointers:?}"
-            );
-        }
-        #[cfg(target_os = "macos")]
-        for keychain_only in ["/claudeAiOauth/accessToken", "/mcpOAuth/srv/clientSecret"] {
-            assert!(
-                !pointers.iter().any(|pointer| pointer == keychain_only),
-                "macOS must not discover keychain-backed primary fields: {pointers:?}"
             );
         }
         assert!(
@@ -1348,7 +1303,7 @@ mod tests {
         );
         tree.write("home/.local/share/opencode/mcp-auth.json", "{");
         let found = machine(&environment, Some(&home), &tree.0);
-        assert!(found.sources.is_empty());
+        assert_eq!(pointers(&found), vec!["/provider/key"]);
         assert_eq!(found.notices.len(), 1);
         assert_found_is_canary_free(&found, &canary);
 

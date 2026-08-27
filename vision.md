@@ -114,8 +114,10 @@ change.
   source references rather than copied into ContextVeil configuration.
 - **Known Source Rules, not generic crawling.** Setup applies maintained,
   deterministic candidate-admission rules for secret-like names,
-  credential-bearing URLs, and bounded secret-bearing store schemas. It does not
-  recursively classify arbitrary structured files by secret-like field names.
+  credential-bearing URLs, and bounded host credential documents. Their field
+  probes are explicit and maintained; complete host schemas are not modeled.
+  Setup does not recursively classify arbitrary structured files by secret-like
+  field names.
 - **One security core.** Harness adapters translate protocols but do not
   reimplement source resolution or matching.
 - **Silent success.** Runtime produces UI only for intervention or malfunction.
