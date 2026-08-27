@@ -16,35 +16,6 @@ use crate::source::{Environment, SourceRef};
 
 use super::discovery::ProjectFiles;
 
-const CLAUDE_ENV: [&str; 8] = [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_AWS_API_KEY",
-    "ANTHROPIC_FOUNDRY_API_KEY",
-    "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
-];
-const MCP_ENV: [&str; 8] = [
-    "API_KEY",
-    "ACCESS_TOKEN",
-    "AUTH_TOKEN",
-    "BEARER_TOKEN",
-    "CLIENT_SECRET",
-    "PASSWORD",
-    "SECRET",
-    "TOKEN",
-];
-const MCP_HEADERS: [&str; 6] = [
-    "authorization",
-    "proxy-authorization",
-    "x-api-key",
-    "api-key",
-    "x-auth-token",
-    "x-subscription-token",
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Rule {
     SecretLikeName,
@@ -82,6 +53,298 @@ impl Rule {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RootSpec {
+    default: &'static str,
+    override_name: &'static str,
+    override_suffix: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Location {
+    File(&'static str),
+    HomeOrRootFile(&'static str),
+    Hex64File {
+        directory: &'static str,
+        suffix: &'static str,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KeyMatch {
+    Any,
+    Exact(&'static [&'static str]),
+    AsciiCaseInsensitive(&'static [&'static str]),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Probe {
+    Exact {
+        pointers: &'static [&'static str],
+        rule: Rule,
+    },
+    ImmediateChildren {
+        container: &'static str,
+        leaves: &'static [&'static [&'static str]],
+        rule: Rule,
+    },
+    Map {
+        container: &'static str,
+        keys: KeyMatch,
+        rule: Rule,
+    },
+    NestedMaps {
+        container: &'static str,
+        maps: &'static [MapSpec],
+        rule: Rule,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MapSpec {
+    nested: &'static str,
+    keys: KeyMatch,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DocumentSpec {
+    location: Location,
+    probes: &'static [Probe],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MachineSpec {
+    root: RootSpec,
+    documents: &'static [DocumentSpec],
+}
+
+const CLAUDE_ENV_KEYS: KeyMatch = KeyMatch::Exact(&[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_AWS_API_KEY",
+    "ANTHROPIC_FOUNDRY_API_KEY",
+    "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+]);
+const MCP_ENV_KEYS: KeyMatch = KeyMatch::Exact(&[
+    "API_KEY",
+    "ACCESS_TOKEN",
+    "AUTH_TOKEN",
+    "BEARER_TOKEN",
+    "CLIENT_SECRET",
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+]);
+const MCP_HEADER_KEYS: KeyMatch = KeyMatch::AsciiCaseInsensitive(&[
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "api-key",
+    "x-auth-token",
+    "x-subscription-token",
+]);
+
+const CODEX_PRIMARY_PROBES: &[Probe] = &[Probe::Exact {
+    pointers: &[
+        "/OPENAI_API_KEY",
+        "/tokens/id_token",
+        "/tokens/access_token",
+        "/tokens/refresh_token",
+        "/personal_access_token",
+        "/bedrock_api_key/api_key",
+        "/agent_identity",
+        "/agent_identity/agent_private_key",
+    ],
+    rule: Rule::CodexPrimaryCredentials,
+}];
+const CODEX_MCP_PROBES: &[Probe] = &[Probe::ImmediateChildren {
+    container: "",
+    leaves: &[&["access_token"], &["refresh_token"]],
+    rule: Rule::CodexMcpCredentials,
+}];
+const OPENCODE_PROVIDER_PROBES: &[Probe] = &[Probe::ImmediateChildren {
+    container: "",
+    leaves: &[&["key"], &["token"], &["access"], &["refresh"]],
+    rule: Rule::OpenCodeProviderCredentials,
+}];
+const OPENCODE_MCP_PROBES: &[Probe] = &[Probe::ImmediateChildren {
+    container: "",
+    leaves: &[
+        &["tokens", "accessToken"],
+        &["tokens", "refreshToken"],
+        &["clientInfo", "clientSecret"],
+        &["codeVerifier"],
+    ],
+    rule: Rule::OpenCodeMcpCredentials,
+}];
+const COPILOT_CONFIG_PROBES: &[Probe] = &[Probe::Map {
+    container: "/copilotTokens",
+    keys: KeyMatch::Any,
+    rule: Rule::CopilotTokenConfiguration,
+}];
+const COPILOT_TOKEN_PROBES: &[Probe] = &[Probe::Exact {
+    pointers: &["/access_token", "/refresh_token", "/id_token"],
+    rule: Rule::CopilotMcpOauthCredentials,
+}];
+const COPILOT_CLIENT_PROBES: &[Probe] = &[Probe::Exact {
+    pointers: &["/client_secret"],
+    rule: Rule::CopilotMcpOauthCredentials,
+}];
+const CLAUDE_CREDENTIALS_PROBES: &[Probe] = &[
+    // Claude's primary credential is keychain-backed on macOS.
+    #[cfg(not(target_os = "macos"))]
+    Probe::Exact {
+        pointers: &["/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"],
+        rule: Rule::ClaudePrimaryOauthCredentials,
+    },
+    Probe::ImmediateChildren {
+        container: "/mcpOAuth",
+        leaves: &[&["accessToken"], &["refreshToken"], &["clientSecret"]],
+        rule: Rule::ClaudeMcpOauthState,
+    },
+    Probe::ImmediateChildren {
+        container: "/mcpOAuthClientConfig",
+        leaves: &[&["clientSecret"]],
+        rule: Rule::ClaudeMcpOauthState,
+    },
+];
+const CLAUDE_SETTINGS_PROBES: &[Probe] = &[Probe::Map {
+    container: "/env",
+    keys: CLAUDE_ENV_KEYS,
+    rule: Rule::ClaudeConfiguredEnvironment,
+}];
+const MCP_SERVER_MAPS: &[MapSpec] = &[
+    MapSpec {
+        nested: "headers",
+        keys: MCP_HEADER_KEYS,
+    },
+    MapSpec {
+        nested: "env",
+        keys: MCP_ENV_KEYS,
+    },
+    MapSpec {
+        nested: "env",
+        keys: CLAUDE_ENV_KEYS,
+    },
+];
+const CLAUDE_STATE_PROBES: &[Probe] = &[
+    Probe::ImmediateChildren {
+        container: "/mcpOAuth",
+        leaves: &[&["accessToken"], &["refreshToken"], &["clientSecret"]],
+        rule: Rule::ClaudeMcpOauthState,
+    },
+    Probe::ImmediateChildren {
+        container: "/mcpOAuthClientConfig",
+        leaves: &[&["clientSecret"]],
+        rule: Rule::ClaudeMcpOauthState,
+    },
+    Probe::NestedMaps {
+        container: "/mcpServers",
+        maps: MCP_SERVER_MAPS,
+        rule: Rule::ClaudeMcpServerCredentials,
+    },
+];
+const PROJECT_MCP_PROBES: &[Probe] = &[Probe::NestedMaps {
+    container: "/mcpServers",
+    maps: MCP_SERVER_MAPS,
+    rule: Rule::ClaudeMcpServerCredentials,
+}];
+
+const CODEX_DOCUMENTS: &[DocumentSpec] = &[
+    DocumentSpec {
+        location: Location::File("auth.json"),
+        probes: CODEX_PRIMARY_PROBES,
+    },
+    DocumentSpec {
+        location: Location::File(".credentials.json"),
+        probes: CODEX_MCP_PROBES,
+    },
+];
+const OPENCODE_DOCUMENTS: &[DocumentSpec] = &[
+    DocumentSpec {
+        location: Location::File("auth.json"),
+        probes: OPENCODE_PROVIDER_PROBES,
+    },
+    DocumentSpec {
+        location: Location::File("mcp-auth.json"),
+        probes: OPENCODE_MCP_PROBES,
+    },
+];
+const COPILOT_DOCUMENTS: &[DocumentSpec] = &[
+    DocumentSpec {
+        location: Location::File("config.json"),
+        probes: COPILOT_CONFIG_PROBES,
+    },
+    DocumentSpec {
+        location: Location::Hex64File {
+            directory: "mcp-oauth-config",
+            suffix: ".tokens.json",
+        },
+        probes: COPILOT_TOKEN_PROBES,
+    },
+    DocumentSpec {
+        location: Location::Hex64File {
+            directory: "mcp-oauth-config",
+            suffix: ".json",
+        },
+        probes: COPILOT_CLIENT_PROBES,
+    },
+];
+const CLAUDE_DOCUMENTS: &[DocumentSpec] = &[
+    DocumentSpec {
+        location: Location::File(".credentials.json"),
+        probes: CLAUDE_CREDENTIALS_PROBES,
+    },
+    DocumentSpec {
+        location: Location::File("settings.json"),
+        probes: CLAUDE_SETTINGS_PROBES,
+    },
+    DocumentSpec {
+        location: Location::HomeOrRootFile(".claude.json"),
+        probes: CLAUDE_STATE_PROBES,
+    },
+];
+const MACHINE_SPECS: &[MachineSpec] = &[
+    MachineSpec {
+        root: RootSpec {
+            default: ".codex",
+            override_name: "CODEX_HOME",
+            override_suffix: "",
+        },
+        documents: CODEX_DOCUMENTS,
+    },
+    MachineSpec {
+        root: RootSpec {
+            default: ".local/share/opencode",
+            override_name: "XDG_DATA_HOME",
+            override_suffix: "opencode",
+        },
+        documents: OPENCODE_DOCUMENTS,
+    },
+    MachineSpec {
+        root: RootSpec {
+            default: ".copilot",
+            override_name: "COPILOT_HOME",
+            override_suffix: "",
+        },
+        documents: COPILOT_DOCUMENTS,
+    },
+    MachineSpec {
+        root: RootSpec {
+            default: ".claude",
+            override_name: "CLAUDE_CONFIG_DIR",
+            override_suffix: "",
+        },
+        documents: CLAUDE_DOCUMENTS,
+    },
+];
+
+const ENVIRONMENT_SOURCES: &[(&str, Rule)] =
+    &[("OPENCODE_AUTH_CONTENT", Rule::OpenCodeAuthContent)];
+
 #[derive(Debug, Default)]
 pub struct Found {
     pub sources: Vec<SourceRef>,
@@ -91,15 +354,7 @@ pub struct Found {
 
 impl Found {
     fn mark_since(&mut self, start: usize, rule: Rule) {
-        self.mark_since_where(start, rule, |_| true);
-    }
-
-    fn mark_since_where(&mut self, start: usize, rule: Rule, matches: impl Fn(&SourceRef) -> bool) {
-        let ids: Vec<SourceId> = self.sources[start..]
-            .iter()
-            .filter(|source| matches(source))
-            .map(SourceRef::id)
-            .collect();
+        let ids: Vec<SourceId> = self.sources[start..].iter().map(SourceRef::id).collect();
         for id in ids {
             let rules = self.rules.entry(id).or_default();
             if !rules.contains(&rule) {
@@ -117,19 +372,36 @@ pub struct Notice {
 
 pub fn machine(environment: &Environment, home: Option<&Path>, base: &Path) -> Found {
     let mut found = Found::default();
-    codex(&mut found, environment, home, base);
-    opencode(&mut found, environment, home, base);
-    copilot(&mut found, environment, home, base);
-    claude_machine(&mut found, environment, home, base);
-    if environment
-        .get_str("OPENCODE_AUTH_CONTENT")
-        .is_some_and(|value| !value.is_empty())
-    {
-        let start = found.sources.len();
-        found.sources.push(SourceRef::Env {
-            name: "OPENCODE_AUTH_CONTENT".into(),
-        });
-        found.mark_since(start, Rule::OpenCodeAuthContent);
+    for spec in MACHINE_SPECS {
+        let default = home.map(|home| home.join(spec.root.default));
+        for root in candidate_roots(
+            default,
+            environment.get(spec.root.override_name),
+            if spec.root.override_suffix.is_empty() {
+                None
+            } else {
+                Some(Path::new(spec.root.override_suffix))
+            },
+            spec.root.override_name,
+            base,
+            &mut found.notices,
+        ) {
+            for document in spec.documents {
+                inspect_location(&mut found, &root, home, document);
+            }
+        }
+    }
+    for (name, rule) in ENVIRONMENT_SOURCES {
+        if environment
+            .get_str(name)
+            .is_some_and(|value| !value.is_empty())
+        {
+            let start = found.sources.len();
+            found.sources.push(SourceRef::Env {
+                name: (*name).into(),
+            });
+            found.mark_since(start, *rule);
+        }
     }
     deduplicate(&mut found.sources);
     found
@@ -138,410 +410,243 @@ pub fn machine(environment: &Environment, home: Option<&Path>, base: &Path) -> F
 pub fn project(project_root: &Path, files: &ProjectFiles) -> Found {
     let mut found = Found::default();
     for path in &files.claude_settings {
-        let start = found.sources.len();
-        inspect(
+        inspect_document(
             &mut found,
             path,
             project_entry(project_root, path),
-            settings_sources,
+            CLAUDE_SETTINGS_PROBES,
         );
-        found.mark_since(start, Rule::ClaudeConfiguredEnvironment);
     }
     for path in &files.claude_mcp {
-        let start = found.sources.len();
-        inspect(
+        inspect_document(
             &mut found,
             path,
             project_entry(project_root, path),
-            mcp_server_sources,
+            PROJECT_MCP_PROBES,
         );
-        found.mark_since(start, Rule::ClaudeMcpServerCredentials);
     }
     deduplicate(&mut found.sources);
     found
 }
 
-fn codex(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    for root in candidate_roots(
-        home.map(|home| home.join(".codex")),
-        environment.get("CODEX_HOME"),
-        None,
-        "CODEX_HOME",
-        base,
-        &mut found.notices,
-    ) {
-        let start = found.sources.len();
-        inspect_at(
-            found,
-            &root.path.join("auth.json"),
-            home,
-            root.default,
-            |value, path, entered, out| {
-                probe_exact(
-                    value,
-                    path,
-                    entered,
-                    &[
-                        "/OPENAI_API_KEY",
-                        "/tokens/id_token",
-                        "/tokens/access_token",
-                        "/tokens/refresh_token",
-                        "/personal_access_token",
-                        "/bedrock_api_key/api_key",
-                        "/agent_identity",
-                        "/agent_identity/agent_private_key",
-                    ],
-                    out,
-                );
-            },
-        );
-        found.mark_since(start, Rule::CodexPrimaryCredentials);
-
-        let start = found.sources.len();
-        inspect_at(
-            found,
-            &root.path.join(".credentials.json"),
-            home,
-            root.default,
-            |value, path, entered, out| {
-                probe_immediate_children(
-                    value,
-                    "",
-                    &[&["access_token"], &["refresh_token"]],
-                    path,
-                    entered,
-                    out,
-                );
-            },
-        );
-        found.mark_since(start, Rule::CodexMcpCredentials);
-    }
-}
-
-fn opencode(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    for root in candidate_roots(
-        home.map(|home| home.join(".local/share/opencode")),
-        environment.get("XDG_DATA_HOME"),
-        Some(Path::new("opencode")),
-        "XDG_DATA_HOME",
-        base,
-        &mut found.notices,
-    ) {
-        let start = found.sources.len();
-        inspect_at(
-            found,
-            &root.path.join("auth.json"),
-            home,
-            root.default,
-            opencode_auth_sources,
-        );
-        found.mark_since(start, Rule::OpenCodeProviderCredentials);
-        let start = found.sources.len();
-        inspect_at(
-            found,
-            &root.path.join("mcp-auth.json"),
-            home,
-            root.default,
-            opencode_mcp_auth_sources,
-        );
-        found.mark_since(start, Rule::OpenCodeMcpCredentials);
-    }
-}
-
-fn opencode_auth_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    probe_immediate_children(
-        value,
-        "",
-        &[&["key"], &["token"], &["access"], &["refresh"]],
-        path,
-        entered,
-        out,
-    );
-}
-
-fn opencode_mcp_auth_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    probe_immediate_children(
-        value,
-        "",
-        &[
-            &["tokens", "accessToken"],
-            &["tokens", "refreshToken"],
-            &["clientInfo", "clientSecret"],
-            &["codeVerifier"],
-        ],
-        path,
-        entered,
-        out,
-    );
-}
-
-fn copilot(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    for root in candidate_roots(
-        home.map(|home| home.join(".copilot")),
-        environment.get("COPILOT_HOME"),
-        None,
-        "COPILOT_HOME",
-        base,
-        &mut found.notices,
-    ) {
-        let start = found.sources.len();
-        inspect_at(
-            found,
-            &root.path.join("config.json"),
-            home,
-            root.default,
-            |value, path, entered, out| {
-                probe_immediate_string_map(value, "/copilotTokens", path, entered, out);
-            },
-        );
-        found.mark_since(start, Rule::CopilotTokenConfiguration);
-
-        let directory = root.path.join("mcp-oauth-config");
-        if !std::fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
-            continue;
+fn inspect_location(found: &mut Found, root: &Root, home: Option<&Path>, document: &DocumentSpec) {
+    match document.location {
+        Location::File(file) => {
+            inspect_at(
+                found,
+                &root.path.join(file),
+                home,
+                root.default,
+                document.probes,
+            );
         }
-        let Ok(entries) = std::fs::read_dir(directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
-                continue;
-            }
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let discover = if name.strip_suffix(".tokens.json").is_some_and(is_hex64) {
-                copilot_mcp_tokens_sources as fn(&Value, &Path, &str, &mut Vec<SourceRef>)
-            } else if name.strip_suffix(".json").is_some_and(is_hex64) {
-                copilot_mcp_client_sources
+        Location::HomeOrRootFile(file) => {
+            let path = if root.default {
+                root.path
+                    .parent()
+                    .expect("default root has a parent")
+                    .join(file)
             } else {
-                continue;
+                root.path.join(file)
             };
-            let start = found.sources.len();
-            inspect_at(found, &path, home, root.default, discover);
-            found.mark_since(start, Rule::CopilotMcpOauthCredentials);
+            inspect_at(found, &path, home, root.default, document.probes);
+        }
+        Location::Hex64File { directory, suffix } => {
+            let directory = root.path.join(directory);
+            if !std::fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
+                return;
+            }
+            let Ok(entries) = std::fs::read_dir(directory) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+                    continue;
+                }
+                let file_name = entry.file_name();
+                let Some(name) = file_name.to_str() else {
+                    continue;
+                };
+                if !name.strip_suffix(suffix).is_some_and(is_hex64) {
+                    continue;
+                }
+                inspect_at(found, &path, home, root.default, document.probes);
+            }
         }
     }
 }
 
-fn copilot_mcp_tokens_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    probe_exact(
-        value,
-        path,
-        entered,
-        &["/access_token", "/refresh_token", "/id_token"],
-        out,
-    );
+fn inspect_at(
+    found: &mut Found,
+    path: &Path,
+    home: Option<&Path>,
+    default: bool,
+    probes: &[Probe],
+) {
+    let entered = if default {
+        home_entry(home, path)
+    } else {
+        path.to_str().map(str::to_string)
+    };
+    inspect_document(found, path, entered, probes);
 }
 
-fn copilot_mcp_client_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    probe_exact(value, path, entered, &["/client_secret"], out);
-}
-
-fn claude_machine(found: &mut Found, environment: &Environment, home: Option<&Path>, base: &Path) {
-    for root in candidate_roots(
-        home.map(|home| home.join(".claude")),
-        environment.get("CLAUDE_CONFIG_DIR"),
-        None,
-        "CLAUDE_CONFIG_DIR",
-        base,
-        &mut found.notices,
-    ) {
-        let start = found.sources.len();
-        inspect_at(
-            found,
-            &root.path.join(".credentials.json"),
-            home,
-            root.default,
-            |value, path, entered, out| {
-                probe_exact(
-                    value,
-                    path,
-                    entered,
-                    &["/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"],
-                    out,
-                );
-                probe_immediate_children(
-                    value,
-                    "/mcpOAuth",
-                    &[&["accessToken"], &["refreshToken"], &["clientSecret"]],
-                    path,
-                    entered,
-                    out,
-                );
-                probe_immediate_children(
-                    value,
-                    "/mcpOAuthClientConfig",
-                    &[&["clientSecret"]],
-                    path,
-                    entered,
-                    out,
-                );
-            },
-        );
-        found.mark_since_where(start, Rule::ClaudePrimaryOauthCredentials, |source| {
-            matches!(source, SourceRef::Json { pointer, .. } if pointer.starts_with("/claudeAiOauth/"))
-        });
-        found.mark_since_where(start, Rule::ClaudeMcpOauthState, |source| {
-            matches!(source, SourceRef::Json { pointer, .. } if !pointer.starts_with("/claudeAiOauth/"))
-        });
-        let start = found.sources.len();
-        inspect_at(
-            found,
-            &root.path.join("settings.json"),
-            home,
-            root.default,
-            settings_sources,
-        );
-        found.mark_since(start, Rule::ClaudeConfiguredEnvironment);
-        let start = found.sources.len();
-        let state = if root.default {
-            home.expect("default Claude root requires home")
-                .join(".claude.json")
-        } else {
-            root.path.join(".claude.json")
-        };
-        let state = paths::normalize(&state);
-        inspect_at(
-            found,
-            &state,
-            home,
-            root.default,
-            |value, path, entered, out| {
-                probe_immediate_children(
-                    value,
-                    "/mcpOAuth",
-                    &[&["accessToken"], &["refreshToken"], &["clientSecret"]],
-                    path,
-                    entered,
-                    out,
-                );
-                probe_immediate_children(
-                    value,
-                    "/mcpOAuthClientConfig",
-                    &[&["clientSecret"]],
-                    path,
-                    entered,
-                    out,
-                );
-                mcp_server_sources(value, path, entered, out);
-            },
-        );
-        found.mark_since_where(start, Rule::ClaudeMcpServerCredentials, |source| {
-            matches!(source, SourceRef::Json { pointer, .. } if pointer.starts_with("/mcpServers/"))
-        });
-        found.mark_since_where(start, Rule::ClaudeMcpOauthState, |source| {
-            matches!(source, SourceRef::Json { pointer, .. } if !pointer.starts_with("/mcpServers/"))
-        });
-    }
-}
-
-fn settings_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    for name in CLAUDE_ENV {
-        add_if_string(value, path, entered, &format!("/env/{name}"), out);
-    }
-}
-
-fn mcp_server_sources(value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
-    let Some(servers) = value.get("mcpServers").and_then(Value::as_object) else {
+fn inspect_document(found: &mut Found, path: &Path, entered: Option<String>, probes: &[Probe]) {
+    let Some(entered) = entered else {
+        unavailable(found, path, "its path is not valid UTF-8");
         return;
     };
-    for (server_name, server) in servers {
-        if let Some(headers) = server.get("headers").and_then(Value::as_object) {
-            for (name, value) in headers {
-                if MCP_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
-                    add_dynamic(
-                        Some(value),
-                        path,
-                        entered,
-                        &["mcpServers", server_name, "headers", name],
-                        out,
-                    );
+    let Some(value) = read_document(found, path) else {
+        return;
+    };
+    for probe in probes {
+        let start = found.sources.len();
+        apply_probe(probe, &value, path, &entered, &mut found.sources);
+        found.mark_since(start, probe.rule());
+    }
+}
+
+fn read_document(found: &mut Found, path: &Path) -> Option<Value> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return None;
+        }
+    }
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return None;
+        }
+    };
+    match file.metadata() {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return None;
+        }
+    }
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        unavailable(found, path, "it could not be read");
+        return None;
+    }
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => {
+            unavailable(found, path, "it is not valid UTF-8");
+            return None;
+        }
+    };
+    match json::parse(&text) {
+        Ok(value) => Some(value),
+        Err(_) => {
+            unavailable(found, path, "it is malformed JSON");
+            None
+        }
+    }
+}
+
+impl Probe {
+    fn rule(self) -> Rule {
+        match self {
+            Self::Exact { rule, .. }
+            | Self::ImmediateChildren { rule, .. }
+            | Self::Map { rule, .. }
+            | Self::NestedMaps { rule, .. } => rule,
+        }
+    }
+}
+
+fn apply_probe(probe: &Probe, value: &Value, path: &Path, entered: &str, out: &mut Vec<SourceRef>) {
+    match probe {
+        Probe::Exact { pointers, .. } => {
+            for pointer in *pointers {
+                add_if_string(value, path, entered, pointer, out);
+            }
+        }
+        Probe::ImmediateChildren {
+            container, leaves, ..
+        } => {
+            let Some(entries) = value.pointer(container).and_then(Value::as_object) else {
+                return;
+            };
+            for (name, entry) in entries {
+                let Some(entry) = entry.as_object() else {
+                    continue;
+                };
+                for leaf in *leaves {
+                    let mut tokens = container_tokens(container);
+                    tokens.push(name.as_str());
+                    let mut selected = None;
+                    for (index, token) in leaf.iter().enumerate() {
+                        selected = if index == 0 {
+                            entry.get(token)
+                        } else {
+                            selected.and_then(|value: &Value| value.get(token))
+                        };
+                    }
+                    tokens.extend_from_slice(leaf);
+                    add_dynamic(selected, path, entered, &tokens, out);
                 }
             }
         }
-        if let Some(env) = server.get("env").and_then(Value::as_object) {
-            for name in MCP_ENV {
-                add_dynamic(
-                    env.get(name),
-                    path,
-                    entered,
-                    &["mcpServers", server_name, "env", name],
-                    out,
-                );
+        Probe::Map {
+            container, keys, ..
+        } => {
+            let Some(entries) = value.pointer(container).and_then(Value::as_object) else {
+                return;
+            };
+            for (name, entry) in entries {
+                if key_matches(*keys, name) {
+                    let mut tokens = container_tokens(container);
+                    tokens.push(name.as_str());
+                    add_dynamic(Some(entry), path, entered, &tokens, out);
+                }
             }
-            for name in CLAUDE_ENV {
-                add_dynamic(
-                    env.get(name),
-                    path,
-                    entered,
-                    &["mcpServers", server_name, "env", name],
-                    out,
-                );
+        }
+        Probe::NestedMaps {
+            container, maps, ..
+        } => {
+            let Some(entries) = value.pointer(container).and_then(Value::as_object) else {
+                return;
+            };
+            for (name, entry) in entries {
+                for map in *maps {
+                    let Some(values) = entry.get(map.nested).and_then(Value::as_object) else {
+                        continue;
+                    };
+                    for (key, value) in values {
+                        if !key_matches(map.keys, key) {
+                            continue;
+                        }
+                        let mut tokens = container_tokens(container);
+                        tokens.push(name.as_str());
+                        tokens.push(map.nested);
+                        tokens.push(key.as_str());
+                        add_dynamic(Some(value), path, entered, &tokens, out);
+                    }
+                }
             }
         }
     }
 }
 
-fn probe_exact(
-    value: &Value,
-    path: &Path,
-    entered: &str,
-    pointers: &[&str],
-    out: &mut Vec<SourceRef>,
-) {
-    for pointer in pointers {
-        add_if_string(value, path, entered, pointer, out);
-    }
-}
-
-fn probe_immediate_children(
-    value: &Value,
-    container: &str,
-    leaves: &[&[&str]],
-    path: &Path,
-    entered: &str,
-    out: &mut Vec<SourceRef>,
-) {
-    let Some(entries) = value.pointer(container).and_then(Value::as_object) else {
-        return;
-    };
-    for (name, entry) in entries {
-        let Some(entry) = entry.as_object() else {
-            continue;
-        };
-        for leaf in leaves {
-            let mut tokens = container_tokens(container);
-            tokens.push(name.as_str());
-            tokens.extend_from_slice(leaf);
-            let mut selected = None;
-            for (index, token) in leaf.iter().enumerate() {
-                selected = if index == 0 {
-                    entry.get(token)
-                } else {
-                    selected.and_then(|value: &Value| value.get(token))
-                };
-            }
-            add_dynamic(selected, path, entered, &tokens, out);
+fn key_matches(keys: KeyMatch, name: &str) -> bool {
+    match keys {
+        KeyMatch::Any => true,
+        KeyMatch::Exact(names) => names.contains(&name),
+        KeyMatch::AsciiCaseInsensitive(names) => {
+            names.iter().any(|key| name.eq_ignore_ascii_case(key))
         }
-    }
-}
-
-fn probe_immediate_string_map(
-    value: &Value,
-    container: &str,
-    path: &Path,
-    entered: &str,
-    out: &mut Vec<SourceRef>,
-) {
-    let Some(entries) = value.pointer(container).and_then(Value::as_object) else {
-        return;
-    };
-    for (name, value) in entries {
-        let mut tokens = container_tokens(container);
-        tokens.push(name.as_str());
-        add_dynamic(Some(value), path, entered, &tokens, out);
     }
 }
 
@@ -600,73 +705,6 @@ fn add_source(path: &Path, entered: &str, pointer: String, out: &mut Vec<SourceR
         path: path.to_path_buf(),
         pointer,
     });
-}
-
-fn inspect_at<F>(found: &mut Found, path: &Path, home: Option<&Path>, default: bool, discover: F)
-where
-    F: FnOnce(&Value, &Path, &str, &mut Vec<SourceRef>),
-{
-    let entered = if default {
-        home_entry(home, path)
-    } else {
-        path.to_str().map(str::to_string)
-    };
-    inspect(found, path, entered, discover);
-}
-
-fn inspect<F>(found: &mut Found, path: &Path, entered: Option<String>, discover: F)
-where
-    F: FnOnce(&Value, &Path, &str, &mut Vec<SourceRef>),
-{
-    let Some(entered) = entered else {
-        unavailable(found, path, "its path is not valid UTF-8");
-        return;
-    };
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
-    }
-    let mut file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
-    };
-    match file.metadata() {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
-    }
-    let mut bytes = Vec::new();
-    match file.read_to_end(&mut bytes) {
-        Ok(_) => {}
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
-    }
-    let text = match String::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(_) => {
-            unavailable(found, path, "it is not valid UTF-8");
-            return;
-        }
-    };
-    match json::parse(&text) {
-        Ok(value) => discover(&value, path, &entered, &mut found.sources),
-        Err(_) => unavailable(found, path, "it is malformed JSON"),
-    }
 }
 
 fn unavailable(found: &mut Found, path: &Path, reason: &'static str) {
@@ -803,12 +841,6 @@ mod tests {
             .collect()
     }
 
-    fn machine_pointers(tree: &Tree) -> Vec<String> {
-        let home = tree.0.join("home");
-        let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
-        pointers(&machine(&environment, Some(&home), &tree.0))
-    }
-
     fn assert_found_is_canary_free(found: &Found, canary: &Canary) {
         let source_metadata = format!("{:?}", found.sources);
         assert_canary_absent(
@@ -844,13 +876,6 @@ mod tests {
     }
 
     #[test]
-    fn lowercase_hash_names_are_pinned() {
-        assert!(is_hex64(&"a".repeat(64)));
-        assert!(!is_hex64(&"A".repeat(64)));
-        assert!(!is_hex64(&"a".repeat(63)));
-    }
-
-    #[test]
     fn explicit_overrides_are_literal_normalized_paths() {
         assert_eq!(
             explicit_path("~/../stores", Path::new("/project")),
@@ -881,606 +906,87 @@ mod tests {
     }
 
     #[test]
-    fn codex_probes_each_bounded_credential_field_independently() {
-        let tree = Tree::new();
-        tree.write("home/.codex/auth.json", r#"{"OPENAI_API_KEY":"a","tokens":{"access_token":"b"},"agent_identity":{"agent_private_key":"c"},"ignored":"d"}"#);
-        tree.write(
-            "home/.codex/.credentials.json",
+    fn probes_are_bounded_and_accept_only_non_empty_strings() {
+        let value = json::parse(
             r#"{
-                "valid":{"server_name":"server","server_url":"https://example.test","client_id":"client","access_token":"d","refresh_token":"e","metadata":{"ignored":true}},
-                "without_refresh":{"server_name":"server","server_url":"https://example.test","client_id":"client","access_token":"f"},
-                "null_refresh":{"server_name":"server","server_url":"https://example.test","client_id":"client","access_token":"g","refresh_token":null},
-                "incomplete":{"server_name":"server","access_token":"h"},
-                "wrong_type":{"server_name":"server","server_url":"https://example.test","client_id":7,"access_token":"i"},
-                "bad_refresh":{"server_name":"server","server_url":"https://example.test","client_id":"client","access_token":"j","refresh_token":7}
+                "plain":"one",
+                "providers":{"good":{"key":"two"},"bad":{"key":7},"*":{"key":"ignored"},"":{"key":"ignored"}},
+                "tokens":{"good":"three","empty":"","number":4},
+                "servers":{"a~b/srv":{"headers":{"Authorization":"four","Cookie":"ignored"},"env":{"TOKEN":"five","OTHER":"ignored"}}}
             }"#,
-        );
-        let home = tree.0.join("home");
-        let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
-        let found = machine(&environment, Some(&home), &tree.0);
-        let pointers = pointers(&found);
-        for expected in [
-            "/OPENAI_API_KEY",
-            "/tokens/access_token",
-            "/agent_identity/agent_private_key",
-            "/valid/access_token",
-            "/valid/refresh_token",
-            "/without_refresh/access_token",
-            "/null_refresh/access_token",
-            "/incomplete/access_token",
-            "/wrong_type/access_token",
-            "/bad_refresh/access_token",
-        ] {
-            assert!(
-                pointers.iter().any(|pointer| pointer == expected),
-                "missing {expected}: {pointers:?}"
-            );
-        }
-        let rejected = "/ignored";
-        assert!(
-            !pointers.iter().any(|pointer| pointer == rejected),
-            "accepted {rejected}"
-        );
-        assert!(found.notices.is_empty());
-    }
+        )
+        .expect("probe document");
+        let mut sources = Vec::new();
+        let path = Path::new("credentials.json");
+        let entered = "credentials.json";
 
-    #[test]
-    fn opencode_auth_probes_direct_fields_without_schema_gating() {
-        let tree = Tree::new();
-        tree.write(
-            "home/.local/share/opencode/auth.json",
-            r#"{
-                "api":{"type":"api","key":"api-canary","metadata":{"region":"test"},"nearbySecret":"ignored"},
-                "oauth":{"type":"oauth","refresh":"refresh-canary","access":"access-canary","expires":0,"accountId":"account","enterpriseUrl":"https://example.test","token":"ignored"},
-                "wellknown":{"type":"wellknown","key":"identifier","token":"token-canary","access":"ignored"},
-                "incomplete_api":{"type":"api"},
-                "empty_api":{"type":"api","key":""},
-                "incomplete_oauth":{"type":"oauth","refresh":"refresh-canary","access":"access-canary"},
-                "incomplete_wellknown":{"type":"wellknown","token":"token-canary"},
-                "wrong_metadata":{"type":"api","key":"api-canary","metadata":{"region":7}},
-                "wrong_expires":{"type":"oauth","refresh":"refresh-canary","access":"access-canary","expires":-1},
-                "wrong_optional":{"type":"oauth","refresh":"refresh-canary","access":"access-canary","expires":1,"accountId":7},
-                "unknown":{"type":"future","key":"ignored","token":"ignored"}
-            }"#,
+        apply_probe(
+            &Probe::Exact {
+                pointers: &["/plain"],
+                rule: Rule::CodexPrimaryCredentials,
+            },
+            &value,
+            path,
+            entered,
+            &mut sources,
         );
+        apply_probe(
+            &Probe::ImmediateChildren {
+                container: "/providers",
+                leaves: &[&["key"]],
+                rule: Rule::OpenCodeProviderCredentials,
+            },
+            &value,
+            path,
+            entered,
+            &mut sources,
+        );
+        apply_probe(
+            &Probe::Map {
+                container: "/tokens",
+                keys: KeyMatch::Any,
+                rule: Rule::CopilotTokenConfiguration,
+            },
+            &value,
+            path,
+            entered,
+            &mut sources,
+        );
+        apply_probe(
+            &Probe::NestedMaps {
+                container: "/servers",
+                maps: &[
+                    MapSpec {
+                        nested: "headers",
+                        keys: MCP_HEADER_KEYS,
+                    },
+                    MapSpec {
+                        nested: "env",
+                        keys: MCP_ENV_KEYS,
+                    },
+                ],
+                rule: Rule::ClaudeMcpServerCredentials,
+            },
+            &value,
+            path,
+            entered,
+            &mut sources,
+        );
+
         assert_eq!(
-            machine_pointers(&tree),
+            pointers(&Found {
+                sources,
+                rules: HashMap::new(),
+                notices: Vec::new(),
+            }),
             vec![
-                "/api/key",
-                "/oauth/token",
-                "/oauth/access",
-                "/oauth/refresh",
-                "/wellknown/key",
-                "/wellknown/token",
-                "/wellknown/access",
-                "/incomplete_oauth/access",
-                "/incomplete_oauth/refresh",
-                "/incomplete_wellknown/token",
-                "/wrong_metadata/key",
-                "/wrong_expires/access",
-                "/wrong_expires/refresh",
-                "/wrong_optional/access",
-                "/wrong_optional/refresh",
-                "/unknown/key",
-                "/unknown/token",
+                "/plain",
+                "/providers/good/key",
+                "/tokens/good",
+                "/servers/a~0b~1srv/headers/Authorization",
+                "/servers/a~0b~1srv/env/TOKEN",
             ]
         );
-    }
-
-    #[test]
-    fn opencode_auth_stays_bounded_and_ignores_unlisted_fields() {
-        let tree = Tree::new();
-        tree.write(
-            "home/.local/share/opencode/auth.json",
-            r#"{
-                "oauth":{"type":"oauth","refresh":"","access":"","expires":12,"extraToken":"ignored"},
-                "wellknown":{"type":"wellknown","key":"","token":"","secret":"ignored"},
-                "unknown":{"type":"future","nested":{"key":"ignored"}}
-            }"#,
-        );
-        assert!(machine_pointers(&tree).is_empty());
-    }
-
-    #[test]
-    fn opencode_mcp_probes_each_server_entry_independently() {
-        let tree = Tree::new();
-        let path = "home/.local/share/opencode/mcp-auth.json";
-        tree.write(
-            path,
-            r#"{
-                "a~b/srv":{"tokens":{"accessToken":"access-canary","refreshToken":"refresh-canary","nearby":"ignored"},"clientInfo":{"clientId":"client","clientSecret":"secret-canary","nearby":"ignored"},"codeVerifier":"verifier-canary","oauthState":"state-is-not-a-credential","serverUrl":"https://example.test","accessToken":"ignored"},
-                "optional":{"unknown":{"clientSecret":"ignored"}}
-            }"#,
-        );
-        assert_eq!(
-            machine_pointers(&tree),
-            vec![
-                "/a~0b~1srv/tokens/accessToken",
-                "/a~0b~1srv/tokens/refreshToken",
-                "/a~0b~1srv/clientInfo/clientSecret",
-                "/a~0b~1srv/codeVerifier",
-            ]
-        );
-
-        tree.write(
-            path,
-            r#"{"valid":{"tokens":{"accessToken":"access-canary"}},"incomplete":{"tokens":{"refreshToken":"refresh-canary"}}}"#,
-        );
-        assert_eq!(
-            machine_pointers(&tree),
-            vec![
-                "/valid/tokens/accessToken",
-                "/incomplete/tokens/refreshToken"
-            ]
-        );
-
-        tree.write(
-            path,
-            r#"{"valid":{"tokens":{"accessToken":"access-canary"}},"wrong":{"clientInfo":{"clientId":7}}}"#,
-        );
-        assert_eq!(machine_pointers(&tree), vec!["/valid/tokens/accessToken"]);
-
-        tree.write(
-            path,
-            r#"{"no-match":{"oauthState":"state","serverUrl":"https://example.test","unknown":{"accessToken":"ignored"}}}"#,
-        );
-        assert!(machine_pointers(&tree).is_empty());
-
-        tree.write(path, r#"[{"tokens":{"accessToken":"access-canary"}}]"#);
-        assert!(machine_pointers(&tree).is_empty());
-    }
-
-    #[test]
-    fn copilot_probes_bounded_token_containers_and_hashed_files() {
-        let tree = Tree::new();
-        tree.write(
-            "home/.copilot/config.json",
-            r#"{"copilotTokens":{"github.com":"n"},"token":"o"}"#,
-        );
-        let hash = "a".repeat(64);
-        tree.write(
-            &format!("home/.copilot/mcp-oauth-config/{hash}.tokens.json"),
-            r#"{"access_token":"p","unknown":"q"}"#,
-        );
-        tree.write(
-            "home/.copilot/mcp-oauth-config/not-a-hash.tokens.json",
-            r#"{"access_token":"rejected"}"#,
-        );
-        let home = tree.0.join("home");
-        let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
-        assert_eq!(
-            pointers(&machine(&environment, Some(&home), &tree.0)),
-            vec!["/copilotTokens/github.com", "/access_token"]
-        );
-    }
-
-    #[test]
-    fn copilot_comment_bearing_config_is_inspected_as_json5() {
-        let tree = Tree::new();
-        tree.write(
-            "home/.copilot/config.json",
-            r#"{
-                // Copilot CLI writes this configuration with comments.
-                copilotTokens: {
-                    'github.com': 'token-canary',
-                },
-            }"#,
-        );
-
-        let home = tree.0.join("home");
-        let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
-        let found = machine(&environment, Some(&home), &tree.0);
-
-        assert_eq!(pointers(&found), vec!["/copilotTokens/github.com"]);
-        assert!(found.notices.is_empty());
-    }
-
-    #[test]
-    fn copilot_mcp_token_fields_are_independent() {
-        let tree = Tree::new();
-        let hash = "b".repeat(64);
-        let path = format!("home/.copilot/mcp-oauth-config/{hash}.tokens.json");
-        tree.write(
-            &path,
-            r#"{"access_token":"access-canary","refresh_token":"refresh-canary","id_token":"id-canary","nearby_secret":"ignored"}"#,
-        );
-        assert_eq!(
-            machine_pointers(&tree),
-            vec!["/access_token", "/refresh_token", "/id_token"]
-        );
-
-        tree.write(&path, r#"{"refresh_token":"refresh-canary"}"#);
-        assert_eq!(machine_pointers(&tree), vec!["/refresh_token"]);
-
-        tree.write(
-            &path,
-            r#"{"access_token":"access-canary","refresh_token":7}"#,
-        );
-        assert_eq!(machine_pointers(&tree), vec!["/access_token"]);
-
-        tree.write(
-            &path,
-            r#"{"access_token":"","refresh_token":"","id_token":"","token":"ignored"}"#,
-        );
-        assert!(machine_pointers(&tree).is_empty());
-
-        tree.write(&path, r#"["access-canary"]"#);
-        assert!(machine_pointers(&tree).is_empty());
-    }
-
-    #[test]
-    fn copilot_mcp_client_secret_does_not_require_client_id() {
-        let tree = Tree::new();
-        let hash = "c".repeat(64);
-        let path = format!("home/.copilot/mcp-oauth-config/{hash}.json");
-        tree.write(
-            &path,
-            r#"{"client_id":"client-canary","client_secret":"secret-canary","access_token":"ignored"}"#,
-        );
-        assert_eq!(machine_pointers(&tree), vec!["/client_secret"]);
-
-        tree.write(&path, r#"{"client_secret":"secret-canary"}"#);
-        assert_eq!(machine_pointers(&tree), vec!["/client_secret"]);
-
-        tree.write(&path, r#"{"client_id":"client-canary","client_secret":7}"#);
-        assert!(machine_pointers(&tree).is_empty());
-
-        tree.write(
-            &path,
-            r#"{"client_id":"client-canary","nearby_secret":"ignored"}"#,
-        );
-        assert!(machine_pointers(&tree).is_empty());
-
-        tree.write(&path, r#"["client-canary"]"#);
-        assert!(machine_pointers(&tree).is_empty());
-    }
-
-    #[test]
-    fn claude_probes_bounded_primary_oauth_and_mcp_fields() {
-        let tree = Tree::new();
-        tree.write(
-            "home/.claude/.credentials.json",
-            r#"{"claudeAiOauth":{"accessToken":"r"},"mcpOAuth":{"srv":{"clientSecret":"s"}}}"#,
-        );
-        tree.write(
-            "home/.claude/settings.json",
-            r#"{"env":{"ANTHROPIC_API_KEY":"t","RANDOM_TOKEN":"u"}}"#,
-        );
-        tree.write(
-            "home/.claude.json",
-            r#"{"mcpOAuthClientConfig":{"srv":{"clientSecret":"v"}}}"#,
-        );
-        let environment = Environment::from_pairs([
-            ("HOME", tree.0.join("home").to_string_lossy().into_owned()),
-            ("OPENCODE_AUTH_CONTENT", "whole".to_string()),
-        ]);
-        let found = machine(&environment, Some(&tree.0.join("home")), &tree.0);
-        let pointers = pointers(&found);
-        for expected in [
-            "/env/ANTHROPIC_API_KEY",
-            "/mcpOAuthClientConfig/srv/clientSecret",
-            "env:OPENCODE_AUTH_CONTENT",
-        ] {
-            assert!(
-                pointers.iter().any(|pointer| pointer == expected),
-                "missing {expected}: {pointers:?}"
-            );
-        }
-        for expected in ["/claudeAiOauth/accessToken", "/mcpOAuth/srv/clientSecret"] {
-            assert!(
-                pointers.iter().any(|pointer| pointer == expected),
-                "missing {expected}: {pointers:?}"
-            );
-        }
-        assert!(
-            !pointers
-                .iter()
-                .any(|pointer| pointer == "/env/RANDOM_TOKEN")
-        );
-        assert!(found.notices.is_empty());
-    }
-
-    #[test]
-    fn unrepresentable_dynamic_pointer_tokens_are_skipped_without_panicking() {
-        let tree = Tree::new();
-        tree.write(
-            "home/.copilot/config.json",
-            r#"{"copilotTokens":{"*":"value","":"value"}}"#,
-        );
-        tree.write(
-            "home/.local/share/opencode/auth.json",
-            r#"{"":{"type":"api","key":"value"}}"#,
-        );
-        let home = tree.0.join("home");
-        let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
-        let found = machine(&environment, Some(&home), &tree.0);
-        assert!(found.sources.is_empty());
-        assert!(found.notices.is_empty());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn codex_filesystem_matrix_covers_primary_mcp_override_and_failure_boundaries() {
-        let tree = Tree::new();
-        let canary = Canary::generate("CODEX_MATRIX");
-        let target = tree.write(
-            "targets/codex-auth.json",
-            &format!(
-                r#"{{"OPENAI_API_KEY":"{}","unrelated":"ignored"}}"#,
-                canary.value()
-            ),
-        );
-        std::fs::create_dir_all(tree.0.join("home/.codex")).expect("Codex root");
-        std::os::unix::fs::symlink(&target, tree.0.join("home/.codex/auth.json"))
-            .expect("Codex exact-file symlink");
-        tree.write(
-            "home/.codex/.credentials.json",
-            &format!(
-                r#"{{"server":{{"server_name":"server","server_url":"https://example.test","client_id":"client","access_token":"{}"}}}}"#,
-                canary.value()
-            ),
-        );
-        tree.write(
-            "home/unrelated/auth.json",
-            &format!(r#"{{"OPENAI_API_KEY":"{}"}}"#, canary.value()),
-        );
-        let (home, environment) = default_environment(&tree);
-        let found = machine(&environment, Some(&home), &tree.0);
-        assert_eq!(
-            pointers(&found),
-            vec!["/OPENAI_API_KEY", "/server/access_token"]
-        );
-        assert!(found.notices.is_empty());
-        assert_found_is_canary_free(&found, &canary);
-
-        std::fs::remove_file(tree.0.join("home/.codex/auth.json")).expect("remove symlink");
-        tree.write("home/.codex/auth.json", r#"{"ordinary":"value"}"#);
-        tree.write("home/.codex/.credentials.json", "{");
-        let found = machine(&environment, Some(&home), &tree.0);
-        assert!(found.sources.is_empty());
-        assert_eq!(found.notices.len(), 1);
-        assert_found_is_canary_free(&found, &canary);
-
-        tree.write(
-            "override/codex/auth.json",
-            &format!(r#"{{"tokens":{{"access_token":"{}"}}}}"#, canary.value()),
-        );
-        let override_environment = Environment::from_pairs([
-            ("HOME", home.to_string_lossy().into_owned()),
-            (
-                "CODEX_HOME",
-                tree.0.join("override/codex").to_string_lossy().into_owned(),
-            ),
-        ]);
-        let found = machine(&override_environment, Some(&home), &tree.0);
-        assert!(pointers(&found).contains(&"/tokens/access_token".to_string()));
-        assert_found_is_canary_free(&found, &canary);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn opencode_filesystem_matrix_covers_primary_mcp_override_and_failure_boundaries() {
-        let tree = Tree::new();
-        let canary = Canary::generate("OPENCODE_MATRIX");
-        let target = tree.write(
-            "targets/opencode-auth.json",
-            &format!(
-                r#"{{"provider":{{"type":"api","key":"{}","ignored":"nearby"}}}}"#,
-                canary.value()
-            ),
-        );
-        std::fs::create_dir_all(tree.0.join("home/.local/share/opencode")).expect("OpenCode root");
-        std::os::unix::fs::symlink(&target, tree.0.join("home/.local/share/opencode/auth.json"))
-            .expect("OpenCode exact-file symlink");
-        tree.write(
-            "home/.local/share/opencode/mcp-auth.json",
-            &format!(
-                r#"{{"server":{{"tokens":{{"accessToken":"{}"}}}}}}"#,
-                canary.value()
-            ),
-        );
-        tree.write(
-            "home/unrelated/mcp-auth.json",
-            &format!(
-                r#"{{"server":{{"tokens":{{"accessToken":"{}"}}}}}}"#,
-                canary.value()
-            ),
-        );
-        let (home, environment) = default_environment(&tree);
-        let found = machine(&environment, Some(&home), &tree.0);
-        assert_eq!(
-            pointers(&found),
-            vec!["/provider/key", "/server/tokens/accessToken"]
-        );
-        assert!(found.notices.is_empty());
-        assert_found_is_canary_free(&found, &canary);
-
-        std::fs::remove_file(tree.0.join("home/.local/share/opencode/auth.json"))
-            .expect("remove symlink");
-        tree.write(
-            "home/.local/share/opencode/auth.json",
-            r#"{"provider":{"type":"future","key":"value"}}"#,
-        );
-        tree.write("home/.local/share/opencode/mcp-auth.json", "{");
-        let found = machine(&environment, Some(&home), &tree.0);
-        assert_eq!(pointers(&found), vec!["/provider/key"]);
-        assert_eq!(found.notices.len(), 1);
-        assert_found_is_canary_free(&found, &canary);
-
-        tree.write(
-            "override/data/opencode/auth.json",
-            &format!(
-                r#"{{"provider":{{"type":"api","key":"{}"}}}}"#,
-                canary.value()
-            ),
-        );
-        let override_environment = Environment::from_pairs([
-            ("HOME", home.to_string_lossy().into_owned()),
-            (
-                "XDG_DATA_HOME",
-                tree.0.join("override/data").to_string_lossy().into_owned(),
-            ),
-        ]);
-        let found = machine(&override_environment, Some(&home), &tree.0);
-        assert!(pointers(&found).contains(&"/provider/key".to_string()));
-        assert_found_is_canary_free(&found, &canary);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn copilot_filesystem_matrix_covers_primary_mcp_override_and_failure_boundaries() {
-        let tree = Tree::new();
-        let canary = Canary::generate("COPILOT_MATRIX");
-        let target = tree.write(
-            "targets/copilot-config.json",
-            &format!(
-                r#"{{"copilotTokens":{{"github.com":"{}"}},"unrelated":"ignored"}}"#,
-                canary.value()
-            ),
-        );
-        std::fs::create_dir_all(tree.0.join("home/.copilot/mcp-oauth-config"))
-            .expect("Copilot MCP root");
-        std::os::unix::fs::symlink(&target, tree.0.join("home/.copilot/config.json"))
-            .expect("Copilot exact-file symlink");
-        let hash = "a".repeat(64);
-        tree.write(
-            &format!("home/.copilot/mcp-oauth-config/{hash}.tokens.json"),
-            &format!(
-                r#"{{"access_token":"{}","unrelated":"ignored"}}"#,
-                canary.value()
-            ),
-        );
-        tree.write(
-            "home/unrelated/config.json",
-            &format!(
-                r#"{{"copilotTokens":{{"github.com":"{}"}}}}"#,
-                canary.value()
-            ),
-        );
-        let (home, environment) = default_environment(&tree);
-        let found = machine(&environment, Some(&home), &tree.0);
-        assert_eq!(
-            pointers(&found),
-            vec!["/copilotTokens/github.com", "/access_token"]
-        );
-        assert!(found.notices.is_empty());
-        assert_found_is_canary_free(&found, &canary);
-
-        std::fs::remove_file(tree.0.join("home/.copilot/config.json")).expect("remove symlink");
-        tree.write(
-            "home/.copilot/config.json",
-            r#"{"copilotTokens":{"github.com":7}}"#,
-        );
-        tree.write(
-            &format!("home/.copilot/mcp-oauth-config/{hash}.tokens.json"),
-            "{",
-        );
-        let found = machine(&environment, Some(&home), &tree.0);
-        assert!(found.sources.is_empty());
-        assert_eq!(found.notices.len(), 1);
-        assert_found_is_canary_free(&found, &canary);
-
-        tree.write(
-            "override/copilot/config.json",
-            &format!(
-                r#"{{"copilotTokens":{{"github.com":"{}"}}}}"#,
-                canary.value()
-            ),
-        );
-        let override_environment = Environment::from_pairs([
-            ("HOME", home.to_string_lossy().into_owned()),
-            (
-                "COPILOT_HOME",
-                tree.0
-                    .join("override/copilot")
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
-        ]);
-        let found = machine(&override_environment, Some(&home), &tree.0);
-        assert!(pointers(&found).contains(&"/copilotTokens/github.com".to_string()));
-        assert_found_is_canary_free(&found, &canary);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn claude_filesystem_matrix_covers_platform_primary_mcp_override_and_failure_boundaries() {
-        let tree = Tree::new();
-        let canary = Canary::generate("CLAUDE_MATRIX");
-        let settings_target = tree.write(
-            "targets/claude-settings.json",
-            &format!(
-                r#"{{"env":{{"ANTHROPIC_API_KEY":"{}","UNRELATED":"ignored"}}}}"#,
-                canary.value()
-            ),
-        );
-        std::fs::create_dir_all(tree.0.join("home/.claude")).expect("Claude root");
-        std::os::unix::fs::symlink(&settings_target, tree.0.join("home/.claude/settings.json"))
-            .expect("Claude exact-file symlink");
-        tree.write(
-            "home/.claude/.credentials.json",
-            &format!(
-                r#"{{"claudeAiOauth":{{"accessToken":"{}"}}}}"#,
-                canary.value()
-            ),
-        );
-        tree.write(
-            "home/.claude.json",
-            &format!(
-                r#"{{"mcpOAuth":{{"server":{{"clientSecret":"{}"}}}},"unrelated":"ignored"}}"#,
-                canary.value()
-            ),
-        );
-        tree.write(
-            "home/unrelated/settings.json",
-            &format!(r#"{{"env":{{"ANTHROPIC_API_KEY":"{}"}}}}"#, canary.value()),
-        );
-        let (home, environment) = default_environment(&tree);
-        let found = machine(&environment, Some(&home), &tree.0);
-        let found_pointers = pointers(&found);
-        assert!(found_pointers.contains(&"/env/ANTHROPIC_API_KEY".to_string()));
-        assert!(found_pointers.contains(&"/mcpOAuth/server/clientSecret".to_string()));
-        #[cfg(not(target_os = "macos"))]
-        assert!(found_pointers.contains(&"/claudeAiOauth/accessToken".to_string()));
-        #[cfg(target_os = "macos")]
-        assert!(!found_pointers.contains(&"/claudeAiOauth/accessToken".to_string()));
-        assert!(found.notices.is_empty());
-        assert_found_is_canary_free(&found, &canary);
-
-        std::fs::remove_file(tree.0.join("home/.claude/settings.json")).expect("remove symlink");
-        tree.write(
-            "home/.claude/settings.json",
-            r#"{"env":{"UNRELATED":"value"}}"#,
-        );
-        tree.write("home/.claude.json", "{");
-        let found = machine(&environment, Some(&home), &tree.0);
-        #[cfg(not(target_os = "macos"))]
-        assert_eq!(pointers(&found), vec!["/claudeAiOauth/accessToken"]);
-        #[cfg(target_os = "macos")]
-        assert!(found.sources.is_empty());
-        assert_eq!(found.notices.len(), 1);
-        assert_found_is_canary_free(&found, &canary);
-
-        tree.write(
-            "override/claude/settings.json",
-            &format!(
-                r#"{{"env":{{"ANTHROPIC_AUTH_TOKEN":"{}"}}}}"#,
-                canary.value()
-            ),
-        );
-        let override_environment = Environment::from_pairs([
-            ("HOME", home.to_string_lossy().into_owned()),
-            (
-                "CLAUDE_CONFIG_DIR",
-                tree.0
-                    .join("override/claude")
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
-        ]);
-        let found = machine(&override_environment, Some(&home), &tree.0);
-        assert!(pointers(&found).contains(&"/env/ANTHROPIC_AUTH_TOKEN".to_string()));
-        assert_found_is_canary_free(&found, &canary);
     }
 
     #[test]

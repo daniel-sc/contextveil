@@ -391,7 +391,8 @@ without validating a complete vendor schema. A relevant bounded field can sugges
 an inactive, stale, or non-secret string. Every applicable rule runs independently
 of adapters, and new automatic suggestions are selected by default unless a
 collision is found. Defaults and valid override locations are both inspected;
-exact references are persisted only after user review.
+exact references are persisted only after user review. Claude primary plaintext
+credentials are not inspected on macOS because they are keychain-backed.
 
 **Impact:** Host changes can move credentials to unknown locations or introduce
 new field names. Unknown fields, raw sidecars, OS keychains, and credential
