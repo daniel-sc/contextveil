@@ -372,13 +372,13 @@ Characters outside ASCII are preserved for display but do not match the V1
 vocabulary. Vocabulary changes are observable setup behavior and MUST update
 this requirement and its fixtures.
 
-**SET-007** Selection defaults MUST apply independently to each source. Every
-wholly new automatically admitted Candidate MUST initially be selected.
-Collision analysis finding another occurrence is the only reason setup MUST
-automatically unselect an otherwise valid new automatic Candidate. Candidates
-with collisions MUST remain visible. Existing enrollment and an explicitly
-added manual Candidate MUST remain selected despite collisions, including when
-an equal-value visual group contains members with different defaults.
+**SET-007** Selection defaults MUST apply to each Candidate Group or standalone
+source. Every wholly new automatically admitted enrollment unit MUST initially
+be selected. Collision analysis finding another occurrence is the only reason
+setup MUST automatically unselect an otherwise valid wholly new automatic unit.
+Candidates with collisions MUST remain visible. A unit containing existing
+enrollment or an explicitly added manual Candidate MUST remain selected despite
+collisions.
 
 **SET-008** The user is authoritative. Setup MUST allow enrollment after a
 collision warning and MUST NOT impose a minimum runtime value length.
@@ -413,7 +413,7 @@ MUST count non-overlapping exact byte occurrences from left to right, including
 occurrences in binary or non-UTF-8 regular files.
 
 Alias-file discovery for these exclusions MUST consider resolvable sources and
-candidates from both enrollment phases even though visual Candidate Groups
+candidates from both enrollment phases even though Candidate Groups
 remain phase-local. Exclusions MUST derive from all aliases known during
 discovery, not only the references currently selected in the setup UI.
 
@@ -439,20 +439,27 @@ managed state where possible; already completed integration actions remain.
 Setup MUST report any rollback failure, preserve unrelated host config, skip
 remaining actions, and return nonzero.
 
-**SET-015** Every visible source MUST have a numeric toggle. Enrollment phases
-MUST offer select-all, select-none, manual environment, dotenv key, wildcard,
-and JSON additions, save, skip, and quit. Integration phases MUST offer apply,
-skip, and quit. Row-specific toggling and bulk selection MUST be omitted when
-there are no rows. Every interaction that continues a selection loop, including
-invalid, declined, duplicate, and otherwise no-op interactions, MUST rerender
-the complete current screen and available actions.
+**SET-015** Every visible Candidate Group or standalone source MUST have a
+numeric toggle. Enrollment phases MUST offer select-all, select-none, manual
+environment, dotenv key, wildcard, and JSON additions, save, skip, and quit.
+Integration phases MUST offer apply, skip, and quit. Row-specific toggling and
+bulk selection MUST be omitted when there are no rows. Every interaction that
+continues a selection loop, including invalid, declined, duplicate, and
+otherwise no-op interactions, MUST rerender the complete current screen and
+available actions.
 
-**SET-016** Within one enrollment phase, setup MAY represent candidate source
-references with equal current resolved values as one visual Candidate Group.
-The group MUST have no selection state. Every represented source MUST retain an
-independent marker and numeric toggle, and toggling one member MUST NOT alter a
-sibling. Existing selection and automatic, manual, and collision defaults apply
-per source. Skip remains the exact no-change path.
+**SET-016** Within one enrollment phase, setup MUST represent candidate source
+references with equal current resolved values as one Candidate Group. The group
+MUST have one selection marker and numeric toggle, and toggling it MUST select or
+deselect every represented source together. If any represented source was
+enrolled at the start of the phase, the group MUST initially be selected. A
+newly discovered equal-value alias MUST join that selected group and MUST be
+persisted on `Save`. An explicitly added resolvable alias MUST likewise select
+its group. If previously equal enrolled aliases later resolve to different
+values, they MUST appear as separate selected enrollment units. Collision
+defaults MUST NOT deselect a group containing an enrolled or explicitly added
+source. `Skip` remains the exact no-change path and MUST NOT persist newly
+discovered aliases or any selection changes.
 
 Groups MUST NOT combine global and project references. Manual resolvable sources
 MUST join an equal-value group immediately. Unresolved sources and dotenv
@@ -493,13 +500,14 @@ group members already displayed in that loop. A resolvable manual alias still
 joins its equal-value group immediately, but its displayed insertion position
 may remain until the phase ends.
 
-On `Save`, setup MUST persist all selected references in Source Identity order,
-including previously enrolled references and references added manually. This
-normalization occurs even when enrollment membership did not change and may
-therefore change the canonical alias selected later under `REG-002`. `Skip`
+On `Save`, setup MUST persist every represented reference from each selected
+Candidate Group and every selected standalone reference in Source Identity
+order, including previously enrolled references and references added manually.
+This normalization occurs even when enrollment membership did not change and
+may therefore change the canonical alias selected later under `REG-002`. `Skip`
 remains the exact no-write, no-change path.
 
-Each visual Candidate Group SHOULD show one masked value preview and a sanitized
+Each Candidate Group SHOULD show one masked value preview and a sanitized
 description of every represented source. It MUST NOT show or derive a complete
 value or deterministic value fingerprint. It MUST also show the display name of
 each Known Source Rule that admitted at least one represented source, deduplicated

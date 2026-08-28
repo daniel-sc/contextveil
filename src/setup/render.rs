@@ -11,45 +11,37 @@ pub(super) fn enrollment(items: &[Item]) -> String {
         return lines.join("\n");
     }
 
-    let mut row = 1;
-    for item in items.iter().filter(|item| item.visible()) {
+    for (row, item) in items.iter().filter(|item| item.visible()).enumerate() {
         let members: Vec<_> = item.visible_members().collect();
+        let marker = match (&item.problem, item.selected) {
+            (Some(_), _) => "!",
+            (None, true) => "x",
+            (None, false) => " ",
+        };
+        let enrolled = if item.enrolled { " (enrolled)" } else { "" };
+        let description = if members.len() == 1 {
+            describe(&members[0].source)
+        } else {
+            format!("Same current value ({} sources)", members.len())
+        };
+        lines.push(format!(
+            "  {:>2} [{marker}] {description}{enrolled}",
+            row + 1
+        ));
+
         if members.len() > 1 {
-            lines.push("  Same current value".to_string());
-            if !item.detail.is_empty() {
-                lines.push(format!("        {}", item.detail));
+            for member in members {
+                let enrolled = if member.enrolled { " (enrolled)" } else { "" };
+                lines.push(format!("        - {}{enrolled}", describe(&member.source)));
             }
-            let rules = item.rules();
-            if !rules.is_empty() {
-                let names: Vec<_> = rules.iter().map(|rule| rule.display()).collect();
-                lines.push(format!("        rules: {}", names.join(", ")));
-            }
-            lines.push(String::new());
         }
-
-        for member in members {
-            let marker = match (&item.problem, member.selected) {
-                (Some(_), _) => "!",
-                (None, true) => "x",
-                (None, false) => " ",
-            };
-            let enrolled = if member.enrolled { " (enrolled)" } else { "" };
-            lines.push(format!(
-                "  {row:>2} [{marker}] {}{enrolled}",
-                describe(&member.source)
-            ));
-            row += 1;
+        if !item.detail.is_empty() {
+            lines.push(format!("        {}", item.detail));
         }
-
-        if item.visible_member_count() == 1 {
-            if !item.detail.is_empty() {
-                lines.push(format!("        {}", item.detail));
-            }
-            let rules = item.rules();
-            if !rules.is_empty() {
-                let names: Vec<_> = rules.iter().map(|rule| rule.display()).collect();
-                lines.push(format!("        rules: {}", names.join(", ")));
-            }
+        let rules = item.rules();
+        if !rules.is_empty() {
+            let names: Vec<_> = rules.iter().map(|rule| rule.display()).collect();
+            lines.push(format!("        rules: {}", names.join(", ")));
         }
         if let Some(collisions) = &item.collisions {
             lines.push(format!("        collision: {}", collisions.describe()));
@@ -89,20 +81,22 @@ mod tests {
     use crate::setup::known_source::Rule;
     use crate::source::SourceRef;
 
-    fn member(source: SourceRef, enrolled: bool, selected: bool, rules: Vec<Rule>) -> Member {
+    fn member(source: SourceRef, enrolled: bool, rules: Vec<Rule>) -> Member {
         Member {
             source,
             rules,
             enrolled,
-            selected,
-            selection_touched: false,
             suppressed: false,
         }
     }
 
-    fn item(members: Vec<Member>, detail: &str) -> Item {
+    fn item(members: Vec<Member>, detail: &str, selected: bool) -> Item {
+        let enrolled = members.iter().any(|member| member.enrolled);
         Item {
             members,
+            enrolled,
+            selected,
+            selection_touched: false,
             detail: detail.to_string(),
             problem: None,
             value: Some("SSCANARY-RENDER-MUST-NOT-APPEAR".to_string()),
@@ -121,7 +115,6 @@ mod tests {
                         name: "PRIMARY_TOKEN".to_string(),
                     },
                     true,
-                    true,
                     vec![Rule::SecretLikeName],
                 ),
                 member(
@@ -131,11 +124,11 @@ mod tests {
                         key: "SECONDARY_TOKEN".to_string(),
                     },
                     false,
-                    false,
                     vec![Rule::SecretLikeName, Rule::CredentialBearingUrl],
                 ),
             ],
             "ab********yz (20 characters)",
+            true,
         );
         grouped.collisions = Some(Collisions {
             total: 1,
@@ -149,9 +142,11 @@ mod tests {
                     pointer: "/token".to_string(),
                 },
                 true,
-                true,
                 Vec::new(),
             )],
+            enrolled: true,
+            selected: true,
+            selection_touched: false,
             detail: "unavailable: malformed JSON source".to_string(),
             problem: Some("malformed JSON source".to_string()),
             value: None,
@@ -166,9 +161,11 @@ mod tests {
                     path: PathBuf::from("/project/.env.shared"),
                 },
                 false,
-                true,
                 Vec::new(),
             )],
+            enrolled: false,
+            selected: true,
+            selection_touched: true,
             detail: "3 current key(s)".to_string(),
             problem: None,
             value: None,
@@ -180,7 +177,7 @@ mod tests {
         let actual = format!(
             "Global sources (this machine)\n{}\n{}\n\nProject sources (this project)\n{}\n{}\n\nIntegrations\n   1 [x] Claude Code (PRODUCTION) - detected, installed\n   2 [ ] Codex CLI (EXPERIMENTAL) - not detected, not installed\nChoose an action:\n  [1 3]   toggle row(s)\n  [Enter] apply\n  [s]     skip\n  [q]     quit\n\nNo-row action state\n{}\n{}\n",
             enrollment(&[grouped, unavailable, wildcard]),
-            enrollment_actions(4),
+            enrollment_actions(3),
             enrollment(&[]),
             enrollment_actions(0),
             enrollment(&[]),

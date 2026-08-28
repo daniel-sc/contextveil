@@ -568,7 +568,7 @@ fn equal_url_candidates_use_the_normal_candidate_group() {
 }
 
 #[test]
-fn equal_value_groups_have_independent_member_selection() {
+fn equal_value_group_toggle_applies_to_every_alias() {
     let canary = Canary::generate("GROUPED_ENV_TOKEN");
     let fixture = Fixture::new();
     let environment = fixture.environment(&[
@@ -576,15 +576,21 @@ fn equal_value_groups_have_independent_member_selection() {
         ("SECOND_API_SECRET", canary.value()),
     ]);
 
-    let (exit, transcript) = fixture.run("2\n\n\n\n", &environment);
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert_eq!(transcript.matches("Same current value").count(), 2);
-    assert_eq!(transcript.matches("secret-like source name").count(), 2);
+    assert_eq!(transcript.matches("Same current value").count(), 1);
+    assert_eq!(transcript.matches("secret-like source name").count(), 1);
     assert!(transcript.contains("env FIRST_API_TOKEN"));
     assert!(transcript.contains("env SECOND_API_SECRET"));
 
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("FIRST_API_TOKEN"));
+    assert!(global.contains("SECOND_API_SECRET"));
+
+    let (exit, transcript) = fixture.run("1\n\n\n\n", &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(!global.contains("FIRST_API_TOKEN"));
     assert!(!global.contains("SECOND_API_SECRET"));
     assert_canary_absent("grouped setup transcript", transcript.as_bytes(), &canary);
 }
@@ -643,7 +649,7 @@ fn equal_values_in_different_phases_remain_separate_choices() {
 }
 
 #[test]
-fn collision_defaults_apply_independently_within_a_visual_group() {
+fn an_enrolled_alias_keeps_its_colliding_group_selected() {
     let canary = Canary::generate("PARTIAL_GROUP_TOKEN");
     let fixture = Fixture::new();
     let original = "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"FIRST_TOKEN\"\n";
@@ -667,9 +673,8 @@ fn collision_defaults_apply_independently_within_a_visual_group() {
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("FIRST_TOKEN"));
-    assert!(!global.contains("SECOND_TOKEN"));
-    assert!(transcript.contains("[x] env FIRST_TOKEN (enrolled)"));
-    assert!(transcript.contains("[ ] env SECOND_TOKEN"));
+    assert!(global.contains("SECOND_TOKEN"));
+    assert!(transcript.contains("[x] Same current value (2 sources) (enrolled)"));
 }
 
 #[test]
@@ -891,7 +896,7 @@ fn resolvable_manual_sources_merge_into_an_existing_group() {
     );
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
-    assert!(!global.contains("AUTO_TOKEN"));
+    assert!(global.contains("AUTO_TOKEN"));
     assert!(global.contains("UNGATED_MANUAL"));
     assert!(project.contains("PRIVATE_VALUE"));
     assert!(project.contains("/credential"));

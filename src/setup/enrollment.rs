@@ -5,19 +5,21 @@ use crate::source::SourceRef;
 use super::collision::Collisions;
 use super::known_source::Rule;
 
-/// One independently selectable source row.
+/// One source represented by a selectable equal-value group.
 pub(super) struct Member {
     pub(super) source: SourceRef,
     pub(super) rules: Vec<Rule>,
     pub(super) enrolled: bool,
-    pub(super) selected: bool,
-    pub(super) selection_touched: bool,
     pub(super) suppressed: bool,
 }
 
-/// A presentation block. Equal-value members share presentation only.
+/// One enrollment choice. Equal-value members are enrolled together so future
+/// rotations of every alias remain protected.
 pub(super) struct Item {
     pub(super) members: Vec<Member>,
+    pub(super) enrolled: bool,
+    pub(super) selected: bool,
+    pub(super) selection_touched: bool,
     pub(super) detail: String,
     pub(super) problem: Option<String>,
     /// Secret-bearing grouping/collision state. Rendering must never inspect it.
@@ -33,7 +35,7 @@ impl Item {
     }
 
     pub(super) fn is_selected_wildcard(&self) -> bool {
-        self.is_wildcard() && self.members[0].selected
+        self.is_wildcard() && self.selected
     }
 
     pub(super) fn visible(&self) -> bool {
@@ -44,18 +46,12 @@ impl Item {
         self.members.iter().filter(|member| !member.suppressed)
     }
 
-    pub(super) fn visible_member_count(&self) -> usize {
-        self.visible_members().count()
-    }
-
     pub(super) fn any_enrolled(&self) -> bool {
-        self.members.iter().any(|member| member.enrolled)
+        self.enrolled
     }
 
     pub(super) fn any_selected(&self) -> bool {
-        self.members
-            .iter()
-            .any(|member| member.selected && !member.suppressed)
+        self.selected && self.visible()
     }
 
     pub(super) fn rules(&self) -> Vec<Rule> {

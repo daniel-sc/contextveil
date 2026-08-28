@@ -53,7 +53,7 @@ The core owns:
 - global and project registry composition;
 - environment, dotenv, and exact-pointer JSON source resolution using JSON5
   document grammar;
-- independent source enrollment state, visual equal-value grouping,
+- group-level equal-value enrollment state,
   deterministic Source Identity ordering, and collision analysis;
 - canonicalization of duplicate resolved values;
 - exact matching and placeholder selection;
@@ -149,8 +149,8 @@ The minimum conceptual types are:
   source reference;
 - `KnownSourceRule`: a maintained deterministic setup-time automatic
   candidate-admission rule, absent from runtime policy;
-- `CandidateGroup`: a presentation-only block of independently selectable
-  equal-value candidates from one enrollment scope;
+- `CandidateGroup`: one selectable enrollment unit containing equal-value
+  candidates from one enrollment scope;
 - `Registry`: ordered source references from one config scope;
 - `ResolvedSecret`: a non-empty UTF-8 value plus source identity and safe label;
 - `EffectiveRegistry`: project entries followed by global entries for canonical
