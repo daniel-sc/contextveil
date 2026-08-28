@@ -359,9 +359,10 @@ for reproducibility.
 - Every claimed covered path retains one generated-canary process or plugin
   boundary fixture that proves non-vacuous intervention and exhaustive absence.
 - Enrollment state and its local invariants live in `src/setup/enrollment.rs`,
-  pure enrollment and integration presentation in `src/setup/render.rs`, setup
-  orchestration and state transitions in `src/setup/mod.rs`, and line I/O in
-  `src/setup/ui.rs`; no generic UI framework or adapter trait is required.
+  pure enrollment presentation in `src/setup/render.rs`, integration presentation
+  beside its phase in `src/setup/integrations.rs`, setup orchestration and state
+  transitions in `src/setup/mod.rs`, and line I/O in `src/setup/ui.rs`; no generic
+  UI framework or adapter trait is required.
 - Unit and property tests cover registry and matcher invariants.
 - Filesystem tests use isolated homes/projects for config, discovery, setup, and
   permissions.
