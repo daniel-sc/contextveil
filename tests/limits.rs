@@ -7,7 +7,6 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
 
 use contextveil::testing::{Canary, assert_canary_absent};
 use serde_json::{Value, json};
@@ -48,7 +47,7 @@ impl Machine {
         .expect("write global config");
     }
 
-    fn run_hook(&self, payload: &str, variables: &[(&str, &str)]) -> (Output, Duration) {
+    fn run_hook(&self, payload: &str, variables: &[(&str, &str)]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_contextveil"));
         command
             .args(["hook", "claude"])
@@ -63,7 +62,6 @@ impl Machine {
             command.env(key, value);
         }
 
-        let started = Instant::now();
         let mut child = command.spawn().expect("the binary runs");
         child
             .stdin
@@ -71,8 +69,7 @@ impl Machine {
             .expect("stdin is piped")
             .write_all(payload.as_bytes())
             .expect("write the payload");
-        let output = child.wait_with_output().expect("the hook finishes");
-        (output, started.elapsed())
+        child.wait_with_output().expect("the hook finishes")
     }
 }
 
@@ -110,7 +107,7 @@ fn a_large_wildcard_dotenv_file_is_resolved_without_a_cap() {
         "tool_response": {"stdout": format!("token={}", canary.value())},
     })
     .to_string();
-    let (output, elapsed) = machine.run_hook(&payload, &[]);
+    let output = machine.run_hook(&payload, &[]);
 
     assert_eq!(output.status.code(), Some(0));
     assert_canary_absent("hook stdout", &output.stdout, &canary);
@@ -118,12 +115,6 @@ fn a_large_wildcard_dotenv_file_is_resolved_without_a_cap() {
     assert_eq!(
         response["hookSpecificOutput"]["updatedToolOutput"]["stdout"],
         json!("token=<SECRET:BIG_TOKEN>")
-    );
-    // `RUN-004`: the host allows five seconds. This records the observation
-    // rather than promising a maximum (`LIM-010`).
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "a 4 MiB dotenv file with ~{key} keys took {elapsed:?}"
     );
 }
 
@@ -141,7 +132,7 @@ fn a_deeply_nested_payload_cannot_exhaust_the_stack() {
         "\"x\"",
         "]".repeat(depth)
     );
-    let (output, _) = machine.run_hook(&payload, &[("TOKEN", "value")]);
+    let output = machine.run_hook(&payload, &[("TOKEN", "value")]);
 
     // Exit zero with valid protocol output, whatever the parser decided
     // (`CLI-007`, `RUN-006`).
@@ -174,7 +165,7 @@ fn a_deeply_nested_json_source_is_a_malfunction_not_a_stack_overflow() {
         "tool_response": {"stdout": "ordinary output"},
     })
     .to_string();
-    let (output, _) = machine.run_hook(&payload, &[]);
+    let output = machine.run_hook(&payload, &[]);
 
     assert_eq!(output.status.code(), Some(0));
     let response: Value = serde_json::from_slice(&output.stdout).expect("valid JSON warning");
@@ -196,7 +187,7 @@ fn a_moderately_nested_payload_is_still_redacted() {
         canary.value(),
         "]".repeat(depth)
     );
-    let (output, _) = machine.run_hook(&payload, &[("NESTED_TOKEN", canary.value())]);
+    let output = machine.run_hook(&payload, &[("NESTED_TOKEN", canary.value())]);
 
     assert_eq!(output.status.code(), Some(0));
     assert_canary_absent("hook stdout", &output.stdout, &canary);
@@ -205,9 +196,7 @@ fn a_moderately_nested_payload_is_still_redacted() {
 }
 
 #[test]
-fn many_enrolled_values_stay_inside_the_host_timeout() {
-    // The `RUN-005` benchmark measures this properly; this guards the wiring at
-    // a size a real machine can hit.
+fn many_enrolled_values_redact_a_large_payload() {
     let canary = Canary::generate("LAST_TOKEN");
     let machine = Machine::new();
 
@@ -239,12 +228,8 @@ fn many_enrolled_values_stay_inside_the_host_timeout() {
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .chain(std::iter::once(("LAST_TOKEN", canary.value())))
         .collect();
-    let (output, elapsed) = machine.run_hook(&payload, &borrowed);
+    let output = machine.run_hook(&payload, &borrowed);
 
     assert_eq!(output.status.code(), Some(0));
     assert_canary_absent("hook stdout", &output.stdout, &canary);
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "201 values over 512 KiB took {elapsed:?}"
-    );
 }

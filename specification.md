@@ -372,11 +372,13 @@ Characters outside ASCII are preserved for display but do not match the V1
 vocabulary. Vocabulary changes are observable setup behavior and MUST update
 this requirement and its fixtures.
 
-**SET-007** Every wholly new automatically admitted Candidate MUST initially be
-selected. Collision analysis finding another occurrence is the only reason setup
-MUST automatically unselect an otherwise valid new automatic Candidate.
-Candidates with collisions MUST remain visible. Existing enrollment and an
-explicitly added manual Candidate MUST remain selected despite collisions.
+**SET-007** Selection defaults MUST apply independently to each source. Every
+wholly new automatically admitted Candidate MUST initially be selected.
+Collision analysis finding another occurrence is the only reason setup MUST
+automatically unselect an otherwise valid new automatic Candidate. Candidates
+with collisions MUST remain visible. Existing enrollment and an explicitly
+added manual Candidate MUST remain selected despite collisions, including when
+an equal-value visual group contains members with different defaults.
 
 **SET-008** The user is authoritative. Setup MUST allow enrollment after a
 collision warning and MUST NOT impose a minimum runtime value length.
@@ -405,13 +407,13 @@ format.
 **SET-011** Collision analysis MUST search readable regular-file bytes under the
 current selected project root using the discovery exclusions. It MUST include
 ignored files, exclude every whole source file known to contribute an equal-value
-alias to the Candidate Group, not follow file or directory symlinks, and skip
+alias, not follow file or directory symlinks, and skip
 FIFOs, devices, sockets, and other special files. For each Candidate Group it
 MUST count non-overlapping exact byte occurrences from left to right, including
 occurrences in binary or non-UTF-8 regular files.
 
 Alias-file discovery for these exclusions MUST consider resolvable sources and
-candidates from both enrollment phases even though Candidate Groups themselves
+candidates from both enrollment phases even though visual Candidate Groups
 remain phase-local. Exclusions MUST derive from all aliases known during
 discovery, not only the references currently selected in the setup UI.
 
@@ -437,23 +439,20 @@ managed state where possible; already completed integration actions remain.
 Setup MUST report any rollback failure, preserve unrelated host config, skip
 remaining actions, and return nonzero.
 
-**SET-015** Each enrollment and integration phase MUST render a multiline action
-menu after its numbered rows. When rows exist, the menu MUST list numeric row
-toggling before the other actions using a simple whitespace-separated example,
-such as `[1 3]   toggle row(s)`. Enrollment menus MUST list select-all,
-select-none, manual environment, dotenv, and JSON source additions, save, skip,
-and quit as separate actions.
-Integration menus MUST list apply, skip, and quit as separate actions. When a
-phase has no rows, row-specific toggling and bulk-selection actions MUST be
-omitted. The menu MUST be rendered again after each action that returns to the
-selection loop.
+**SET-015** Every visible source MUST have a numeric toggle. Enrollment phases
+MUST offer select-all, select-none, manual environment, dotenv key, wildcard,
+and JSON additions, save, skip, and quit. Integration phases MUST offer apply,
+skip, and quit. Row-specific toggling and bulk selection MUST be omitted when
+there are no rows. Every interaction that continues a selection loop, including
+invalid, declined, duplicate, and otherwise no-op interactions, MUST rerender
+the complete current screen and available actions.
 
-**SET-016** Within one enrollment phase, setup MUST represent candidate source
-references with equal current resolved values as one Candidate Group. Selecting
-the group enrolls every represented reference; deselecting it removes every
-represented reference. If only some aliases were previously enrolled, the group
-MUST be selected and saving it MUST enroll all represented aliases. Skip remains
-the exact no-change path.
+**SET-016** Within one enrollment phase, setup MAY represent candidate source
+references with equal current resolved values as one visual Candidate Group.
+The group MUST have no selection state. Every represented source MUST retain an
+independent marker and numeric toggle, and toggling one member MUST NOT alter a
+sibling. Existing selection and automatic, manual, and collision defaults apply
+per source. Skip remains the exact no-change path.
 
 Groups MUST NOT combine global and project references. Manual resolvable sources
 MUST join an equal-value group immediately. Unresolved sources and dotenv
@@ -500,7 +499,7 @@ normalization occurs even when enrollment membership did not change and may
 therefore change the canonical alias selected later under `REG-002`. `Skip`
 remains the exact no-write, no-change path.
 
-Each Candidate Group MUST show one masked value preview and a sanitized
+Each visual Candidate Group SHOULD show one masked value preview and a sanitized
 description of every represented source. It MUST NOT show or derive a complete
 value or deterministic value fingerprint. It MUST also show the display name of
 each Known Source Rule that admitted at least one represented source, deduplicated
@@ -890,24 +889,43 @@ permissions, atomic writes, invalid-config preservation, repeat setup, and
 partial multi-phase failure. They MUST retain malformed-file, JSON Pointer, and
 secret-leak coverage.
 
-**TST-004** Every shipped adapter path MUST have protocol fixtures for clean,
-intervened, unresolved, malformed-input, diagnosed-malfunction, timeout mapping,
-and conflicting installation states where representable.
+**TST-004** Every shipped adapter path MUST have protocol decision fixtures for
+clean, intervened, unresolved, and explicitly unsupported behavior. Every
+covered path MUST retain one non-vacuous real boundary fixture. Malformed input,
+registry malfunction, project-root selection, host failure mapping, installation
+shape, timeout, conflicts, and diagnostics MUST be tested once at their owning
+layer rather than repeated through every layer.
 
-**TST-005** Tests MUST use generated canaries and assert that a matched canary is
-absent from adapter stdout, stderr, diagnostics, snapshots, and returned
-model-visible content after intervention.
+**TST-005** Every intervention boundary fixture MUST generate a canary, prove it
+entered the covered input, prove intervention occurred, and assert the canary
+and its unique token are absent from stdout, stderr, returned model-visible
+content, and progress or notification records where applicable. Dedicated leak
+tests MAY focus on setup persistence, diagnostics, logging, and telemetry rather
+than repeat adapter conformance.
 
-**TST-006** Fuzz targets MUST cover the matcher and untrusted JSON5 source,
-strict protocol JSON, TOML, and dotenv inputs. A bounded fuzz smoke task MUST run
-through mise.
+**TST-006** Fuzz targets MUST cover robustness of the matcher, sanitizer,
+untrusted JSON5 source, strict adapter protocol JSON, TOML, and dotenv inputs.
+Committed corpora MUST replay routinely with mutation disabled. Bounded mutation
+MUST run separately through mise.
 
 **TST-007** Routine CI MUST run formatting, linting with warnings denied, tests,
-and builds through mise on supported targets. Release checks MUST exercise built
-artifacts, checksums, clean installation, and upgrade behavior.
+and builds through mise on supported targets. Release checks MUST consume the
+exact package-job artifacts and exercise their checksums, clean installation,
+and upgrade behavior without rebuilding substitutes.
 
-**TST-008** Optional paid/networked tests MUST NOT gate routine CI. The manual
-Claude resume qualification in `REL-008` gates a release.
+**TST-008** Optional paid/networked tests MUST NOT gate routine CI; optional
+automation is permitted. Publication MUST remain gated by the human Claude
+resume qualification in `REL-008`.
+
+## Setup Presentation Baseline
+
+The following presentation is the maintained V1 design baseline. Equivalent
+presentation changes are permitted when they preserve the normative product and
+UX requirements above. One broad rendering snapshot and manual review maintain
+this baseline. Exact wording, spacing, indentation, action order, one-action-per-
+line layout, existing-before-new tiers, least-identity group placement,
+rule-label order, headings, statuses, warnings, collision treatment, unavailable
+treatment, and integration-row presentation are non-normative.
 
 ## 19. Examples
 

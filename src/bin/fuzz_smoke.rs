@@ -1,8 +1,8 @@
 //! Bounded fuzz smoke run over every untrusted input surface (`TST-006`).
 //!
-//! It replays the committed regression corpus first, then mutates seed inputs with
-//! a deterministic generator until its iteration or time budget runs out. A target
-//! that panics fails the run and its input is written to
+//! Regression mode replays the committed corpus. Smoke mode mutates seed inputs
+//! with a deterministic generator until its iteration or time budget runs out. A
+//! target that panics during mutation fails the run and its input is written to
 //! `fuzz/regressions/<target>/` so it can be committed as a permanent seed.
 //!
 //! Determinism is deliberate: the same command reproduces the same inputs, so a
@@ -98,14 +98,24 @@ const SEEDS: [(&str, &[&str]); 9] = [
 ];
 
 fn main() {
+    let mode = match std::env::args().nth(1).as_deref() {
+        Some("regressions") => Mode::Regressions,
+        Some("smoke") | None => Mode::Smoke,
+        _ => {
+            eprintln!("usage: fuzz_smoke [regressions|smoke]");
+            std::process::exit(2);
+        }
+    };
     let iterations: usize = read_budget("CONTEXTVEIL_FUZZ_ITERATIONS", 4000);
     let seconds = read_budget("CONTEXTVEIL_FUZZ_SECONDS", 30) as u64;
     let deadline = Instant::now() + Duration::from_secs(seconds);
     let regressions = PathBuf::from("fuzz/regressions");
 
-    println!("ContextVeil fuzz smoke");
+    println!("ContextVeil fuzz {}", mode.name());
     println!("  targets     {}", fuzz::TARGETS.len());
-    println!("  iterations  {iterations} per target (budget {seconds}s)");
+    if mode == Mode::Smoke {
+        println!("  iterations  {iterations} per target (budget {seconds}s)");
+    }
     if fuzz::context().is_none() {
         eprintln!("fuzz-smoke: a temporary configuration could not be created");
         std::process::exit(1);
@@ -120,13 +130,15 @@ fn main() {
             .map(|(_, seeds)| *seeds)
             .unwrap_or(&[]);
 
-        // Committed regressions run first and always, budget or not.
-        for (label, input) in replay(&regressions, name) {
-            executed += 1;
-            if !run(target, &input) {
-                failures += 1;
-                eprintln!("fuzz-smoke: {name} failed on committed regression {label}");
+        if mode == Mode::Regressions {
+            for (label, input) in replay(&regressions, name) {
+                executed += 1;
+                if !run(target, &input) {
+                    failures += 1;
+                    eprintln!("fuzz-regressions: {name} failed on committed regression {label}");
+                }
             }
+            continue;
         }
 
         let mut rng = Rng::new(seed_for(name));
@@ -156,6 +168,21 @@ fn main() {
         std::process::exit(1);
     }
     println!("  result      no panic, no unbounded recursion, no disclosure");
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Regressions,
+    Smoke,
+}
+
+impl Mode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Regressions => "regressions",
+            Self::Smoke => "smoke",
+        }
+    }
 }
 
 fn read_budget(name: &str, default: usize) -> usize {

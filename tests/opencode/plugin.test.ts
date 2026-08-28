@@ -20,6 +20,7 @@ const MISSING_BINARY = "/nonexistent/contextveil";
 let workspace: string;
 let invalidProtocolStub: string;
 let failingStub: string;
+let hangingStub: string;
 
 /** Every binary path the fixtures substitute into the template, to its instance. */
 const instances = new Map<string, string>();
@@ -37,10 +38,14 @@ async function writeInstances(binaries: string[]) {
   const source = await Bun.file(TEMPLATE).text();
   for (const [index, binary] of binaries.entries()) {
     const instance = join(workspace, `plugin-${index}.ts`);
-    writeFileSync(
-      instance,
-      source.replace('"__CONTEXTVEIL_BINARY__"', JSON.stringify(binary)),
+    let rendered = source.replace(
+      '"__CONTEXTVEIL_BINARY__"',
+      JSON.stringify(binary),
     );
+    if (binary === hangingStub) {
+      rendered = rendered.replace("const TIMEOUT_MS = 5000;", "const TIMEOUT_MS = 50;");
+    }
+    writeFileSync(instance, rendered);
     instances.set(binary, instance);
   }
 }
@@ -111,11 +116,13 @@ beforeAll(async () => {
   workspace = mkdtempSync(join(tmpdir(), "contextveil-plugin-"));
   invalidProtocolStub = join(workspace, "invalid-protocol.sh");
   failingStub = join(workspace, "failing.sh");
+  hangingStub = join(workspace, "hanging.sh");
   await writeInstances([
     BINARY,
     MISSING_BINARY,
     invalidProtocolStub,
     failingStub,
+    hangingStub,
   ]);
 });
 
@@ -128,15 +135,17 @@ test("the plugin binary under test exists", async () => {
 });
 
 test("new user text is redacted in place and announced", async () => {
-  enroll("PLUGIN_TOKEN", CANARY);
+  const canary = `SSCANARY-PLUGIN-CHAT-${crypto.randomUUID()}`;
+  enroll("PLUGIN_TOKEN", canary);
   const client = recordingClient();
   const hooks = await loadPlugin(BINARY, client);
 
   const parts = [
-    { type: "text", text: `deploy with ${CANARY}` },
+    { type: "text", text: `deploy with ${canary}` },
     { type: "text", text: "and nothing else" },
     { type: "file", filename: "notes.txt" },
   ];
+  expect(parts[0].text).toContain(canary);
   await hooks["chat.message"]({ sessionID: "s1" }, { message: {}, parts });
 
   expect(parts[0].text).toBe("deploy with <SECRET:PLUGIN_TOKEN>");
@@ -145,15 +154,17 @@ test("new user text is redacted in place and announced", async () => {
   // `OCO-003`: one safe named and count notification.
   expect(client.toasts).toHaveLength(1);
   expect(client.toasts[0].body.message).toContain("PLUGIN_TOKEN");
-  expect(client.toasts[0].body.message).not.toContain(CANARY);
+  expect(JSON.stringify({ parts, toasts: client.toasts })).not.toContain(canary);
 });
 
 test("successful standard tool output is redacted in place", async () => {
-  enroll("PLUGIN_TOKEN", CANARY);
+  const canary = `SSCANARY-PLUGIN-TOOL-${crypto.randomUUID()}`;
+  enroll("PLUGIN_TOKEN", canary);
   const client = recordingClient();
   const hooks = await loadPlugin(BINARY, client);
 
-  const output = { title: "shell", output: `token=${CANARY}`, metadata: { exit: 0 } };
+  const output = { title: "shell", output: `token=${canary}`, metadata: { exit: 0 } };
+  expect(output.output).toContain(canary);
   await hooks["tool.execute.after"]({ tool: "bash", sessionID: "s1" }, output);
 
   expect(output.output).toBe("token=<SECRET:PLUGIN_TOKEN>");
@@ -161,6 +172,7 @@ test("successful standard tool output is redacted in place", async () => {
   expect(output.title).toBe("shell");
   expect(output.metadata).toEqual({ exit: 0 });
   expect(client.toasts).toHaveLength(1);
+  expect(JSON.stringify({ output, toasts: client.toasts })).not.toContain(canary);
 });
 
 test("clean events change nothing and stay silent", async () => {
@@ -237,6 +249,22 @@ test("a nonzero exit status aborts the covered operation", async () => {
     ),
   ).rejects.toThrow(/status 3/);
 });
+
+test(
+  "a subprocess timeout aborts the covered operation",
+  async () => {
+    enroll("PLUGIN_TOKEN", CANARY);
+    writeFileSync(hangingStub, "#!/bin/sh\nsleep 10\n", { mode: 0o755 });
+    const hooks = await loadPlugin(hangingStub, recordingClient());
+    const output = { title: "t", output: CANARY, metadata: {} };
+
+    expect(
+      hooks["tool.execute.after"]({ tool: "bash" }, output),
+    ).rejects.toThrow();
+    expect(output.output).toBe(CANARY);
+  },
+  3000,
+);
 
 test("a reported malfunction aborts the covered operation", async () => {
   enrollInvalid();

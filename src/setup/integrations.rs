@@ -10,7 +10,9 @@
 //! Dispatch is a plain match over a small enum, not a plugin framework
 //! (`architecture.md`).
 
-use std::path::Path;
+use std::fs::Permissions;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use crate::cli::Exit;
 use crate::integration::hooks_json::Installed;
@@ -41,8 +43,8 @@ pub fn phase(
     global_config_path: &Path,
     executable: Option<&Path>,
 ) -> Result<(), Exit> {
-    terminal.line("Integrations");
     let Some(home) = home else {
+        terminal.line("Integrations");
         terminal.line("  skipped: the home directory is unknown.");
         terminal.blank();
         return Ok(());
@@ -50,6 +52,7 @@ pub fn phase(
 
     let state_path = state::path(global_config_path);
     let mut state = state::load(&state_path);
+    let initial_state = state.clone();
     let mut rows: Vec<Row> = HARNESSES
         .iter()
         .map(|harness| {
@@ -68,6 +71,7 @@ pub fn phase(
         .collect();
 
     loop {
+        terminal.line("Integrations");
         render(terminal, &rows);
         render_actions(terminal, rows.len());
         let answer = match terminal.ask(">") {
@@ -86,13 +90,20 @@ pub fn phase(
         }
     }
 
-    let mut outcome = Ok(());
     for row in &rows {
         // `SET-014`: each action is its own transaction, and an earlier
         // completed action stays applied when a later one fails.
-        let result = apply(terminal, home, executable, row, &mut state);
-        if result.is_err() && outcome.is_ok() {
-            outcome = result;
+        if let Err(exit) = apply(terminal, home, executable, row, &mut state) {
+            if state != initial_state
+                && let Err(error) = state::save(&state_path, &state)
+            {
+                terminal.line(&format!(
+                    "  warning: the integration record could not be saved because {}.",
+                    error.reason()
+                ));
+            }
+            terminal.blank();
+            return Err(exit);
         }
         if row.selected
             && let Err(Cancelled) = approve_conflicts(terminal, row, &mut state)
@@ -101,14 +112,16 @@ pub fn phase(
         }
     }
 
-    if let Err(error) = state::save(&state_path, &state) {
+    if state != initial_state
+        && let Err(error) = state::save(&state_path, &state)
+    {
         terminal.line(&format!(
             "  warning: the integration record could not be saved because {}.",
             error.reason()
         ));
     }
     terminal.blank();
-    outcome
+    Ok(())
 }
 
 fn render(terminal: &mut Terminal<'_>, rows: &[Row]) {
@@ -215,7 +228,22 @@ fn apply(
         return Ok(());
     }
 
-    match (row.selected, row.installed) {
+    if matches!((row.selected, row.installed), (false, false)) {
+        return Ok(());
+    }
+
+    let artifact = match ArtifactSnapshot::capture(&row.inspection.artifact_path) {
+        Ok(snapshot) => snapshot,
+        Err(_) => {
+            terminal.line(&format!(
+                "  {label} action failed: the existing integration artifact could not be read."
+            ));
+            return Err(Exit::Failure);
+        }
+    };
+    let previous = state.get(harness).cloned();
+
+    let result = match (row.selected, row.installed) {
         (false, false) => Ok(()),
         (false, true) => match integration::remove(harness, home, state) {
             Ok(true) => {
@@ -246,16 +274,15 @@ fn apply(
                     "  {label} installation failed: {}.",
                     integration::InstallError::ExecutablePath.reason()
                 ));
-                return Err(Exit::Failure);
+                return rollback(terminal, harness, artifact, previous, state);
             };
 
-            let previous = state.get(harness).cloned();
             if let Err(error) = integration::install(harness, home, executable, state) {
                 terminal.line(&format!(
                     "  {label} installation failed: {}.",
                     error.reason()
                 ));
-                return Err(Exit::Failure);
+                return rollback(terminal, harness, artifact, previous, state);
             }
             terminal.line(&format!(
                 "  Installed the {label} integration with a 5-second timeout."
@@ -271,31 +298,77 @@ fn apply(
                 }
                 Verification::Failed(reason) => {
                     terminal.line(&format!("  Offline protocol check failed: {reason}."));
-                    restore(terminal, harness, home, executable, previous, state);
                     Err(Exit::Failure)
                 }
             }
         }
+    };
+
+    if result.is_err() {
+        rollback(terminal, harness, artifact, previous, state)
+    } else {
+        result
     }
 }
 
-/// Restores an integration's exact prior managed state (`SET-014`).
-fn restore(
+/// The exact managed artifact before one integration action.
+struct ArtifactSnapshot {
+    path: PathBuf,
+    contents: Option<Vec<u8>>,
+    permissions: Option<Permissions>,
+}
+
+impl ArtifactSnapshot {
+    fn capture(path: &Path) -> io::Result<Self> {
+        match std::fs::read(path) {
+            Ok(contents) => Ok(Self {
+                path: path.to_path_buf(),
+                contents: Some(contents),
+                permissions: Some(std::fs::metadata(path)?.permissions()),
+            }),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Self {
+                path: path.to_path_buf(),
+                contents: None,
+                permissions: None,
+            }),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn restore(self) -> io::Result<()> {
+        match self.contents {
+            Some(contents) => {
+                if let Some(parent) = self.path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&self.path, contents)?;
+                if let Some(permissions) = self.permissions {
+                    std::fs::set_permissions(&self.path, permissions)?;
+                }
+                Ok(())
+            }
+            None => match std::fs::remove_file(&self.path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            },
+        }
+    }
+}
+
+/// Restores an integration's exact prior artifact and ownership state (`SET-014`).
+fn rollback(
     terminal: &mut Terminal<'_>,
     harness: Harness,
-    home: &Path,
-    executable: &Path,
+    artifact: ArtifactSnapshot,
     previous: Option<Managed>,
     state: &mut State,
-) {
-    let restored = match &previous {
-        Some(_) => integration::install(harness, home, executable, state).is_ok(),
-        None => integration::remove(harness, home, state).is_ok(),
-    };
-    if !restored {
+) -> Result<(), Exit> {
+    if artifact.restore().is_err() {
         terminal.line("  warning: the previous integration state could not be restored.");
     }
     state.set(harness, previous);
+    Err(Exit::Failure)
 }
 
 /// Individual approval for every competing mutating hook (`INT-005`).

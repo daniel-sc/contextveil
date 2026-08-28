@@ -1,0 +1,195 @@
+//! Pure setup rendering. Presentation is a maintained design baseline, not a
+//! compatibility contract.
+
+use super::describe;
+use super::enrollment::Item;
+
+pub(super) fn enrollment(items: &[Item]) -> String {
+    let mut lines = vec![String::new()];
+    if items.iter().all(|item| !item.visible()) {
+        lines.push("  (no candidates found)".to_string());
+        return lines.join("\n");
+    }
+
+    let mut row = 1;
+    for item in items.iter().filter(|item| item.visible()) {
+        let members: Vec<_> = item.visible_members().collect();
+        if members.len() > 1 {
+            lines.push("  Same current value".to_string());
+            if !item.detail.is_empty() {
+                lines.push(format!("        {}", item.detail));
+            }
+            let rules = item.rules();
+            if !rules.is_empty() {
+                let names: Vec<_> = rules.iter().map(|rule| rule.display()).collect();
+                lines.push(format!("        rules: {}", names.join(", ")));
+            }
+            lines.push(String::new());
+        }
+
+        for member in members {
+            let marker = match (&item.problem, member.selected) {
+                (Some(_), _) => "!",
+                (None, true) => "x",
+                (None, false) => " ",
+            };
+            let enrolled = if member.enrolled { " (enrolled)" } else { "" };
+            lines.push(format!(
+                "  {row:>2} [{marker}] {}{enrolled}",
+                describe(&member.source)
+            ));
+            row += 1;
+        }
+
+        if item.visible_member_count() == 1 {
+            if !item.detail.is_empty() {
+                lines.push(format!("        {}", item.detail));
+            }
+            let rules = item.rules();
+            if !rules.is_empty() {
+                let names: Vec<_> = rules.iter().map(|rule| rule.display()).collect();
+                lines.push(format!("        rules: {}", names.join(", ")));
+            }
+        }
+        if let Some(collisions) = &item.collisions {
+            lines.push(format!("        collision: {}", collisions.describe()));
+        }
+    }
+    lines.join("\n")
+}
+
+pub(super) fn enrollment_actions(row_count: usize) -> String {
+    let mut lines = vec!["Choose an action:".to_string()];
+    if row_count > 0 {
+        lines.extend([
+            "  [1 3]   toggle row(s)".to_string(),
+            "  [a]     select all".to_string(),
+            "  [n]     select none".to_string(),
+        ]);
+    }
+    lines.extend([
+        "  [e]     add env".to_string(),
+        "  [k]     add dotenv key".to_string(),
+        "  [w]     add wildcard file".to_string(),
+        "  [j]     add JSON field".to_string(),
+        "  [Enter] save".to_string(),
+        "  [s]     skip".to_string(),
+        "  [q]     quit".to_string(),
+    ]);
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::setup::collision::Collisions;
+    use crate::setup::enrollment::Member;
+    use crate::setup::known_source::Rule;
+    use crate::source::SourceRef;
+
+    fn member(source: SourceRef, enrolled: bool, selected: bool, rules: Vec<Rule>) -> Member {
+        Member {
+            source,
+            rules,
+            enrolled,
+            selected,
+            selection_touched: false,
+            suppressed: false,
+        }
+    }
+
+    fn item(members: Vec<Member>, detail: &str) -> Item {
+        Item {
+            members,
+            detail: detail.to_string(),
+            problem: None,
+            value: Some("SSCANARY-RENDER-MUST-NOT-APPEAR".to_string()),
+            resolved: true,
+            wildcard_values: Vec::new(),
+            collisions: None,
+        }
+    }
+
+    #[test]
+    fn setup_rendering_matches_the_maintained_design_baseline() {
+        let mut grouped = item(
+            vec![
+                member(
+                    SourceRef::Env {
+                        name: "PRIMARY_TOKEN".to_string(),
+                    },
+                    true,
+                    true,
+                    vec![Rule::SecretLikeName],
+                ),
+                member(
+                    SourceRef::DotenvKey {
+                        entered: ".env.local".to_string(),
+                        path: PathBuf::from("/project/.env.local"),
+                        key: "SECONDARY_TOKEN".to_string(),
+                    },
+                    false,
+                    false,
+                    vec![Rule::SecretLikeName, Rule::CredentialBearingUrl],
+                ),
+            ],
+            "ab********yz (20 characters)",
+        );
+        grouped.collisions = Some(Collisions {
+            total: 1,
+            files: vec![("README\\nHOSTILE.md".to_string(), 1)],
+        });
+        let unavailable = Item {
+            members: vec![member(
+                SourceRef::Json {
+                    entered: "broken\\efile.json".to_string(),
+                    path: PathBuf::from("/project/broken.json"),
+                    pointer: "/token".to_string(),
+                },
+                true,
+                true,
+                Vec::new(),
+            )],
+            detail: "unavailable: malformed JSON source".to_string(),
+            problem: Some("malformed JSON source".to_string()),
+            value: None,
+            resolved: false,
+            wildcard_values: Vec::new(),
+            collisions: None,
+        };
+        let wildcard = Item {
+            members: vec![member(
+                SourceRef::DotenvAll {
+                    entered: ".env.shared".to_string(),
+                    path: PathBuf::from("/project/.env.shared"),
+                },
+                false,
+                true,
+                Vec::new(),
+            )],
+            detail: "3 current key(s)".to_string(),
+            problem: None,
+            value: None,
+            resolved: true,
+            wildcard_values: Vec::new(),
+            collisions: None,
+        };
+
+        let actual = format!(
+            "Global sources (this machine)\n{}\n{}\n\nProject sources (this project)\n{}\n{}\n\nIntegrations\n   1 [x] Claude Code (PRODUCTION) - detected, installed\n   2 [ ] Codex CLI (EXPERIMENTAL) - not detected, not installed\nChoose an action:\n  [1 3]   toggle row(s)\n  [Enter] apply\n  [s]     skip\n  [q]     quit\n\nNo-row action state\n{}\n{}\n",
+            enrollment(&[grouped, unavailable, wildcard]),
+            enrollment_actions(4),
+            enrollment(&[]),
+            enrollment_actions(0),
+            enrollment(&[]),
+            enrollment_actions(0),
+        );
+        assert!(!actual.contains("SSCANARY-RENDER-MUST-NOT-APPEAR"));
+        assert_eq!(
+            actual,
+            include_str!("../../tests/snapshots/setup-rendering.txt")
+        );
+    }
+}

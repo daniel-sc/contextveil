@@ -13,9 +13,11 @@
 pub mod collision;
 pub mod credential_url;
 pub mod discovery;
+pub mod enrollment;
 pub mod integrations;
 pub mod known_source;
 pub mod preview;
+pub mod render;
 pub mod ui;
 pub mod vocabulary;
 pub mod write;
@@ -30,8 +32,8 @@ use crate::sanitize;
 use crate::secret::SourceId;
 use crate::source::{Environment, Resolution, Resolver, SourceRef, Unresolved};
 
-use collision::Collisions;
 use discovery::{Discovered, State};
+use enrollment::{Item, Member};
 use known_source::Rule;
 use ui::{Cancelled, Terminal};
 
@@ -238,15 +240,15 @@ fn enrollment_phase(
 ) -> PhaseResult {
     refresh_items(scope, &mut items, &mut context);
 
-    terminal.line(scope.title());
-    terminal.line(&format!("  file: {}", sanitize::path(context.config_path)));
-    for notice in notices {
-        terminal.line(&format!(
-            "  unavailable: {} ({})",
-            notice.display, notice.reason
-        ));
-    }
     loop {
+        terminal.line(scope.title());
+        terminal.line(&format!("  file: {}", sanitize::path(context.config_path)));
+        for notice in &notices {
+            terminal.line(&format!(
+                "  unavailable: {} ({})",
+                notice.display, notice.reason
+            ));
+        }
         render(terminal, &items);
         render_actions(terminal, visible_count(&items));
         let answer = match terminal.ask(">") {
@@ -286,7 +288,7 @@ fn enrollment_phase(
             "s" => {
                 for item in &mut items {
                     if item.is_wildcard() {
-                        item.selected = item.enrolled;
+                        item.members[0].selected = item.members[0].enrolled;
                     }
                 }
                 context.aliases.sync_wildcards(scope, &items);
@@ -298,16 +300,20 @@ fn enrollment_phase(
             "a" => {
                 for item in &mut items {
                     if item.problem.is_none() {
-                        item.selected = true;
-                        item.selection_touched = true;
+                        for member in item.members.iter_mut().filter(|member| !member.suppressed) {
+                            member.selected = true;
+                            member.selection_touched = true;
+                        }
                     }
                 }
                 refresh_items(scope, &mut items, &mut context);
             }
             "n" => {
                 for item in &mut items {
-                    item.selected = false;
-                    item.selection_touched = true;
+                    for member in &mut item.members {
+                        member.selected = false;
+                        member.selection_touched = true;
+                    }
                 }
                 refresh_items(scope, &mut items, &mut context);
             }
@@ -329,70 +335,6 @@ fn cancelled(terminal: &mut Terminal<'_>) -> PhaseResult {
     // `CLI-004`: cancellation returns nonzero. Phases already committed stay.
     terminal.line("Setup cancelled. Nothing further was changed.");
     PhaseResult::Stopped(Exit::Failure)
-}
-
-struct Member {
-    source: SourceRef,
-    rules: Vec<Rule>,
-    enrolled: bool,
-    suppressed: bool,
-}
-
-/// One selectable row in a phase. Singular equal-value references share a row;
-/// unresolved references and wildcard policies remain standalone (`SET-016`).
-struct Item {
-    members: Vec<Member>,
-    enrolled: bool,
-    selected: bool,
-    /// Masked preview, when the source resolves.
-    detail: String,
-    /// Why the source cannot be used, when it currently cannot.
-    problem: Option<String>,
-    /// The resolved value, kept only in memory for collision analysis.
-    value: Option<String>,
-    resolved: bool,
-    /// Current values from a wildcard policy. They never make the wildcard a
-    /// Candidate Group member, but can exclude its file for other groups.
-    wildcard_values: Vec<String>,
-    collisions: Option<Collisions>,
-    /// Whether the user explicitly chose this row rather than accepting setup's
-    /// collision-derived default.
-    selection_touched: bool,
-}
-
-impl Item {
-    fn description(&self) -> String {
-        let visible: Vec<&Member> = self
-            .members
-            .iter()
-            .filter(|member| !member.suppressed)
-            .collect();
-        if visible.len() == 1 {
-            describe(&visible[0].source)
-        } else {
-            format!("Candidate group ({} sources)", visible.len())
-        }
-    }
-
-    fn is_wildcard(&self) -> bool {
-        matches!(self.members[0].source, SourceRef::DotenvAll { .. })
-    }
-
-    fn visible(&self) -> bool {
-        self.is_wildcard() || self.members.iter().any(|member| !member.suppressed)
-    }
-
-    fn rules(&self) -> Vec<Rule> {
-        let mut rules: Vec<Rule> = self
-            .members
-            .iter()
-            .filter(|member| !member.suppressed)
-            .flat_map(|member| member.rules.iter().copied())
-            .collect();
-        rules.sort_unstable();
-        rules.dedup();
-        rules
-    }
 }
 
 #[derive(Default)]
@@ -524,12 +466,15 @@ fn sort_initial_items(items: &mut [Item]) {
         item.members.sort_by_key(|member| member.source.id());
     }
     items.sort_by(|left, right| {
-        right.enrolled.cmp(&left.enrolled).then_with(|| {
-            left.members[0]
-                .source
-                .id()
-                .cmp(&right.members[0].source.id())
-        })
+        right
+            .any_enrolled()
+            .cmp(&left.any_enrolled())
+            .then_with(|| {
+                left.members[0]
+                    .source
+                    .id()
+                    .cmp(&right.members[0].source.id())
+            })
     });
 }
 
@@ -582,7 +527,7 @@ fn automatic_item_for(
     let mut item = item_for(source.clone(), false, Vec::new(), resolver, environment);
     let rules = admission_rules(&source, item.value.as_deref());
     if item.problem.is_none() && !rules.is_empty() {
-        item.selected = true;
+        item.members[0].selected = true;
     }
     item.members[0].rules = rules;
     item
@@ -601,19 +546,16 @@ fn item_for(
             source: source.clone(),
             rules,
             enrolled,
+            selected: enrolled || automatically_admitted,
+            selection_touched: false,
             suppressed: false,
         }],
-        enrolled,
-        // Name/URL admissions are assigned immediately after resolution by
-        // `automatic_item_for`; manual additions are selected after confirmation.
-        selected: enrolled || automatically_admitted,
         detail: String::new(),
         problem: None,
         value: None,
         resolved: false,
         wildcard_values: Vec::new(),
         collisions: None,
-        selection_touched: false,
     };
 
     match resolver.resolve(&source, environment) {
@@ -643,7 +585,7 @@ fn item_for(
             // selected and blocks saving until the user deselects it.
             item.problem = Some(why.reason());
             item.detail = format!("unavailable: {}", why.reason());
-            item.selected = enrolled;
+            item.members[0].selected = enrolled;
         }
     }
     item
@@ -681,9 +623,6 @@ fn merge_item(items: &mut Vec<Item>, mut incoming: Item) {
             .iter_mut()
             .find(|item| item.value.as_ref() == Some(value))
     {
-        existing.enrolled |= incoming.enrolled;
-        existing.selected |= incoming.selected;
-        existing.selection_touched |= incoming.selection_touched;
         existing.members.append(&mut incoming.members);
         return;
     }
@@ -699,7 +638,7 @@ fn alias_inventory<'a>(phases: impl IntoIterator<Item = (Scope, &'a [Item])>) ->
                     add_alias(&mut aliases.sources, value, member.source.file());
                 }
             }
-            if item.selected && item.is_wildcard() {
+            if item.is_selected_wildcard() {
                 aliases.wildcards.push(WildcardAliases {
                     scope,
                     path: item.members[0]
@@ -718,20 +657,21 @@ fn alias_inventory<'a>(phases: impl IntoIterator<Item = (Scope, &'a [Item])>) ->
 impl AliasInventory {
     fn sync_wildcards(&mut self, scope: Scope, items: &[Item]) {
         self.wildcards.retain(|wildcard| wildcard.scope != scope);
-        self.wildcards.extend(
-            items
-                .iter()
-                .filter(|item| item.selected && item.is_wildcard())
-                .map(|item| WildcardAliases {
-                    scope,
-                    path: item.members[0]
-                        .source
-                        .file()
-                        .expect("a wildcard always has a file")
-                        .to_path_buf(),
-                    values: item.wildcard_values.clone(),
-                }),
-        );
+        self.wildcards
+            .extend(
+                items
+                    .iter()
+                    .filter(|item| item.is_selected_wildcard())
+                    .map(|item| WildcardAliases {
+                        scope,
+                        path: item.members[0]
+                            .source
+                            .file()
+                            .expect("a wildcard always has a file")
+                            .to_path_buf(),
+                        values: item.wildcard_values.clone(),
+                    }),
+            );
     }
 
     fn source_files(&self, value: &str) -> Vec<PathBuf> {
@@ -794,92 +734,50 @@ fn annotate_collisions(items: &mut [Item], project_root: &Path, aliases: &AliasI
         if !collisions.is_empty() {
             // `SET-007`: a colliding candidate stays visible but unselected,
             // unless it is already enrolled (`CFG-015`).
-            if !item.enrolled && !item.selection_touched {
-                item.selected = false;
+            for member in &mut item.members {
+                if !member.enrolled && !member.selection_touched {
+                    member.selected = false;
+                }
             }
             item.collisions = Some(collisions);
-        } else if !item.enrolled && !item.selection_touched {
-            item.selected = true;
+        } else {
+            for member in &mut item.members {
+                if !member.enrolled && !member.selection_touched {
+                    member.selected = true;
+                }
+            }
         }
     }
 }
 
 fn render(terminal: &mut Terminal<'_>, items: &[Item]) {
-    terminal.blank();
-    if visible_count(items) == 0 {
-        terminal.line("  (no candidates found)");
-        return;
-    }
-    for (index, item) in items.iter().filter(|item| item.visible()).enumerate() {
-        let marker = match (&item.problem, item.selected) {
-            (Some(_), _) => "!",
-            (None, true) => "x",
-            (None, false) => " ",
-        };
-        let enrolled = if item.enrolled { " (enrolled)" } else { "" };
-        terminal.line(&format!(
-            "  {:>2} [{marker}] {}{enrolled}",
-            index + 1,
-            item.description()
-        ));
-        if item
-            .members
-            .iter()
-            .filter(|member| !member.suppressed)
-            .count()
-            > 1
-        {
-            for member in item.members.iter().filter(|member| !member.suppressed) {
-                let enrolled = if member.enrolled { " (enrolled)" } else { "" };
-                terminal.line(&format!("        - {}{enrolled}", describe(&member.source)));
-            }
-        }
-        if !item.detail.is_empty() {
-            terminal.line(&format!("        {}", item.detail));
-        }
-        let rules = item.rules();
-        if !rules.is_empty() {
-            let names: Vec<&str> = rules.iter().map(|rule| rule.display()).collect();
-            terminal.line(&format!("        rules: {}", names.join(", ")));
-        }
-        if let Some(collisions) = &item.collisions {
-            terminal.line(&format!("        collision: {}", collisions.describe()));
-        }
+    for line in render::enrollment(items).lines() {
+        terminal.line(line);
     }
 }
 
-fn render_actions(terminal: &mut Terminal<'_>, item_count: usize) {
-    terminal.line("Choose an action:");
-    if item_count > 0 {
-        terminal.line("  [1 3]   toggle row(s)");
-        terminal.line("  [a]     select all");
-        terminal.line("  [n]     select none");
+fn render_actions(terminal: &mut Terminal<'_>, row_count: usize) {
+    for line in render::enrollment_actions(row_count).lines() {
+        terminal.line(line);
     }
-    terminal.line("  [e]     add env");
-    terminal.line("  [k]     add dotenv key");
-    terminal.line("  [w]     add wildcard file");
-    terminal.line("  [j]     add JSON field");
-    terminal.line("  [Enter] save");
-    terminal.line("  [s]     skip");
-    terminal.line("  [q]     quit");
 }
 
 /// The first selected source that blocks saving (`SET-013`).
 fn blocking_item(items: &[Item]) -> Option<String> {
     items
         .iter()
-        .find(|item| item.visible() && item.selected && item.problem.is_some())
-        .map(|item| item.description())
+        .find(|item| item.visible() && item.any_selected() && item.problem.is_some())
+        .and_then(|item| item.visible_members().next())
+        .map(|member| describe(&member.source))
 }
 
 fn selected_sources(items: &[Item]) -> Vec<SourceRef> {
     let mut selected: Vec<SourceRef> = items
         .iter()
-        .filter(|item| item.selected && item.visible())
         .flat_map(|item| {
             item.members
                 .iter()
-                .filter(|member| !member.suppressed)
+                .filter(|member| member.selected && !member.suppressed)
                 .map(|member| member.source.clone())
         })
         .collect();
@@ -888,25 +786,33 @@ fn selected_sources(items: &[Item]) -> Vec<SourceRef> {
 }
 
 fn toggle(terminal: &mut Terminal<'_>, items: &mut [Item], selection: &str) {
-    let visible: Vec<usize> = items
+    let visible: Vec<(usize, usize)> = items
         .iter()
         .enumerate()
-        .filter_map(|(index, item)| item.visible().then_some(index))
+        .flat_map(|(item_index, item)| {
+            item.members
+                .iter()
+                .enumerate()
+                .filter(|(_, member)| !member.suppressed)
+                .map(move |(member_index, _)| (item_index, member_index))
+        })
         .collect();
     let mut unknown = Vec::new();
     for token in selection.split_whitespace() {
         match token.parse::<usize>() {
             Ok(number) if number >= 1 && number <= visible.len() => {
-                let item = &mut items[visible[number - 1]];
-                if item.problem.is_some() && !item.selected {
+                let (item_index, member_index) = visible[number - 1];
+                let item = &mut items[item_index];
+                let member = &mut item.members[member_index];
+                if item.problem.is_some() && !member.selected {
                     terminal.line(&format!(
                         "  {} is unavailable and cannot be selected.",
-                        item.description()
+                        describe(&member.source)
                     ));
                     continue;
                 }
-                item.selected = !item.selected;
-                item.selection_touched = true;
+                member.selected = !member.selected;
+                member.selection_touched = true;
             }
             _ => unknown.push(sanitize::text(token)),
         }
@@ -917,7 +823,7 @@ fn toggle(terminal: &mut Terminal<'_>, items: &mut [Item], selection: &str) {
 }
 
 fn visible_count(items: &[Item]) -> usize {
-    items.iter().filter(|item| item.visible()).count()
+    items.iter().map(Item::visible_member_count).sum()
 }
 
 fn update_suppression(items: &mut [Item], aliases: &AliasInventory) {
@@ -1073,10 +979,10 @@ fn add_manual(
             return Ok(());
         }
     }
-    item.selected = true;
+    item.members[0].selected = true;
     // Manual entry is itself an affirmative enrollment choice. Collisions stay
     // visible but do not reverse that choice (`SET-008`).
-    item.selection_touched = true;
+    item.members[0].selection_touched = true;
     if let Some(value) = &item.value {
         add_alias(
             &mut context.aliases.sources,

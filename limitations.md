@@ -155,11 +155,10 @@ source is a malfunction and disables the effective registry for that event.
 **Workaround:** Keep credential files small and rely on normal harness output
 limits. Diagnose slow paths with `contextveil doctor` and benchmarks.
 
-**Verification:** Large-input tests measure behavior without promising a fixed
-maximum: a 4 MiB dotenv file with about 90,000 wildcard keys, a 2 MiB tool
-result, and 201 active values over a 512 KiB payload all complete well inside the
-five-second host bound, and runtime cost is linear in input size rather than
-quadratic. A 20,000-level JSON source is rejected without overflowing the stack.
+**Verification:** Functional large-input tests cover a 4 MiB dotenv file, 201
+active values over a 512 KiB payload, moderate successful nesting, and rejection
+of a 20,000-level JSON source without a stack overflow. Portable tests make no
+machine-sensitive duration assertion; `mise run bench` owns performance evidence.
 
 ## Host Integration Limits
 
@@ -410,6 +409,21 @@ bounded traversal, dynamic pointer escaping, additive defaults and overrides,
 malformed-file isolation, exact-reference persistence, automatic selection and
 collision behavior, filesystem boundaries, and canary-free output. The maintained
 inventory is [`docs/known-sources.md`](docs/known-sources.md).
+
+### LIM-024: Setup Save Can Change The Canonical Placeholder Alias
+
+**Reality:** Setup normalizes selected sources into Source Identity order, while
+runtime canonicalization uses project file order followed by global file order.
+
+**Impact:** A setup save can change placeholder labels even when protected values
+and enrollment membership are unchanged.
+
+**Workaround:** Use `Skip` when exact file bytes and canonical alias preservation
+matter.
+
+**Verification:**
+`tests/setup.rs::save_order_can_change_the_canonical_alias` preserves the current
+persistence-and-runtime interaction.
 
 ## Implementation Deviations
 

@@ -51,15 +51,21 @@ async function redact(
     throw new Error(`ContextVeil could not be started: ${cause}`);
   }
 
-  const timer = setTimeout(() => process.kill(), TIMEOUT_MS);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      process.kill();
+      reject(new Error("ContextVeil timed out"));
+    }, TIMEOUT_MS);
+  });
   let stdout: string;
   let exitCode: number;
   try {
     process.stdin.write(request);
     process.stdin.end();
-    [stdout, exitCode] = await Promise.all([
-      new Response(process.stdout).text(),
-      process.exited,
+    [stdout, exitCode] = await Promise.race([
+      Promise.all([new Response(process.stdout).text(), process.exited]),
+      timeout,
     ]);
   } catch (cause) {
     throw new Error(`ContextVeil could not be run: ${cause}`);

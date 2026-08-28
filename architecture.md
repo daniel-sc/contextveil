@@ -53,8 +53,8 @@ The core owns:
 - global and project registry composition;
 - environment, dotenv, and exact-pointer JSON source resolution using JSON5
   document grammar;
-- candidate grouping, deterministic Source Identity ordering, and collision
-  analysis;
+- independent source enrollment state, visual equal-value grouping,
+  deterministic Source Identity ordering, and collision analysis;
 - canonicalization of duplicate resolved values;
 - exact matching and placeholder selection;
 - structured string-value traversal;
@@ -149,8 +149,8 @@ The minimum conceptual types are:
   source reference;
 - `KnownSourceRule`: a maintained deterministic setup-time automatic
   candidate-admission rule, absent from runtime policy;
-- `CandidateGroup`: equal-value candidates from one enrollment scope, identified
-  for setup ordering by their least source identity;
+- `CandidateGroup`: a presentation-only block of independently selectable
+  equal-value candidates from one enrollment scope;
 - `Registry`: ordered source references from one config scope;
 - `ResolvedSecret`: a non-empty UTF-8 value plus source identity and safe label;
 - `EffectiveRegistry`: project entries followed by global entries for canonical
@@ -340,6 +340,7 @@ mise run lint
 mise run test
 mise run check
 mise run build
+mise run fuzz-regressions
 mise run fuzz-smoke
 mise run release-check
 ```
@@ -353,6 +354,13 @@ for reproducibility.
 
 ## Test Architecture
 
+- Shared semantics are proven once at their owning unit/property layer. Adapters
+  test host parsing, covered-field selection, result shape, and failure mapping.
+- Every claimed covered path retains one generated-canary process or plugin
+  boundary fixture that proves non-vacuous intervention and exhaustive absence.
+- Setup state transitions live in `src/setup/enrollment.rs`, pure presentation in
+  `src/setup/render.rs`, orchestration in `src/setup/mod.rs`, and line I/O in
+  `src/setup/ui.rs`; no generic UI framework or adapter trait is required.
 - Unit and property tests cover registry and matcher invariants.
 - Filesystem tests use isolated homes/projects for config, discovery, setup, and
   permissions.

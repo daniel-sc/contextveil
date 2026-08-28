@@ -1,12 +1,7 @@
 //! Leak regression suite (`TST-005`, `SEC-004`).
 //!
-//! One generated canary is enrolled and then pushed through every shipped path:
-//! all four adapters, `status`, `doctor`, and a complete `setup` run. After each,
-//! the canary must be absent from stdout, stderr, every file ContextVeil wrote,
-//! and every diagnostic it produced.
-//!
-//! This is deliberately end to end through the built binary, so it also covers
-//! the wiring between the CLI, the adapters, and the installers.
+//! Owner-layer tests cover diagnostics and setup persistence. Process-hook
+//! boundaries are consolidated in `process_boundaries.rs`.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -116,7 +111,7 @@ impl Machine {
             .as_mut()
             .expect("stdin is piped")
             .write_all(payload.as_bytes())
-            .expect("write the payload");
+            .expect("write payload");
         child.wait_with_output().expect("the hook finishes")
     }
 
@@ -168,92 +163,6 @@ fn walk(root: &Path) -> Vec<PathBuf> {
         }
     }
     found
-}
-
-#[test]
-fn every_adapter_redacts_an_enrolled_json_value() {
-    let machine = Machine::new();
-    // Leave JSON as the only resolving enrolled source so another source kind
-    // cannot hide a broken JSON runtime path.
-    std::fs::write(
-        machine.home().join(".config/contextveil/config.toml"),
-        "version = 1\n",
-    )
-    .expect("global config");
-    std::fs::remove_file(machine.project().join(".env")).expect("remove dotenv source");
-    let value = machine.canary.value().to_string();
-    let project = machine.project().to_string_lossy().into_owned();
-
-    let cases: Vec<(&str, Vec<&str>, String)> = vec![
-        (
-            "claude",
-            vec!["hook", "claude"],
-            json!({
-                "hook_event_name": "PostToolUse",
-                "cwd": project,
-                "tool_name": "Bash",
-                "tool_response": {"stdout": value, "stderr": value, "nested": [{"text": value}]},
-            })
-            .to_string(),
-        ),
-        (
-            "codex",
-            vec!["hook", "codex"],
-            json!({
-                "hook_event_name": "PostToolUse",
-                "cwd": project,
-                "tool_name": "shell",
-                "tool_response": {"output": value, "exit_code": 0},
-            })
-            .to_string(),
-        ),
-        (
-            "copilot prompt",
-            vec!["hook", "copilot", "prompt"],
-            json!({
-                "cwd": project,
-                "prompt": value,
-                "transformedPrompt": value,
-            })
-            .to_string(),
-        ),
-        (
-            "copilot tool",
-            vec!["hook", "copilot", "tool"],
-            json!({
-                "cwd": project,
-                "toolName": "shell",
-                "toolResult": {"resultType": "success", "textResultForLlm": value},
-            })
-            .to_string(),
-        ),
-        (
-            "opencode",
-            vec!["hook", "opencode"],
-            json!({
-                "version": 1,
-                "event": "tool.execute.after",
-                "project_root": project,
-                "texts": [value],
-            })
-            .to_string(),
-        ),
-    ];
-
-    for (label, arguments, payload) in cases {
-        let output = machine.run_with_payload(&arguments, &payload);
-        machine.assert_clean(label, &output);
-        assert!(
-            !output.stdout.is_empty(),
-            "{label} produced no output, so the fixture proves nothing"
-        );
-        // The replacement really happened, so absence is not vacuous.
-        let text = String::from_utf8(output.stdout.clone()).expect("UTF-8 stdout");
-        assert!(
-            text.contains("<SECRET:"),
-            "{label} did not redact anything: {text}"
-        );
-    }
 }
 
 #[test]
@@ -318,8 +227,8 @@ fn a_complete_setup_run_writes_no_value_anywhere() {
     )
     .expect("global config");
     assert!(
-        global.contains("~/.codex/auth.json"),
-        "the setup leak check must exercise Known Source persistence"
+        global.contains("name = \"LEAK_TOKEN\""),
+        "the setup leak check must retain an enrolled source reference"
     );
     // Every file ContextVeil wrote, including the installed hook and the
     // integration record, is value-free.
@@ -327,132 +236,40 @@ fn a_complete_setup_run_writes_no_value_anywhere() {
 }
 
 #[test]
-fn a_malfunction_on_every_adapter_discloses_nothing() {
-    let machine = Machine::new();
-    // Break the global config so every adapter takes its malfunction path.
-    std::fs::write(
-        machine
-            .home()
-            .join(".config")
-            .join("contextveil")
-            .join("config.toml"),
-        "version = 1\n\n[[secret]]\nsource = \"unknown\"\n",
-    )
-    .expect("write invalid config");
-
-    let value = machine.canary.value().to_string();
-    let cases: Vec<(&str, Vec<&str>, String)> = vec![
-        (
-            "claude",
-            vec!["hook", "claude"],
-            json!({"hook_event_name": "PostToolUse", "tool_response": {"stdout": value}})
-                .to_string(),
-        ),
-        (
-            "codex",
-            vec!["hook", "codex"],
-            json!({"hook_event_name": "PostToolUse", "tool_response": {"output": value}})
-                .to_string(),
-        ),
-        (
-            "copilot",
-            vec!["hook", "copilot", "tool"],
-            json!({"toolResult": {"resultType": "success", "textResultForLlm": value}}).to_string(),
-        ),
-        (
-            "opencode",
-            vec!["hook", "opencode"],
-            json!({"version": 1, "event": "chat.message", "texts": [value]}).to_string(),
-        ),
-    ];
-
-    for (label, arguments, payload) in cases {
-        let output = machine.run_with_payload(&arguments, &payload);
-        machine.assert_clean(label, &output);
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            combined.contains("doctor"),
-            "{label} did not warn about the malfunction"
-        );
-    }
-}
-
-#[test]
 fn runtime_writes_no_log_or_telemetry_file() {
-    // `SEC-005`: no telemetry, crash upload, analytics, or persistent runtime
-    // logging. Every covered path is exercised, then the file tree is compared
-    // with what existed before.
     let machine = Machine::new();
     let value = machine.canary.value().to_string();
     let project = machine.project().to_string_lossy().into_owned();
-    let before: Vec<PathBuf> = walk(&machine.home());
-
-    let payloads: Vec<(Vec<&str>, String)> = vec![
+    let before = walk(&machine.home());
+    let cases = [
         (
             vec!["hook", "claude"],
-            json!({"hook_event_name": "PostToolUse", "cwd": project, "tool_response": {"stdout": value}})
+            json!({"hook_event_name":"PostToolUse","cwd":project,"tool_response":{"stdout":value}})
                 .to_string(),
         ),
         (
             vec!["hook", "codex"],
-            json!({"hook_event_name": "PostToolUse", "cwd": project, "tool_response": {"output": value}})
+            json!({"hook_event_name":"PostToolUse","cwd":project,"tool_response":{"output":value}})
                 .to_string(),
         ),
         (
             vec!["hook", "copilot", "tool"],
-            json!({"cwd": project, "toolResult": {"resultType": "success", "textResultForLlm": value}})
+            json!({"cwd":project,"toolResult":{"resultType":"success","textResultForLlm":value}})
                 .to_string(),
         ),
         (
             vec!["hook", "opencode"],
-            json!({"version": 1, "event": "chat.message", "project_root": project, "texts": [value]})
+            json!({"version":1,"event":"chat.message","project_root":project,"texts":[value]})
                 .to_string(),
         ),
     ];
-    for (arguments, payload) in payloads {
-        machine.run_with_payload(&arguments, &payload);
+    for (arguments, payload) in cases {
+        let _ = machine.run_with_payload(&arguments, &payload);
     }
-    machine.run(&["status"]);
-    machine.run(&["doctor"]);
+    let _ = machine.run(&["status"]);
+    let _ = machine.run(&["doctor"]);
 
-    let after: Vec<PathBuf> = walk(&machine.home());
-    let created: Vec<&PathBuf> = after.iter().filter(|path| !before.contains(path)).collect();
+    let after = walk(&machine.home());
+    let created: Vec<_> = after.iter().filter(|path| !before.contains(path)).collect();
     assert!(created.is_empty(), "runtime created files: {created:?}");
-}
-
-#[test]
-fn terminal_hostile_names_and_paths_are_escaped_in_diagnostics() {
-    // `SEC-006`: everything untrusted reaching a terminal is escaped.
-    let machine = Machine::new();
-    std::fs::write(
-        machine
-            .home()
-            .join(".config")
-            .join("contextveil")
-            .join("config.toml"),
-        "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"\\u001b[31mLEAK_TOKEN\"\n",
-    )
-    .expect("write global config");
-    std::fs::write(
-        machine.project().join(".contextveil.toml"),
-        "version = 1\n\n[[secret]]\nsource = \"dotenv\"\nfile = \"weird\\u001b[31mname.env\"\nkey = \"A\"\n",
-    )
-    .expect("write project config");
-
-    for command in ["status", "doctor"] {
-        let output = machine.run(&[command]);
-        let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
-        assert!(!stdout.contains('\u{1b}'), "{command} emitted a raw escape");
-    }
-    // Only doctor names individual sources, so only doctor renders the escape.
-    let doctor = machine.run(&["doctor"]);
-    let stdout = String::from_utf8(doctor.stdout).expect("UTF-8 stdout");
-    assert!(
-        stdout.contains("\\e[31m"),
-        "doctor did not escape the name: {stdout}"
-    );
 }

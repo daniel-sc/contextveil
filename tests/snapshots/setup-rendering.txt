@@ -1,0 +1,57 @@
+Global sources (this machine)
+
+  Same current value
+        ab********yz (20 characters)
+        rules: secret-like source name, credential-bearing URL
+
+   1 [x] env PRIMARY_TOKEN (enrolled)
+   2 [ ] dotenv .env.local key SECONDARY_TOKEN
+        collision: 1 occurrence(s) elsewhere in this project (README\nHOSTILE.md x1)
+   3 [!] json broken\\efile.json pointer /token (enrolled)
+        unavailable: malformed JSON source
+   4 [x] dotenv .env.shared (every key)
+        3 current key(s)
+Choose an action:
+  [1 3]   toggle row(s)
+  [a]     select all
+  [n]     select none
+  [e]     add env
+  [k]     add dotenv key
+  [w]     add wildcard file
+  [j]     add JSON field
+  [Enter] save
+  [s]     skip
+  [q]     quit
+
+Project sources (this project)
+
+  (no candidates found)
+Choose an action:
+  [e]     add env
+  [k]     add dotenv key
+  [w]     add wildcard file
+  [j]     add JSON field
+  [Enter] save
+  [s]     skip
+  [q]     quit
+
+Integrations
+   1 [x] Claude Code (PRODUCTION) - detected, installed
+   2 [ ] Codex CLI (EXPERIMENTAL) - not detected, not installed
+Choose an action:
+  [1 3]   toggle row(s)
+  [Enter] apply
+  [s]     skip
+  [q]     quit
+
+No-row action state
+
+  (no candidates found)
+Choose an action:
+  [e]     add env
+  [k]     add dotenv key
+  [w]     add wildcard file
+  [j]     add JSON field
+  [Enter] save
+  [s]     skip
+  [q]     quit

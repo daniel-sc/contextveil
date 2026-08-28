@@ -87,19 +87,45 @@ impl Fixture {
         environment: &Environment,
         directory: &Path,
     ) -> (Exit, String) {
+        self.run_with_executable(
+            script,
+            environment,
+            directory,
+            Path::new(env!("CARGO_BIN_EXE_contextveil")),
+        )
+    }
+
+    fn run_with_executable(
+        &self,
+        script: &str,
+        environment: &Environment,
+        directory: &Path,
+        executable: &Path,
+    ) -> (Exit, String) {
         let mut output: Vec<u8> = Vec::new();
         let exit = {
             let mut terminal = Terminal::new(std::io::Cursor::new(script.to_string()), &mut output);
-            // The real binary is used so the integration phase can install a
-            // working hook and verify it offline.
-            setup::run(
-                &mut terminal,
-                environment,
-                directory,
-                Some(Path::new(env!("CARGO_BIN_EXE_contextveil"))),
-            )
+            setup::run(&mut terminal, environment, directory, Some(executable))
         };
         (exit, String::from_utf8(output).expect("UTF-8 transcript"))
+    }
+
+    #[cfg(unix)]
+    fn executable_failing(&self, harness: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = self.root.join(format!("contextveil-fail-{harness}"));
+        let real = env!("CARGO_BIN_EXE_contextveil").replace('\'', "'\\''");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nif [ \"$1 $2\" = \"hook {harness}\" ]; then exit 1; fi\nexec '{real}' \"$@\"\n"
+            ),
+        )
+        .expect("verification wrapper");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .expect("executable wrapper");
+        path
     }
 
     fn claude_settings(&self) -> PathBuf {
@@ -295,38 +321,16 @@ fn setup_shows_a_masked_preview_and_rules_without_shape_details() {
 }
 
 #[test]
-fn setup_lists_number_toggle_and_other_actions_separately() {
-    let canary = Canary::generate("API_TOKEN");
+fn selection_screen_rerenders_after_every_continuing_interaction() {
     let fixture = Fixture::new();
-    let environment = fixture.environment(&[("API_TOKEN", canary.value())]);
+    let environment = fixture.environment(&[("API_TOKEN", "value"), ("MANUAL", "other")]);
 
-    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
-    assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(transcript.contains(
-        "Choose an action:\n  [1 3]   toggle row(s)\n  [a]     select all\n  [n]     select none\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [j]     add JSON field\n  [Enter] save\n  [s]     skip\n  [q]     quit\n> "
-    ));
-    assert!(transcript.contains(
-        "Choose an action:\n  [1 3]   toggle row(s)\n  [Enter] apply\n  [s]     skip\n  [q]     quit\n> "
-    ));
-    assert!(transcript.contains(
-        "(no candidates found)\nChoose an action:\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [j]     add JSON field\n"
-    ));
-    assert!(
-        !transcript.contains("(no candidates found)\nChoose an action:\n  [1 3]   toggle row(s)")
+    let (exit, transcript) = fixture.run(
+        "not-a-choice\nw\nmissing.env\nn\ne\nMANUAL\n\n\n\n",
+        &environment,
     );
-    assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
-}
-
-#[test]
-fn setup_repeats_the_action_menu_after_a_toggle() {
-    let fixture = Fixture::new();
-    let environment = fixture.environment(&[("API_TOKEN", "value")]);
-
-    // The first input toggles the global row off; the following blank inputs
-    // save the two enrollment phases and apply integrations.
-    let (exit, transcript) = fixture.run("1\n\n\n\n", &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert_eq!(transcript.matches("Choose an action:").count(), 4);
+    assert_eq!(transcript.matches("Choose an action:").count(), 6);
 }
 
 #[test]
@@ -554,7 +558,7 @@ fn equal_url_candidates_use_the_normal_candidate_group() {
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert_eq!(transcript.matches("Candidate group (2 sources)").count(), 1);
+    assert_eq!(transcript.matches("Same current value").count(), 1);
     assert_eq!(transcript.matches("credential-bearing URL").count(), 1);
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("PRIMARY_URL"));
@@ -564,7 +568,7 @@ fn equal_url_candidates_use_the_normal_candidate_group() {
 }
 
 #[test]
-fn equal_environment_candidates_are_one_group_and_enroll_every_alias() {
+fn equal_value_groups_have_independent_member_selection() {
     let canary = Canary::generate("GROUPED_ENV_TOKEN");
     let fixture = Fixture::new();
     let environment = fixture.environment(&[
@@ -572,20 +576,16 @@ fn equal_environment_candidates_are_one_group_and_enroll_every_alias() {
         ("SECOND_API_SECRET", canary.value()),
     ]);
 
-    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    let (exit, transcript) = fixture.run("2\n\n\n\n", &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert_eq!(transcript.matches("Candidate group (2 sources)").count(), 1);
-    assert_eq!(transcript.matches("secret-like source name").count(), 1);
+    assert_eq!(transcript.matches("Same current value").count(), 2);
+    assert_eq!(transcript.matches("secret-like source name").count(), 2);
     assert!(transcript.contains("env FIRST_API_TOKEN"));
     assert!(transcript.contains("env SECOND_API_SECRET"));
 
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("FIRST_API_TOKEN"));
-    assert!(global.contains("SECOND_API_SECRET"));
-    assert!(
-        global.find("FIRST_API_TOKEN").expect("first identity")
-            < global.find("SECOND_API_SECRET").expect("second identity")
-    );
+    assert!(!global.contains("SECOND_API_SECRET"));
     assert_canary_absent("grouped setup transcript", transcript.as_bytes(), &canary);
 }
 
@@ -628,7 +628,7 @@ fn equal_values_in_different_phases_remain_separate_choices() {
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(!transcript.contains("Candidate group"));
+    assert!(!transcript.contains("Same current value"));
     assert!(!transcript.contains("collision:"));
     assert!(
         std::fs::read_to_string(fixture.global_config())
@@ -643,7 +643,7 @@ fn equal_values_in_different_phases_remain_separate_choices() {
 }
 
 #[test]
-fn a_partially_enrolled_group_saves_all_aliases_but_skip_is_exact() {
+fn collision_defaults_apply_independently_within_a_visual_group() {
     let canary = Canary::generate("PARTIAL_GROUP_TOKEN");
     let fixture = Fixture::new();
     let original = "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"FIRST_TOKEN\"\n";
@@ -654,6 +654,7 @@ fn a_partially_enrolled_group_saves_all_aliases_but_skip_is_exact() {
         ("FIRST_TOKEN", canary.value()),
         ("SECOND_TOKEN", canary.value()),
     ]);
+    fixture.write("README.md", canary.value());
 
     let (exit, transcript) = fixture.run("s\n\n\n", &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
@@ -666,11 +667,9 @@ fn a_partially_enrolled_group_saves_all_aliases_but_skip_is_exact() {
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(global.contains("FIRST_TOKEN"));
-    assert!(global.contains("SECOND_TOKEN"));
-    assert!(
-        global.find("FIRST_TOKEN").expect("first alias")
-            < global.find("SECOND_TOKEN").expect("second alias")
-    );
+    assert!(!global.contains("SECOND_TOKEN"));
+    assert!(transcript.contains("[x] env FIRST_TOKEN (enrolled)"));
+    assert!(transcript.contains("[ ] env SECOND_TOKEN"));
 }
 
 #[test]
@@ -682,7 +681,7 @@ fn aliases_split_into_separate_rows_after_their_values_diverge() {
     let second = fixture.environment(&[("FIRST_TOKEN", "one"), ("SECOND_TOKEN", "two")]);
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &second);
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(!transcript.contains("Candidate group"));
+    assert!(!transcript.contains("Same current value"));
     assert!(transcript.contains("env FIRST_TOKEN (enrolled)"));
     assert!(transcript.contains("env SECOND_TOKEN (enrolled)"));
 }
@@ -697,7 +696,7 @@ fn every_alias_file_is_excluded_but_an_unrelated_collision_remains() {
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(transcript.contains("Same current value"));
     assert!(transcript.contains("1 occurrence(s) elsewhere"));
     assert!(transcript.contains("README.md x1"));
     assert_canary_absent("alias collision transcript", transcript.as_bytes(), &canary);
@@ -885,14 +884,14 @@ fn resolvable_manual_sources_merge_into_an_existing_group() {
 
     let (exit, transcript) = fixture.run(script, &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(transcript.contains("Same current value"));
     assert!(
-        transcript.matches("Candidate group (2 sources)").count() >= 2,
+        transcript.matches("Same current value").count() >= 2,
         "{transcript}"
     );
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
-    assert!(global.contains("AUTO_TOKEN"));
+    assert!(!global.contains("AUTO_TOKEN"));
     assert!(global.contains("UNGATED_MANUAL"));
     assert!(project.contains("PRIVATE_VALUE"));
     assert!(project.contains("/credential"));
@@ -900,7 +899,7 @@ fn resolvable_manual_sources_merge_into_an_existing_group() {
 }
 
 #[test]
-fn manual_aliases_keep_current_member_order_then_save_by_identity() {
+fn manual_addition_preserves_existing_display_order() {
     let canary = Canary::generate("MANUAL_ORDER_TOKEN");
     let fixture = Fixture::new();
     let environment =
@@ -909,7 +908,7 @@ fn manual_aliases_keep_current_member_order_then_save_by_identity() {
     let (exit, transcript) = fixture.run("e\nA_MANUAL\n\n\n\n", &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let grouped = &transcript[transcript
-        .rfind("Candidate group (2 sources)")
+        .rfind("Same current value")
         .expect("group after manual addition")..];
     assert!(
         grouped.find("env B_TOKEN").expect("original member")
@@ -933,6 +932,30 @@ fn manual_aliases_keep_current_member_order_then_save_by_identity() {
     );
     assert_canary_absent("manual order transcript", transcript.as_bytes(), &canary);
     assert_canary_absent("manual order config", global.as_bytes(), &canary);
+}
+
+#[test]
+fn save_order_can_change_the_canonical_alias() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    std::fs::write(
+        fixture.global_config(),
+        "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"Z_TOKEN\"\n\n[[secret]]\nsource = \"env\"\nname = \"A_TOKEN\"\n",
+    )
+    .expect("global config");
+    let environment = fixture.environment(&[("Z_TOKEN", "same"), ("A_TOKEN", "same")]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let registry = match registry::build(&environment, Some(&fixture.project())) {
+        registry::Outcome::Ready(registry) => registry,
+        registry::Outcome::Malfunction(problem) => panic!("registry malfunction: {problem:?}"),
+    };
+    assert_eq!(
+        registry.redactor.canonical_sources().next(),
+        Some(&SourceId::env("A_TOKEN"))
+    );
 }
 
 #[test]
@@ -1322,6 +1345,156 @@ fn the_claude_hook_is_installed_and_verified_offline() {
 }
 
 #[test]
+fn all_integrations_pass_offline_verification() {
+    let fixture = Fixture::new();
+
+    let (exit, transcript) = fixture.run("\n\n1 2 3 4\n\n", &fixture.environment(&[]));
+
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        transcript.matches("Offline protocol check passed").count(),
+        4
+    );
+    assert!(fixture.claude_settings().exists());
+    assert!(fixture.home().join(".codex/hooks.json").exists());
+    assert!(
+        fixture
+            .home()
+            .join(".copilot/hooks/contextveil.json")
+            .exists()
+    );
+    assert!(
+        fixture
+            .home()
+            .join(".config/opencode/plugins/contextveil.ts")
+            .exists()
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn verification_failure_removes_new_artifacts() {
+    let fixture = Fixture::new();
+    let executable = fixture.executable_failing("claude");
+    let state = fixture.global_config().with_file_name("integrations.toml");
+
+    let (exit, transcript) = fixture.run_with_executable(
+        "\n\n1\n\n",
+        &fixture.environment(&[]),
+        &fixture.project(),
+        &executable,
+    );
+
+    assert_eq!(exit, Exit::Failure, "{transcript}");
+    assert!(transcript.contains("Offline protocol check failed"));
+    assert!(!fixture.claude_settings().exists());
+    assert!(
+        !state.exists(),
+        "failed ownership changes must not be saved"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn verification_failure_restores_previous_state_byte_for_byte() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    detect_claude(&fixture);
+    assert_eq!(
+        fixture.run(ACCEPT_ALL, &fixture.environment(&[])).0,
+        Exit::Ok
+    );
+
+    let settings_path = fixture.claude_settings();
+    let mut settings: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("installed settings"))
+            .expect("settings JSON");
+    settings["hooks"]["PostToolUse"]
+        .as_array_mut()
+        .expect("hook groups")
+        .push(serde_json::json!({
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": "/other/mutator"}]
+        }));
+    let mut previous_artifact = b"\n  ".to_vec();
+    previous_artifact.extend(serde_json::to_vec(&settings).expect("serialize settings"));
+    previous_artifact.extend_from_slice(b"\n");
+    std::fs::write(&settings_path, &previous_artifact).expect("custom settings bytes");
+    std::fs::set_permissions(&settings_path, std::fs::Permissions::from_mode(0o640))
+        .expect("custom settings permissions");
+
+    let state_path = fixture.global_config().with_file_name("integrations.toml");
+    let mut previous_state = b"# preserve this formatting\n".to_vec();
+    previous_state.extend(std::fs::read(&state_path).expect("ownership state"));
+    std::fs::write(&state_path, &previous_state).expect("custom state bytes");
+
+    let executable = fixture.executable_failing("claude");
+    let (exit, transcript) = fixture.run_with_executable(
+        ACCEPT_ALL,
+        &fixture.environment(&[]),
+        &fixture.project(),
+        &executable,
+    );
+
+    assert_eq!(exit, Exit::Failure, "{transcript}");
+    assert!(!transcript.contains("Keep it and continue?"));
+    assert_eq!(
+        std::fs::read(&settings_path).expect("restored settings"),
+        previous_artifact
+    );
+    assert_eq!(
+        std::fs::metadata(&settings_path)
+            .expect("settings metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o640
+    );
+    assert_eq!(
+        std::fs::read(state_path).expect("restored state"),
+        previous_state
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn later_failure_keeps_completed_earlier_actions() {
+    let fixture = Fixture::new();
+    let executable = fixture.executable_failing("codex");
+
+    let (exit, transcript) = fixture.run_with_executable(
+        "\n\n1 2 3 4\n\n",
+        &fixture.environment(&[]),
+        &fixture.project(),
+        &executable,
+    );
+
+    assert_eq!(exit, Exit::Failure, "{transcript}");
+    assert!(fixture.claude_settings().exists());
+    assert!(!fixture.home().join(".codex/hooks.json").exists());
+    assert!(
+        !fixture
+            .home()
+            .join(".copilot/hooks/contextveil.json")
+            .exists()
+    );
+    assert!(
+        !fixture
+            .home()
+            .join(".config/opencode/plugins/contextveil.ts")
+            .exists()
+    );
+    assert!(!transcript.contains("Installed the GitHub Copilot CLI integration"));
+
+    let state =
+        std::fs::read_to_string(fixture.global_config().with_file_name("integrations.toml"))
+            .expect("ownership state");
+    assert!(state.contains("[claude]"));
+    assert!(!state.contains("[codex]"));
+}
+
+#[test]
 fn rerunning_setup_leaves_an_installed_integration_byte_identical() {
     // `SET-014`, `INT-004`: a second run must not duplicate or rewrite the
     // managed entry.
@@ -1604,7 +1777,7 @@ fn known_sources_persist_explicit_refs_and_bypass_name_gating() {
     assert!(global.contains("file = \"~/.codex/auth.json\""));
     assert!(global.contains("pointer = \"/tokens/access_token\""));
     assert!(global.contains("pointer = \"/tokens/refresh_token\""));
-    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(transcript.contains("Same current value"));
     assert_eq!(transcript.matches("Codex primary credentials").count(), 1);
     assert_canary_absent("known source transcript", transcript.as_bytes(), &canary);
     assert_canary_absent("known source config", global.as_bytes(), &canary);
@@ -1746,7 +1919,7 @@ fn project_known_source_aliases_form_one_candidate_group() {
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(transcript.contains("Same current value"));
     assert_eq!(
         transcript
             .matches("Claude configured environment credentials")
@@ -1787,7 +1960,7 @@ fn a_known_source_group_with_an_external_collision_defaults_unselected() {
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(transcript.contains("Candidate group (2 sources)"));
+    assert!(transcript.contains("Same current value"));
     assert!(transcript.contains("collision:"));
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(!project.contains("settings.json"));
