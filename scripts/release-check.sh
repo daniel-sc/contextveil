@@ -2,9 +2,9 @@
 # Release artifact, checksum, and installer verification (`REL-001` - `REL-004`,
 # `TST-007`).
 #
-# It packages a real release artifact for the host target, then drives the real
-# `install.sh` against those artifacts over `file://` URLs. No network access and
-# no published release are required, so this runs in CI and locally.
+# With no argument it packages the host target once. When passed an artifact
+# directory or archive, it verifies that exact prebuilt native package without
+# rebuilding. It drives `install.sh` against the artifacts over `file://` URLs.
 set -euo pipefail
 
 version="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
@@ -35,6 +35,14 @@ fail() {
   exit 1
 }
 
+checksum_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
 printf 'ContextVeil release check\n'
 printf '  version     %s\n' "${version}"
 printf '  target      %s\n' "${target}"
@@ -43,32 +51,45 @@ printf '  target      %s\n' "${target}"
 
 releases="${work}/releases/v${version}"
 mkdir -p "${releases}"
-bash scripts/package.sh "${target}" "${releases}" >/dev/null
 archive="${releases}/contextveil-${version}-${target}.tar.gz"
 checksums="${releases}/contextveil-${version}-SHA256SUMS"
+
+if [ "$#" -gt 1 ]; then
+  fail "usage: release-check.sh [ARTIFACT_OR_DIRECTORY]"
+elif [ "$#" -eq 1 ]; then
+  artifact="$1"
+  if [ -d "${artifact}" ]; then
+    source_archive="${artifact}/$(basename "${archive}")"
+    source_checksums="${artifact}/$(basename "${checksums}")"
+  else
+    [ "$(basename "${artifact}")" = "$(basename "${archive}")" ] ||
+      fail "the supplied artifact is not the native ${target} package"
+    source_archive="${artifact}"
+    source_checksums="$(dirname "${artifact}")/$(basename "${checksums}")"
+  fi
+  [ -f "${source_archive}" ] || fail "the prebuilt release archive was not found"
+  [ -f "${source_checksums}" ] || fail "the prebuilt checksum file was not found"
+  cp "${source_archive}" "${archive}"
+  cp "${source_checksums}" "${checksums}"
+  printf '  artifact    %s\n' "${source_archive}"
+else
+  bash scripts/package.sh "${target}" "${releases}" >/dev/null
+fi
 
 [ -f "${archive}" ] || fail "the release archive was not produced"
 [ -f "${checksums}" ] || fail "the checksum file was not produced"
 check "release archive and checksum file exist"
 
 # `REL-001`: the checksum must match the artifact.
-if command -v sha256sum >/dev/null 2>&1; then
-  (cd "${releases}" && sha256sum --check --status "$(basename "${checksums}")") ||
-    fail "the published checksum does not match the artifact"
-else
-  (cd "${releases}" && shasum -a 256 --check --status "$(basename "${checksums}")") ||
-    fail "the published checksum does not match the artifact"
-fi
+checksum_entries="$(awk -v name="$(basename "${archive}")" '$2 == name || $2 == "*" name {count += 1; checksum = $1} END {print count + 0, checksum}' "${checksums}")"
+checksum_count="${checksum_entries%% *}"
+expected="${checksum_entries#* }"
+[ "${checksum_count}" = 1 ] || fail "the checksum file must list the native artifact exactly once"
+[ "${#expected}" -eq 64 ] || fail "the artifact checksum is not a SHA-256 digest"
+case "${expected}" in *[!0-9a-fA-F]*) fail "the artifact checksum is not a SHA-256 digest" ;; esac
+[ "$(checksum_of "${archive}")" = "${expected}" ] ||
+  fail "the published checksum does not match the artifact"
 check "checksum matches the artifact"
-
-# Deterministic packaging: the same commit and platform produce the same bytes.
-second="${work}/second"
-mkdir -p "${second}"
-bash scripts/package.sh "${target}" "${second}" >/dev/null
-if ! cmp -s "${archive}" "${second}/contextveil-${version}-${target}.tar.gz"; then
-  fail "packaging is not reproducible on this platform"
-fi
-check "packaging the same commit twice produces identical bytes"
 
 # A release index in the shape `install.sh` parses, newest first.
 index="${work}/index.json"

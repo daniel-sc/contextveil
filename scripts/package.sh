@@ -77,9 +77,9 @@ checksums="${output}/contextveil-${version}-SHA256SUMS"
 (
   cd "${output}"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$(basename "${archive}")" >>"$(basename "${checksums}")"
+    sha256sum "$(basename "${archive}")" >"$(basename "${checksums}")"
   else
-    shasum -a 256 "$(basename "${archive}")" >>"$(basename "${checksums}")"
+    shasum -a 256 "$(basename "${archive}")" >"$(basename "${checksums}")"
   fi
 )
 

@@ -458,4 +458,36 @@ mod tests {
         assert_eq!(Event::parse("tool"), Some(Event::PostToolUse));
         assert_eq!(Event::parse("other"), None);
     }
+
+    #[test]
+    fn the_project_registry_is_selected_from_event_cwd() {
+        let canary = Canary::generate("PROJECT_TOKEN");
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n");
+        let project = fixture.root.join("project");
+        std::fs::create_dir_all(&project).expect("project directory");
+        std::fs::write(
+            project.join(".contextveil.toml"),
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"PROJECT_TOKEN\"\n",
+        )
+        .expect("project config");
+        let environment = fixture.environment(&[("PROJECT_TOKEN", canary.value())]);
+        let payload = json!({
+            "cwd": project,
+            "toolResult": {
+                "resultType": "success",
+                "textResultForLlm": canary.value(),
+            },
+        })
+        .to_string();
+
+        let response = handle(Event::PostToolUse, &payload, &environment);
+        let stdout = response.stdout.as_deref().expect("intervention");
+        assert_canary_absent("copilot stdout", stdout.as_bytes(), &canary);
+        let (_, final_object) = split(&response);
+        assert_eq!(
+            final_object["modifiedResult"]["textResultForLlm"],
+            json!("<SECRET:PROJECT_TOKEN>")
+        );
+    }
 }

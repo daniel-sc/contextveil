@@ -30,10 +30,6 @@ path = "src/bin/fuzz_smoke.rs"
 required-features = ["testing"]
 
 [[test]]
-name = "claude_hook"
-required-features = ["testing"]
-
-[[test]]
 name = "setup"
 required-features = ["testing"]
 
@@ -42,11 +38,7 @@ name = "diagnose"
 required-features = ["testing"]
 
 [[test]]
-name = "codex_hook"
-required-features = ["testing"]
-
-[[test]]
-name = "copilot_hook"
+name = "process_boundaries"
 required-features = ["testing"]
 
 [[test]]

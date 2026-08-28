@@ -433,4 +433,35 @@ mod tests {
         .to_string();
         assert_eq!(handle(&payload, &environment), Response::silent());
     }
+
+    #[test]
+    fn the_project_registry_is_selected_from_event_cwd() {
+        let canary = Canary::generate("PROJECT_TOKEN");
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n");
+        let project = fixture.root.join("project");
+        std::fs::create_dir_all(&project).expect("project directory");
+        std::fs::write(
+            project.join(".contextveil.toml"),
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"PROJECT_TOKEN\"\n",
+        )
+        .expect("project config");
+        let environment = fixture.environment(&[("PROJECT_TOKEN", canary.value())]);
+        let payload = json!({
+            "hook_event_name": "PostToolUse",
+            "cwd": project,
+            "tool_response": {"output": canary.value()},
+        })
+        .to_string();
+
+        let response = handle(&payload, &environment);
+        let stdout = response.stdout.as_deref().expect("intervention");
+        assert_canary_absent("codex stdout", stdout.as_bytes(), &canary);
+        assert!(
+            parsed(&response)["reason"]
+                .as_str()
+                .expect("model-facing reason")
+                .contains("<SECRET:PROJECT_TOKEN>")
+        );
+    }
 }

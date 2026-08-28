@@ -26,7 +26,7 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-latest
           - target: x86_64-apple-darwin
-            runner: macos-latest
+            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +36,7 @@ jobs:
           version: 2026.8.6
           experimental: true
 
-      # Each runner builds natively except x86_64 macOS, which cross-compiles
-      # from the arm64 runner using the SDK that ships with it.
+      # Each target is built once on its native runner.
       - run: mise run package ${{ matrix.target }}
 
       - uses: actions/upload-artifact@v4
@@ -46,16 +45,28 @@ jobs:
           path: dist/
 
   verify:
-    name: verify artifacts (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: verify artifact (${{ matrix.target }})
+    needs: package
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        # `SUP-001`: packaging and installing differ per platform, and macOS
-        # ships bsdtar rather than GNU tar, so both are verified.
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: dist
 
       - name: Install pinned tools
         uses: jdx/mise-action@v2
@@ -63,15 +74,18 @@ jobs:
           version: 2026.8.6
           experimental: true
 
-      # `TST-007`: release checks exercise built artifacts, checksums, clean
-      # installation, and upgrade behavior.
-      - run: mise run release-check
+      # `TST-007`: verify the package job's exact native artifact. Supplying the
+      # artifact directory guarantees release-check cannot rebuild it.
+      - run: mise run release-check dist
 
   publish:
     name: publish
     needs: [package, verify]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    # Required reviewers on this protected environment record the manual human
+    # qualification before any already-verified artifact is published.
+    environment: release-publication
     steps:
       - uses: actions/checkout@v4
 

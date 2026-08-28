@@ -136,6 +136,54 @@ fn completed_setup_contract_work_has_no_temporary_gap_entries() {
 }
 
 #[test]
+fn traceability_has_exactly_one_row_per_requirement_and_known_statuses() {
+    let specification = read("specification.md");
+    let traceability = read("docs/traceability.md");
+    let requirement_ids: HashSet<&str> = specification
+        .lines()
+        .filter_map(|line| line.strip_prefix("**"))
+        .filter_map(|line| line.split_once("**").map(|(id, _)| id))
+        .filter(|id| {
+            id.len() == 7
+                && id.as_bytes()[3] == b'-'
+                && id[4..].bytes().all(|byte| byte.is_ascii_digit())
+        })
+        .collect();
+
+    let mut traced = HashSet::new();
+    for line in traceability.lines().filter(|line| line.starts_with("| ")) {
+        let columns: Vec<_> = line.split('|').map(str::trim).collect();
+        let Some(id) = columns.get(1).copied() else {
+            continue;
+        };
+        let looks_like_requirement = id.len() == 7
+            && id.as_bytes().get(3) == Some(&b'-')
+            && id[4..].bytes().all(|byte| byte.is_ascii_digit());
+        if !looks_like_requirement {
+            continue;
+        }
+        assert!(requirement_ids.contains(id), "unknown traceability ID {id}");
+        assert!(traced.insert(id), "duplicate traceability row for {id}");
+        let status = columns.get(columns.len() - 2).copied().unwrap_or_default();
+        assert!(
+            [
+                "covered",
+                "covered-by-design",
+                "manual",
+                "accepted-limitation",
+                "gap",
+            ]
+            .contains(&status),
+            "unknown traceability status `{status}` for {id}"
+        );
+    }
+    assert_eq!(
+        traced, requirement_ids,
+        "traceability ID set differs from spec"
+    );
+}
+
+#[test]
 fn limitation_and_deviation_entries_are_well_formed() {
     let text = read("limitations.md");
     let mut identifiers = HashSet::new();

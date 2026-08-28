@@ -46,7 +46,11 @@ run = [
 
 [tasks.check]
 description = "Routine local quality gate"
-depends = ["format-check", "lint", "test", "test-plugin"]
+depends = ["format-check", "lint", "test", "test-plugin", "fuzz-regressions"]
+
+[tasks.fuzz-regressions]
+description = "Replay the committed fuzz regression corpus"
+run = "bash scripts/fuzz-regressions.sh"
 
 [tasks.fuzz-smoke]
 description = "Bounded fuzz smoke run over untrusted input surfaces"
