@@ -35,8 +35,12 @@ Choose an action:
   [q]     quit
 
 Integrations
-   1 [x] Claude Code (PRODUCTION) - detected, installed
+
+   1 [x] Claude Code (production) - detected, installed
+        file: /home/user/.claude/settings.json
    2 [ ] Codex CLI (EXPERIMENTAL) - not detected, not installed
+        file: /home/user/.codex/hooks.json
+  Installation is not proof of protection; run `contextveil doctor` to check it.
 Choose an action:
   [1 3]   toggle row(s)
   [Enter] apply

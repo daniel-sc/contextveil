@@ -7,6 +7,7 @@
 //! Values are never written. Only source references are persisted (`SEC-004`),
 //! and paths are stored exactly as entered (`CFG-010`).
 
+use std::fs::Permissions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -124,19 +125,37 @@ pub fn write_text(path: &Path, contents: &str, user_only: bool) -> Result<bool, 
         return Ok(false);
     }
 
+    replace_bytes(path, contents.as_bytes(), user_only, None)?;
+    Ok(true)
+}
+
+/// Atomically restores exact artifact bytes and their prior permissions.
+pub(super) fn restore_bytes(
+    path: &Path,
+    contents: &[u8],
+    permissions: Option<&Permissions>,
+) -> Result<(), WriteError> {
+    replace_bytes(path, contents, false, permissions)
+}
+
+fn replace_bytes(
+    path: &Path,
+    contents: &[u8],
+    user_only: bool,
+    permissions: Option<&Permissions>,
+) -> Result<(), WriteError> {
     let directory = path.parent().unwrap_or(Path::new("."));
     create_directory(directory, user_only)?;
 
     let temporary = temporary_path(path);
-    write_temporary(&temporary, contents.as_bytes(), user_only).inspect_err(|_| {
+    write_temporary(&temporary, contents, user_only, permissions).inspect_err(|_| {
         let _ = std::fs::remove_file(&temporary);
     })?;
 
     std::fs::rename(&temporary, path).map_err(|_| {
         let _ = std::fs::remove_file(&temporary);
         WriteError::Replace
-    })?;
-    Ok(true)
+    })
 }
 
 fn create_directory(directory: &Path, user_only: bool) -> Result<(), WriteError> {
@@ -153,17 +172,26 @@ fn create_directory(directory: &Path, user_only: bool) -> Result<(), WriteError>
     builder.create(directory).map_err(|_| WriteError::Directory)
 }
 
-fn write_temporary(path: &Path, contents: &[u8], user_only: bool) -> Result<(), WriteError> {
+fn write_temporary(
+    path: &Path,
+    contents: &[u8],
+    user_only: bool,
+    permissions: Option<&Permissions>,
+) -> Result<(), WriteError> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
-    if user_only {
+    if user_only || permissions.is_some() {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
     let mut file = options.open(path).map_err(|_| WriteError::Temporary)?;
     file.write_all(contents)
         .map_err(|_| WriteError::Temporary)?;
+    if let Some(permissions) = permissions {
+        file.set_permissions(permissions.clone())
+            .map_err(|_| WriteError::Temporary)?;
+    }
     // Flush to disk before the rename so a crash cannot leave a renamed but
     // empty file behind.
     file.sync_all().map_err(|_| WriteError::Temporary)?;
@@ -329,6 +357,30 @@ mod tests {
         assert_ne!(before, after);
         assert!(config::parse(&before, Path::new("/p"), None).is_ok());
         assert!(config::parse(&after, Path::new("/p"), Some(Path::new("/h"))).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn byte_restoration_preserves_contents_and_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temporary_root("restore-bytes");
+        let path = root.join("settings.json");
+        std::fs::write(&path, b"replacement").expect("replacement file");
+        let permissions = Permissions::from_mode(0o640);
+
+        restore_bytes(&path, b"\xfforiginal bytes", Some(&permissions)).expect("restore bytes");
+
+        assert_eq!(
+            std::fs::read(&path).expect("restored contents"),
+            b"\xfforiginal bytes"
+        );
+        let mode = std::fs::metadata(&path)
+            .expect("restored metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o640);
         let _ = std::fs::remove_dir_all(&root);
     }
 
