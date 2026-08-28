@@ -133,9 +133,9 @@ pub fn write_text(path: &Path, contents: &str, user_only: bool) -> Result<bool, 
 pub(super) fn restore_bytes(
     path: &Path,
     contents: &[u8],
-    permissions: Option<&Permissions>,
+    permissions: &Permissions,
 ) -> Result<(), WriteError> {
-    replace_bytes(path, contents, false, permissions)
+    replace_bytes(path, contents, false, Some(permissions))
 }
 
 fn replace_bytes(
@@ -370,7 +370,7 @@ mod tests {
         std::fs::write(&path, b"replacement").expect("replacement file");
         let permissions = Permissions::from_mode(0o640);
 
-        restore_bytes(&path, b"\xfforiginal bytes", Some(&permissions)).expect("restore bytes");
+        restore_bytes(&path, b"\xfforiginal bytes", &permissions).expect("restore bytes");
 
         assert_eq!(
             std::fs::read(&path).expect("restored contents"),

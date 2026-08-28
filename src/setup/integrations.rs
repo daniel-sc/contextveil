@@ -21,7 +21,6 @@ use crate::integration::{
     self, Detection, HARNESSES, Harness, Inspection, Tier, Verification, state,
 };
 use crate::sanitize;
-use crate::setup::render;
 use crate::setup::ui::{Cancelled, Terminal};
 use crate::source::Environment;
 
@@ -29,8 +28,6 @@ use crate::source::Environment;
 pub(super) struct Row {
     pub(super) inspection: Inspection,
     pub(super) selected: bool,
-    /// Whether a managed artifact existed when the phase started.
-    pub(super) installed: bool,
 }
 
 /// Runs the integration phase.
@@ -65,7 +62,6 @@ pub fn phase(
                 selected: installed
                     || (harness.tier() == Tier::Production
                         && inspection.detection == Detection::Detected),
-                installed,
                 inspection,
             }
         })
@@ -73,10 +69,10 @@ pub fn phase(
 
     loop {
         terminal.line("Integrations");
-        for line in render::integrations(&rows).lines() {
+        for line in render_rows(&rows).lines() {
             terminal.line(line);
         }
-        for line in render::integration_actions(rows.len()).lines() {
+        for line in render_actions(rows.len()).lines() {
             terminal.line(line);
         }
         let answer = match terminal.ask(">") {
@@ -129,6 +125,70 @@ pub fn phase(
     Ok(())
 }
 
+/// Pure integration presentation used by setup and the broad rendering snapshot.
+pub(super) fn render_rows(rows: &[Row]) -> String {
+    let mut lines = vec![String::new()];
+    for (index, row) in rows.iter().enumerate() {
+        let harness = row.inspection.harness;
+        lines.push(format!(
+            "  {:>2} [{}] {} ({}) - {}, {}",
+            index + 1,
+            if row.selected { "x" } else { " " },
+            harness.label(),
+            harness.tier_label(),
+            match row.inspection.detection {
+                Detection::Detected => "detected",
+                Detection::NotDetected => "not detected",
+            },
+            describe(&row.inspection.installed)
+        ));
+        lines.push(format!(
+            "        file: {}",
+            sanitize::path(&row.inspection.artifact_path)
+        ));
+        for conflict in &row.inspection.conflicts {
+            lines.push(format!(
+                "        other hook on the same event: {} ({})",
+                conflict.command,
+                if conflict.approved {
+                    "approved"
+                } else {
+                    "needs review"
+                }
+            ));
+        }
+    }
+    lines.push(
+        "  Installation is not proof of protection; run `contextveil doctor` to check it."
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+pub(super) fn render_actions(row_count: usize) -> String {
+    let mut lines = vec!["Choose an action:".to_string()];
+    if row_count > 0 {
+        lines.push("  [1 3]   toggle row(s)".to_string());
+    }
+    lines.extend([
+        "  [Enter] apply".to_string(),
+        "  [s]     skip".to_string(),
+        "  [q]     quit".to_string(),
+    ]);
+    lines.join("\n")
+}
+
+fn describe(installed: &Installed) -> &'static str {
+    match installed {
+        Installed::Absent => "not installed",
+        Installed::Current => "installed",
+        Installed::Outdated { .. } => "installed, pointing at another binary",
+        Installed::Modified { .. } => "installed entry was modified by hand",
+        Installed::Unreadable => "host file is not valid JSON",
+        Installed::Unexpected => "host file has an unexpected shape",
+    }
+}
+
 fn toggle(terminal: &mut Terminal<'_>, rows: &mut [Row], selection: &str) {
     let mut unknown = Vec::new();
     for token in selection.split_whitespace() {
@@ -137,7 +197,7 @@ fn toggle(terminal: &mut Terminal<'_>, rows: &mut [Row], selection: &str) {
                 let row = &mut rows[number - 1];
                 row.selected = !row.selected;
                 if row.selected
-                    && !row.installed
+                    && !row.inspection.is_installed()
                     && row.inspection.harness.tier() == Tier::Experimental
                 {
                     // `SUP-003`: experimental installation is an affirmative
@@ -167,6 +227,7 @@ fn apply(
 ) -> Result<(), Exit> {
     let harness = row.inspection.harness;
     let label = harness.label();
+    let installed = row.inspection.is_installed();
 
     if let Installed::Modified { command } = &row.inspection.installed {
         // `INT-004`: a hand-modified entry is preserved, not rewritten.
@@ -176,7 +237,7 @@ fn apply(
         return Ok(());
     }
 
-    if matches!((row.selected, row.installed), (false, false)) {
+    if matches!((row.selected, installed), (false, false)) {
         return Ok(());
     }
 
@@ -191,7 +252,7 @@ fn apply(
     };
     let previous = state.get(harness).cloned();
 
-    let result = match (row.selected, row.installed) {
+    let result = match (row.selected, installed) {
         (false, false) => Ok(()),
         (false, true) => match integration::remove(harness, home, state) {
             Ok(true) => {
@@ -210,7 +271,7 @@ fn apply(
             }
         },
         (true, _) => {
-            if !row.installed && row.inspection.detection == Detection::NotDetected {
+            if !installed && row.inspection.detection == Detection::NotDetected {
                 // `INT-002`: disclose that verification is limited.
                 terminal.line(&format!(
                     "  {label} was not detected. The integration will be installed, but \
@@ -262,8 +323,7 @@ fn apply(
 /// The exact managed artifact before one integration action.
 struct ArtifactSnapshot {
     path: PathBuf,
-    contents: Option<Vec<u8>>,
-    permissions: Option<Permissions>,
+    prior: Option<(Vec<u8>, Permissions)>,
 }
 
 impl ArtifactSnapshot {
@@ -271,28 +331,25 @@ impl ArtifactSnapshot {
         match std::fs::read(path) {
             Ok(contents) => Ok(Self {
                 path: path.to_path_buf(),
-                contents: Some(contents),
-                permissions: Some(std::fs::metadata(path)?.permissions()),
+                prior: Some((contents, std::fs::metadata(path)?.permissions())),
             }),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Self {
                 path: path.to_path_buf(),
-                contents: None,
-                permissions: None,
+                prior: None,
             }),
             Err(error) => Err(error),
         }
     }
 
-    fn restore(self) -> io::Result<()> {
-        match self.contents {
-            Some(contents) => {
-                crate::setup::write::restore_bytes(&self.path, &contents, self.permissions.as_ref())
-                    .map_err(|_| io::Error::other("atomic integration artifact restoration failed"))
+    fn restore(self) -> bool {
+        match self.prior {
+            Some((contents, permissions)) => {
+                crate::setup::write::restore_bytes(&self.path, &contents, &permissions).is_ok()
             }
             None => match std::fs::remove_file(&self.path) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(error),
+                Ok(()) => true,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+                Err(_) => false,
             },
         }
     }
@@ -306,7 +363,7 @@ fn rollback(
     previous: Option<Managed>,
     state: &mut State,
 ) -> Result<(), Exit> {
-    if artifact.restore().is_err() {
+    if !artifact.restore() {
         terminal.line("  warning: the previous integration state could not be restored.");
     }
     state.set(harness, previous);
