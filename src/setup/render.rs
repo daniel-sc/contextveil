@@ -3,6 +3,10 @@
 
 use super::describe;
 use super::enrollment::Item;
+use super::integrations::Row;
+use crate::integration::Detection;
+use crate::integration::hooks_json::Installed;
+use crate::sanitize;
 
 pub(super) fn enrollment(items: &[Item]) -> String {
     let mut lines = vec![String::new()];
@@ -71,13 +75,79 @@ pub(super) fn enrollment_actions(row_count: usize) -> String {
     lines.join("\n")
 }
 
+pub(super) fn integrations(rows: &[Row]) -> String {
+    let mut lines = vec![String::new()];
+    for (index, row) in rows.iter().enumerate() {
+        let harness = row.inspection.harness;
+        lines.push(format!(
+            "  {:>2} [{}] {} ({}) - {}, {}",
+            index + 1,
+            if row.selected { "x" } else { " " },
+            harness.label(),
+            harness.tier_label(),
+            match row.inspection.detection {
+                Detection::Detected => "detected",
+                Detection::NotDetected => "not detected",
+            },
+            describe_installed(&row.inspection.installed)
+        ));
+        lines.push(format!(
+            "        file: {}",
+            sanitize::path(&row.inspection.artifact_path)
+        ));
+        for conflict in &row.inspection.conflicts {
+            lines.push(format!(
+                "        other hook on the same event: {} ({})",
+                conflict.command,
+                if conflict.approved {
+                    "approved"
+                } else {
+                    "needs review"
+                }
+            ));
+        }
+    }
+    lines.push(
+        "  Installation is not proof of protection; run `contextveil doctor` to check it."
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+pub(super) fn integration_actions(row_count: usize) -> String {
+    let mut lines = vec!["Choose an action:".to_string()];
+    if row_count > 0 {
+        lines.push("  [1 3]   toggle row(s)".to_string());
+    }
+    lines.extend([
+        "  [Enter] apply".to_string(),
+        "  [s]     skip".to_string(),
+        "  [q]     quit".to_string(),
+    ]);
+    lines.join("\n")
+}
+
+fn describe_installed(installed: &Installed) -> &'static str {
+    match installed {
+        Installed::Absent => "not installed",
+        Installed::Current => "installed",
+        Installed::Outdated { .. } => "installed, pointing at another binary",
+        Installed::Modified { .. } => "installed entry was modified by hand",
+        Installed::Unreadable => "host file is not valid JSON",
+        Installed::Unexpected => "host file has an unexpected shape",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::integration::hooks_json::Installed;
+    use crate::integration::{Harness, Inspection};
     use crate::setup::collision::Collisions;
     use crate::setup::enrollment::Member;
+    use crate::setup::integrations::Row;
     use crate::setup::known_source::Rule;
     use crate::source::SourceRef;
 
@@ -173,13 +243,45 @@ mod tests {
             wildcard_values: Vec::new(),
             collisions: None,
         };
+        let integration_rows = [
+            Row {
+                inspection: Inspection {
+                    harness: Harness::Claude,
+                    artifact_path: PathBuf::from("/home/user/.claude/settings.json"),
+                    detection: Detection::Detected,
+                    installed: Installed::Current,
+                    conflicts: Vec::new(),
+                    hook_executable: None,
+                    hook_timeout: Some(5),
+                    disabled_by_policy: false,
+                },
+                selected: true,
+                installed: true,
+            },
+            Row {
+                inspection: Inspection {
+                    harness: Harness::Codex,
+                    artifact_path: PathBuf::from("/home/user/.codex/hooks.json"),
+                    detection: Detection::NotDetected,
+                    installed: Installed::Absent,
+                    conflicts: Vec::new(),
+                    hook_executable: None,
+                    hook_timeout: None,
+                    disabled_by_policy: false,
+                },
+                selected: false,
+                installed: false,
+            },
+        ];
 
         let actual = format!(
-            "Global sources (this machine)\n{}\n{}\n\nProject sources (this project)\n{}\n{}\n\nIntegrations\n   1 [x] Claude Code (PRODUCTION) - detected, installed\n   2 [ ] Codex CLI (EXPERIMENTAL) - not detected, not installed\nChoose an action:\n  [1 3]   toggle row(s)\n  [Enter] apply\n  [s]     skip\n  [q]     quit\n\nNo-row action state\n{}\n{}\n",
+            "Global sources (this machine)\n{}\n{}\n\nProject sources (this project)\n{}\n{}\n\nIntegrations\n{}\n{}\n\nNo-row action state\n{}\n{}\n",
             enrollment(&[grouped, unavailable, wildcard]),
             enrollment_actions(3),
             enrollment(&[]),
             enrollment_actions(0),
+            integrations(&integration_rows),
+            integration_actions(integration_rows.len()),
             enrollment(&[]),
             enrollment_actions(0),
         );

@@ -21,15 +21,16 @@ use crate::integration::{
     self, Detection, HARNESSES, Harness, Inspection, Tier, Verification, state,
 };
 use crate::sanitize;
+use crate::setup::render;
 use crate::setup::ui::{Cancelled, Terminal};
 use crate::source::Environment;
 
 /// One selectable integration row.
-struct Row {
-    inspection: Inspection,
-    selected: bool,
+pub(super) struct Row {
+    pub(super) inspection: Inspection,
+    pub(super) selected: bool,
     /// Whether a managed artifact existed when the phase started.
-    installed: bool,
+    pub(super) installed: bool,
 }
 
 /// Runs the integration phase.
@@ -72,8 +73,12 @@ pub fn phase(
 
     loop {
         terminal.line("Integrations");
-        render(terminal, &rows);
-        render_actions(terminal, rows.len());
+        for line in render::integrations(&rows).lines() {
+            terminal.line(line);
+        }
+        for line in render::integration_actions(rows.len()).lines() {
+            terminal.line(line);
+        }
         let answer = match terminal.ask(">") {
             Ok(answer) => answer,
             Err(Cancelled) => return cancelled(terminal),
@@ -122,63 +127,6 @@ pub fn phase(
     }
     terminal.blank();
     Ok(())
-}
-
-fn render(terminal: &mut Terminal<'_>, rows: &[Row]) {
-    terminal.blank();
-    for (index, row) in rows.iter().enumerate() {
-        let harness = row.inspection.harness;
-        terminal.line(&format!(
-            "  {:>2} [{}] {} ({}) - {}, {}",
-            index + 1,
-            if row.selected { "x" } else { " " },
-            harness.label(),
-            harness.tier_label(),
-            match row.inspection.detection {
-                Detection::Detected => "detected",
-                Detection::NotDetected => "not detected",
-            },
-            describe(&row.inspection.installed)
-        ));
-        terminal.line(&format!(
-            "        file: {}",
-            sanitize::path(&row.inspection.artifact_path)
-        ));
-        for conflict in &row.inspection.conflicts {
-            terminal.line(&format!(
-                "        other hook on the same event: {} ({})",
-                conflict.command,
-                if conflict.approved {
-                    "approved"
-                } else {
-                    "needs review"
-                }
-            ));
-        }
-    }
-    terminal
-        .line("  Installation is not proof of protection; run `contextveil doctor` to check it.");
-}
-
-fn render_actions(terminal: &mut Terminal<'_>, row_count: usize) {
-    terminal.line("Choose an action:");
-    if row_count > 0 {
-        terminal.line("  [1 3]   toggle row(s)");
-    }
-    terminal.line("  [Enter] apply");
-    terminal.line("  [s]     skip");
-    terminal.line("  [q]     quit");
-}
-
-fn describe(installed: &Installed) -> &'static str {
-    match installed {
-        Installed::Absent => "not installed",
-        Installed::Current => "installed",
-        Installed::Outdated { .. } => "installed, pointing at another binary",
-        Installed::Modified { .. } => "installed entry was modified by hand",
-        Installed::Unreadable => "host file is not valid JSON",
-        Installed::Unexpected => "host file has an unexpected shape",
-    }
 }
 
 fn toggle(terminal: &mut Terminal<'_>, rows: &mut [Row], selection: &str) {
@@ -338,14 +286,8 @@ impl ArtifactSnapshot {
     fn restore(self) -> io::Result<()> {
         match self.contents {
             Some(contents) => {
-                if let Some(parent) = self.path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::write(&self.path, contents)?;
-                if let Some(permissions) = self.permissions {
-                    std::fs::set_permissions(&self.path, permissions)?;
-                }
-                Ok(())
+                crate::setup::write::restore_bytes(&self.path, &contents, self.permissions.as_ref())
+                    .map_err(|_| io::Error::other("atomic integration artifact restoration failed"))
             }
             None => match std::fs::remove_file(&self.path) {
                 Ok(()) => Ok(()),
