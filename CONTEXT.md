@@ -51,10 +51,10 @@ phrase even though the accepted document grammar is JSON5.
 _Avoid_: JSONC source, JSON5 source type
 
 **Candidate Group**:
-A visual setup block within one enrollment scope containing candidate source
-references whose currently resolved values are equal. Every represented source
-remains an independent enrollment choice; the group shares only preview, rule,
-and collision presentation.
+One setup enrollment unit within one scope containing candidate source
+references whose currently resolved values are equal. The group has one
+selection state; selecting it enrolls every represented source so aliases remain
+protected if their values later diverge.
 _Avoid_: Duplicate secret, merged source
 
 **Group Representative**:
