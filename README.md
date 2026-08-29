@@ -15,7 +15,7 @@ It only replaces exact values from sources you choose.
 It is an extra safety net, not a promise to cover every
 way a secret can be exposed or used.
 
-> **Status:** Pre-release. `v1.0.0-alpha.2` is available, but stable V1 has not
+> **Status:** Pre-release. `v1.0.0-alpha.3` is available, but stable V1 has not
 > been published yet. See [Quick Start](#quick-start) for the current install
 > command.
 
@@ -122,7 +122,7 @@ While ContextVeil is in pre-release, install the published alpha explicitly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.sh |
-  bash -s -- --version 1.0.0-alpha.2
+  bash -s -- --version 1.0.0-alpha.3
 ```
 
 After stable V1 is published, the shorter command will install the latest stable
