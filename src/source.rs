@@ -69,14 +69,6 @@ impl SourceRef {
             SourceRef::Json { path, .. } | SourceRef::Properties { path, .. } => Some(path),
         }
     }
-
-    /// The dotenv file this reference reads, if any.
-    pub fn dotenv_file(&self) -> Option<&Path> {
-        match self {
-            SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => Some(path),
-            SourceRef::Env { .. } | SourceRef::Json { .. } | SourceRef::Properties { .. } => None,
-        }
-    }
 }
 
 /// Why a source has no usable value right now.
@@ -360,19 +352,6 @@ impl Resolver {
                     },
                 }
             }
-        }
-    }
-
-    /// Keys assigned more than once in an already-read file (`SRC-004`).
-    pub fn duplicate_keys(&self, path: &Path) -> &[String] {
-        if let Some(FileState::Parsed(dotenv)) = self.files.get(path) {
-            dotenv.duplicates()
-        } else if let Some(PropertiesFileState::Parsed(properties)) =
-            self.properties_files.get(path)
-        {
-            properties.duplicates()
-        } else {
-            &[]
         }
     }
 
@@ -731,7 +710,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn unreadable_dotenv_and_json_files_are_malfunctions() {
+    fn unreadable_file_sources_are_malfunctions() {
         use std::os::unix::fs::PermissionsExt;
         let fixture = Fixture::new();
         let path = fixture.write(".env.locked", "A=1\n");
@@ -757,6 +736,14 @@ mod tests {
                     ..
                 }
             ));
+            let mut resolver = Resolver::new();
+            assert!(matches!(
+                resolver.resolve(&properties_ref(&path, "token"), &Environment::default()),
+                Resolution::Malfunction {
+                    why: SourceMalfunction::Unreadable,
+                    ..
+                }
+            ));
         }
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
@@ -772,7 +759,7 @@ mod tests {
             resolver.resolve(&key_ref(&path, "A"), &environment),
             Resolution::Resolved(_)
         ));
-        assert_eq!(resolver.duplicate_keys(&path), ["A"]);
+        assert_eq!(resolver.duplicate_keys_for(&key_ref(&path, "A")), ["A"]);
 
         // Removing the file after the first read must not change this event.
         std::fs::remove_file(&path).expect("remove fixture file");
@@ -950,7 +937,7 @@ mod tests {
         let fixture = Fixture::new();
         let path = fixture.write(
             "application.properties",
-            "spring.datasource.password=first\nspring.datasource.pass\\u0077ord=  final  \n",
+            "spring.datasource.password=first\nspring.datasource.pass\\u0077ord=  final  \nempty=  \n",
         );
         let mut resolver = Resolver::new();
         match resolver.resolve(
@@ -964,9 +951,44 @@ mod tests {
             other => panic!("expected properties value, got {other:?}"),
         }
         assert_eq!(
-            resolver.duplicate_keys(&path),
+            resolver.duplicate_keys_for(&properties_ref(&path, "spring.datasource.password")),
             ["spring.datasource.password"]
         );
+        for (key, why) in [
+            ("missing", Unresolved::KeyAbsent),
+            ("empty", Unresolved::Empty),
+        ] {
+            assert!(matches!(
+                resolver.resolve(&properties_ref(&path, key), &Environment::default()),
+                Resolution::Unresolved { why: actual, .. } if actual == why
+            ));
+        }
+        assert!(matches!(
+            Resolver::new().resolve(
+                &properties_ref(&fixture.path("missing.properties"), "key"),
+                &Environment::default(),
+            ),
+            Resolution::Unresolved {
+                why: Unresolved::Absent,
+                ..
+            }
+        ));
+
+        std::fs::write(&path, "spring.datasource.password=rotated\n").expect("rotate properties");
+        match resolver.resolve(
+            &properties_ref(&path, "spring.datasource.password"),
+            &Environment::default(),
+        ) {
+            Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "final"),
+            other => panic!("expected event-local cached value, got {other:?}"),
+        }
+        match Resolver::new().resolve(
+            &properties_ref(&path, "spring.datasource.password"),
+            &Environment::default(),
+        ) {
+            Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "rotated"),
+            other => panic!("expected fresh properties value, got {other:?}"),
+        }
     }
 
     #[test]

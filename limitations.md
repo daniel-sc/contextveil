@@ -369,17 +369,18 @@ external automation, then run human-readable diagnostics.
 ### LIM-022: Non-UTF-8 Source Paths
 
 **Reality:** TOML can represent only UTF-8 strings. Automatic discovery skips
-dotenv files whose project-relative path contains non-UTF-8 bytes, although it
-renders the unavailable path safely in setup.
+dotenv and properties files whose project-relative path contains non-UTF-8
+bytes, although it renders the unavailable path safely in setup.
 
-**Impact:** A dotenv source at such a path cannot be enrolled directly in V1.
+**Impact:** A dotenv or properties source at such a path cannot be enrolled
+directly in V1.
 
 **Workaround:** Rename the file or an ancestor directory to a UTF-8 name, or
 expose the credential through an enrolled environment variable.
 
-**Verification:** A Unix test asserts such a path is safely reported, not parsed
-or persisted. Its discovery half additionally creates the file, which runs only
-where the filesystem accepts a non-UTF-8 name; APFS rejects one, so macOS covers
+**Verification:** Unix tests assert dotenv and properties paths are safely
+reported, not parsed or persisted. Discovery additionally creates a non-UTF-8
+dotenv path where the filesystem permits it; APFS rejects one, so macOS covers
 the reporting half alone.
 
 ### LIM-023: Known Source Rules Are Advisory

@@ -1026,12 +1026,16 @@ fn an_unresolved_manual_source_requires_confirmation() {
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(!global.contains("ABSENT_TOKEN"));
 
-    // Accept: saved even though it does not resolve yet (`SET-005`).
+    // Properties use the same confirmation path and persist an exact key.
     let fixture = Fixture::new();
-    let (exit, _) = fixture.run("e\nABSENT_TOKEN\ny\n\n\n\n", &fixture.environment(&[]));
+    let (exit, _) = fixture.run(
+        "p\nmissing.properties\nmissing.password\ny\n\n\n\n",
+        &fixture.environment(&[]),
+    );
     assert_eq!(exit, Exit::Ok);
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
-    assert!(global.contains("ABSENT_TOKEN"));
+    assert!(global.contains("missing.properties"));
+    assert!(global.contains("missing.password"));
 }
 
 #[test]
@@ -1095,6 +1099,7 @@ fn properties_are_discovered_and_enrolled_as_exact_keys() {
     assert!(!project.contains("messages_en"));
     assert!(transcript.contains("properties configuration"));
     assert!(transcript.contains("credential-bearing URL"));
+    assert!(!transcript.contains("collision:"));
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     assert_canary_absent("setup transcript", transcript.as_bytes(), &url_canary);
     assert_canary_absent("project config", project.as_bytes(), &canary);

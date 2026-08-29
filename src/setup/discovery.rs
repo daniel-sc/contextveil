@@ -269,16 +269,19 @@ fn eligible_properties_path(root: &Path, path: &Path) -> bool {
 
 fn configuration_name(stem: &str) -> bool {
     stem.eq_ignore_ascii_case("application")
-        || stem
-            .strip_prefix("application-")
-            .is_some_and(|profile| !profile.is_empty())
+        || has_profile(stem, "application-")
         || stem.eq_ignore_ascii_case("bootstrap")
-        || stem
-            .strip_prefix("bootstrap-")
-            .is_some_and(|profile| !profile.is_empty())
+        || has_profile(stem, "bootstrap-")
         || ["microprofile-config", "gradle", "sonar-project"]
             .iter()
             .any(|name| stem.eq_ignore_ascii_case(name))
+}
+
+fn has_profile(stem: &str, prefix: &str) -> bool {
+    stem.len() > prefix.len()
+        && stem
+            .get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
 }
 
 fn strip_locale_suffix(stem: &str) -> Option<&str> {
@@ -578,6 +581,18 @@ mod tests {
         assert!(inspected.display.contains("\\xff"));
         assert!(!inspected.display.contains('\u{fffd}'));
 
+        let properties_path = tree
+            .root
+            .join(OsString::from_vec(vec![0xff]))
+            .join("app.properties");
+        let properties = inspect_properties(&properties_path, None);
+        assert_eq!(
+            properties.state,
+            PropertiesState::Unavailable(PropertiesUnavailable::NonUtf8Path)
+        );
+        assert!(properties.display.contains("\\xff"));
+        assert!(!properties.display.contains('\u{fffd}'));
+
         // `LIM-022`: APFS rejects file names that are not valid UTF-8, so the
         // discovery half only runs on a filesystem that accepts one.
         if std::fs::write(&path, "A=1\n").is_err() {
@@ -675,6 +690,8 @@ mod tests {
             "database.properties",
             "apps/a/application-prod.properties",
             "apps/b/src/main/resources/application.properties",
+            "apps/c/Application-prod_de.properties",
+            "apps/d/BOOTSTRAP-qa_DE.properties",
             "modules/lib/gradle.properties",
             "modules/lib/META-INF/microprofile-config.properties",
             "tools/sonar-project.properties",
@@ -700,11 +717,19 @@ mod tests {
             .iter()
             .filter_map(|file| file.entered.as_deref())
             .collect();
-        assert_eq!(names.len(), 6, "{names:?}");
-        assert!(names.contains(&"apps/a/application-prod.properties"));
-        assert!(names.contains(&"apps/b/src/main/resources/application.properties"));
-        assert!(!names.iter().any(|name| name.contains("application_en")));
-        assert!(!names.iter().any(|name| name.contains("locales")));
+        assert_eq!(
+            names,
+            [
+                "apps/a/application-prod.properties",
+                "apps/b/src/main/resources/application.properties",
+                "apps/c/Application-prod_de.properties",
+                "apps/d/BOOTSTRAP-qa_DE.properties",
+                "database.properties",
+                "modules/lib/META-INF/microprofile-config.properties",
+                "modules/lib/gradle.properties",
+                "tools/sonar-project.properties",
+            ]
+        );
     }
 
     #[test]
