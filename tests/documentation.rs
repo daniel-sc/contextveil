@@ -22,7 +22,6 @@ fn public_support_matrices_have_the_required_tiers() {
     for (document, heading) in [
         ("README.md", "## Support and Security Limits"),
         ("docs/vision.md", "## V1 Support Posture"),
-        ("docs/release-notes-template.md", "## Support matrix"),
     ] {
         let text = read(document);
         let matrix = section(&text, heading);
@@ -56,11 +55,17 @@ fn public_support_matrices_have_the_required_tiers() {
 }
 
 #[test]
-fn release_notes_link_the_boundary_and_reporting_documents() {
-    let text = read("docs/release-notes-template.md");
-    for link in ["(limitations.md)", "(../SECURITY.md)"] {
-        assert!(text.contains(link), "release notes omit the `{link}` link");
-    }
+fn changelog_has_an_entry_for_the_current_package_version() {
+    let changelog = read("CHANGELOG.md");
+    let heading = format!("## [{}]", env!("CARGO_PKG_VERSION"));
+    assert!(
+        changelog.lines().any(|line| line.starts_with(&heading)),
+        "CHANGELOG.md has no entry for the current package version"
+    );
+    assert!(
+        changelog.contains("## [Unreleased]"),
+        "CHANGELOG.md has no Unreleased section"
+    );
 }
 
 #[test]
@@ -71,25 +76,6 @@ fn public_known_source_documents_link_the_inventory() {
         overview.contains("(docs/known-sources.md)"),
         "README overview does not link the known source inventory"
     );
-
-    let release_notes = read("docs/release-notes-template.md");
-    let overview = section(&release_notes, "## Known Source Rules");
-    let overview = overview.split_whitespace().collect::<Vec<_>>().join(" ");
-    for marker in [
-        "secret-like names",
-        "credential-bearing URLs",
-        "recognized credential document rules",
-        "full JSON5 grammar",
-        "bounded",
-        "selected by default",
-        "known-sources.md",
-        "LIM-023",
-    ] {
-        assert!(
-            overview.contains(marker),
-            "release-note overview omits `{marker}`"
-        );
-    }
 }
 
 #[test]

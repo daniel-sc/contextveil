@@ -110,9 +110,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
           notes="$(mktemp)"
-          sed "s/__VERSION__/${version}/g" docs/release-notes-template.md > "${notes}"
+          version="${GITHUB_REF_NAME#v}"
+          bash scripts/release-notes.sh "${GITHUB_REF_NAME}" >"${notes}"
+          if [ ! -s "${notes}" ]; then
+            printf 'No changelog section found for %s\n' "${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
           # A prerelease is published as one, and its notes say how to install it
           # given that the installer never selects a prerelease on its own
           # (`REL-002`).
@@ -121,15 +125,26 @@ jobs:
             *-*)
               prerelease=(--prerelease)
               {
-                printf '\n## This is a prerelease\n\n'
-                printf 'The installer only selects stable releases on its own, so name this one:\n\n'
+                printf '\n## Install\n\n'
+                printf 'The installer selects stable releases automatically. Install this prerelease by naming it:\n\n'
                 printf '```bash\n'
                 printf 'curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v%s/install.sh | bash -s -- --version %s\n' \
                   "${version}" "${version}"
                 printf '```\n'
               } >>"${notes}"
               ;;
+            *)
+              {
+                printf '\n## Install\n\n'
+                printf '```bash\n'
+                printf 'curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v%s/install.sh | bash\n' \
+                  "${version}"
+                printf '```\n'
+              } >>"${notes}"
+              ;;
           esac
+          printf '\nSee the [README](https://github.com/daniel-sc/contextveil/tree/%s), [limitations](https://github.com/daniel-sc/contextveil/blob/%s/docs/limitations.md), and [qualification record](https://github.com/daniel-sc/contextveil/blob/%s/docs/qualification.md) for details.\n' \
+            "${GITHUB_REF_NAME}" "${GITHUB_REF_NAME}" "${GITHUB_REF_NAME}" >>"${notes}"
           gh release create "${GITHUB_REF_NAME}" \
             --title "ContextVeil ${version}" \
             --notes-file "${notes}" \

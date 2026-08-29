@@ -43,7 +43,7 @@ the end of the audit.
 | SUP-002 | Claude is production; Codex, Copilot, OpenCode are experimental | src/integration/mod.rs (`Tier` enum) | src/integration/mod.rs::only_claude_is_production; tests/documentation.rs::public_support_matrices_have_the_required_tiers | covered |
 | SUP-003 | Experimental integrations labeled EXPERIMENTAL everywhere; opt-in only; not counted as production health | src/diagnose.rs:534 (`Tier::Experimental => " (EXPERIMENTAL)"`); src/setup/integrations.rs:171-174 (affirmative installation only) | tests/diagnose.rs (asserts output contains "EXPERIMENTAL", ~line 884); tests/setup.rs::an_experimental_integration_requires_an_affirmative_choice; tests/documentation.rs::public_support_matrices_have_the_required_tiers | covered |
 | SUP-004 | No host version checks; health from configuration and synthetic checks | No version-detection code exists anywhere in src/; doc comment in src/integration/mod.rs states this explicitly | covered-by-design — a prohibition satisfied by the absence of any version-comparison code; DIA-003/DIA-006 evidence the config+synthetic-check alternative | covered-by-design |
-| SUP-005 | Coverage applies to local harness modes honoring the integration; cloud/remote/container modes need separate install | README.md and release-note support-matrix scoping text | Manual release review compares the coverage statements with the requirement | manual |
+| SUP-005 | Coverage applies to local harness modes honoring the integration; cloud/remote/container modes need separate install | README.md support matrix | Manual release review compares the coverage statements with the requirement | manual |
 
 ## 3. CLI (`CLI-*`)
 

@@ -297,6 +297,7 @@ mise run release-check
 - [Limitations](docs/limitations.md): complete security and coding-agent boundaries
 - [Vision](docs/vision.md): product intent and non-goals
 - [Architecture](docs/architecture.md): implementation boundaries
+- [Changelog](CHANGELOG.md): release history
 - [Known Source Rule inventory](docs/known-sources.md): supported bounded rules,
   exact locations and fields, and non-contract boundaries
 

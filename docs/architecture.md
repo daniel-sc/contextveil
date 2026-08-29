@@ -399,6 +399,10 @@ Ordinary upgrades stay within the installed major version. Incompatible major
 upgrades require affirmative opt-in. Release checks include clean installation,
 upgrade, binary version, checksum, and setup-free invocation tests.
 
+`CHANGELOG.md` is the canonical release history. The release workflow publishes
+the section matching the tag and adds only version-specific installation
+guidance; detailed product documentation remains in the README and linked docs.
+
 ## Tactical Discretion
 
 Implementers may choose module layout, parser and terminal libraries, matcher

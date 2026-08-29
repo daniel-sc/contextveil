@@ -320,8 +320,8 @@ fixtures are updated.
 assurance is needed.
 
 **Verification:** Health relies on configuration and synthetic checks, never a
-version-range certificate. The host versions each protocol was verified against
-are recorded in the release notes as evidence, not as a supported range.
+version-range certificate. Host versions used for verification may be recorded
+in release records as evidence, not as a supported range.
 
 ### LIM-019: Project Roots And Multi-Root Sessions
 
