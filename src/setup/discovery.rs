@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::dotenv::{self, Dotenv, ParseErrorKind};
+use crate::properties::{self, Properties};
 use crate::sanitize;
 
 /// Directories never entered by project discovery or collision analysis.
@@ -67,8 +68,40 @@ pub struct Discovered {
 #[derive(Debug, Default)]
 pub struct ProjectFiles {
     pub dotenv: Vec<Discovered>,
+    pub properties: Vec<DiscoveredProperties>,
     pub claude_settings: Vec<PathBuf>,
     pub claude_mcp: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredProperties {
+    pub path: PathBuf,
+    pub display: String,
+    pub entered: Option<String>,
+    pub state: PropertiesState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PropertiesState {
+    Available(Properties),
+    Unavailable(PropertiesUnavailable),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertiesUnavailable {
+    NonUtf8Path,
+    Unreadable,
+    Malformed,
+}
+
+impl PropertiesUnavailable {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NonUtf8Path => "its path is not valid UTF-8",
+            Self::Unreadable => "it could not be read",
+            Self::Malformed => "it is malformed properties",
+        }
+    }
 }
 
 /// Whether a discovered file can be offered as a candidate.
@@ -134,6 +167,9 @@ pub fn project_files(project_root: &Path) -> ProjectFiles {
     found
         .dotenv
         .sort_by(|left, right| left.path.cmp(&right.path));
+    found
+        .properties
+        .sort_by(|left, right| left.path.cmp(&right.path));
     found.claude_settings.sort();
     found.claude_mcp.sort();
     found
@@ -171,6 +207,15 @@ fn walk(root: &Path, directory: &Path, found: &mut ProjectFiles) {
             found
                 .dotenv
                 .push(inspect(&path, relative_entry(root, &path)));
+        } else if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.ends_with(".properties"))
+            && eligible_properties_path(root, &path)
+        {
+            found
+                .properties
+                .push(inspect_properties(&path, relative_entry(root, &path)));
         } else if entry.file_name() == "settings.json"
             && path.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new(".claude"))
         {
@@ -178,6 +223,120 @@ fn walk(root: &Path, directory: &Path, found: &mut ProjectFiles) {
         } else if entry.file_name() == ".mcp.json" {
             found.claude_mcp.push(path);
         }
+    }
+}
+
+fn eligible_properties_path(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let localization_directory = relative.parent().is_some_and(|parent| {
+        parent.components().any(|component| {
+            component.as_os_str().to_str().is_some_and(|name| {
+                ["i18n", "l10n", "locale", "locales", "lang", "languages"]
+                    .iter()
+                    .any(|excluded| name.eq_ignore_ascii_case(excluded))
+            })
+        })
+    });
+    if localization_directory {
+        return false;
+    }
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let stem = file_name.strip_suffix(".properties").unwrap_or(file_name);
+    if configuration_name(stem) {
+        return true;
+    }
+    let base = strip_locale_suffix(stem).unwrap_or(stem);
+    ![
+        "message",
+        "messages",
+        "label",
+        "labels",
+        "string",
+        "strings",
+        "text",
+        "texts",
+        "errors",
+        "validationmessages",
+    ]
+    .iter()
+    .any(|excluded| base.eq_ignore_ascii_case(excluded))
+        && strip_locale_suffix(stem).is_none()
+}
+
+fn configuration_name(stem: &str) -> bool {
+    stem.eq_ignore_ascii_case("application")
+        || stem
+            .strip_prefix("application-")
+            .is_some_and(|profile| !profile.is_empty())
+        || stem.eq_ignore_ascii_case("bootstrap")
+        || stem
+            .strip_prefix("bootstrap-")
+            .is_some_and(|profile| !profile.is_empty())
+        || ["microprofile-config", "gradle", "sonar-project"]
+            .iter()
+            .any(|name| stem.eq_ignore_ascii_case(name))
+}
+
+fn strip_locale_suffix(stem: &str) -> Option<&str> {
+    let parts: Vec<&str> = stem.split('_').collect();
+    for suffix_parts in [3, 2, 1] {
+        if parts.len() <= suffix_parts {
+            continue;
+        }
+        let suffix = &parts[parts.len() - suffix_parts..];
+        let valid = match suffix {
+            [language] => ascii_letters(language, 2),
+            [language, second] => {
+                ascii_letters(language, 2)
+                    && (ascii_letters(second, 2)
+                        || ascii_digits(second, 3)
+                        || ascii_letters(second, 4))
+            }
+            [language, script, region] => {
+                ascii_letters(language, 2)
+                    && ascii_letters(script, 4)
+                    && (ascii_letters(region, 2) || ascii_digits(region, 3))
+            }
+            _ => false,
+        };
+        if valid {
+            let suffix_len = suffix.iter().map(|part| part.len() + 1).sum::<usize>();
+            return stem.get(..stem.len() - suffix_len);
+        }
+    }
+    None
+}
+
+fn ascii_letters(value: &str, length: usize) -> bool {
+    value.len() == length && value.bytes().all(|byte| byte.is_ascii_alphabetic())
+}
+
+fn ascii_digits(value: &str, length: usize) -> bool {
+    value.len() == length && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+pub fn inspect_properties(path: &Path, entered: Option<String>) -> DiscoveredProperties {
+    let display = sanitize::path(path);
+    let state = if entered.is_none() {
+        PropertiesState::Unavailable(PropertiesUnavailable::NonUtf8Path)
+    } else {
+        match std::fs::read(path) {
+            Err(_) => PropertiesState::Unavailable(PropertiesUnavailable::Unreadable),
+            Ok(bytes) => match properties::parse(&bytes) {
+                Ok(parsed) => PropertiesState::Available(parsed),
+                Err(_) => PropertiesState::Unavailable(PropertiesUnavailable::Malformed),
+            },
+        }
+    };
+    DiscoveredProperties {
+        path: path.to_path_buf(),
+        display,
+        entered,
+        state,
     }
 }
 
@@ -507,5 +666,68 @@ mod tests {
         assert!(!is_dotenv_name(".environment"));
         assert!(!is_dotenv_name("local.env"));
         assert!(!is_dotenv_name(".ENV"));
+    }
+
+    #[test]
+    fn properties_discovery_handles_monorepos_and_localization_exclusions() {
+        let tree = Tree::new();
+        for included in [
+            "database.properties",
+            "apps/a/application-prod.properties",
+            "apps/b/src/main/resources/application.properties",
+            "modules/lib/gradle.properties",
+            "modules/lib/META-INF/microprofile-config.properties",
+            "tools/sonar-project.properties",
+        ] {
+            tree.file(included, "database.password=value\n");
+        }
+        for excluded in [
+            "i18n/database.properties",
+            "apps/a/locales/custom.properties",
+            "messages.properties",
+            "labels_de.properties",
+            "custom_de_DE.properties",
+            "custom_zh_Hant_TW.properties",
+            "messages_zh_Hant.properties",
+            "application_en.properties",
+            "UPPER.PROPERTIES",
+        ] {
+            tree.file(excluded, "database.password=value\n");
+        }
+
+        let files = project_files(&tree.root).properties;
+        let names: Vec<_> = files
+            .iter()
+            .filter_map(|file| file.entered.as_deref())
+            .collect();
+        assert_eq!(names.len(), 6, "{names:?}");
+        assert!(names.contains(&"apps/a/application-prod.properties"));
+        assert!(names.contains(&"apps/b/src/main/resources/application.properties"));
+        assert!(!names.iter().any(|name| name.contains("application_en")));
+        assert!(!names.iter().any(|name| name.contains("locales")));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn properties_symlinks_and_special_files_are_not_read() {
+        let tree = Tree::new();
+        let target = tree.file("outside.properties", "database.password=value\n");
+        std::os::unix::fs::symlink(&target, tree.root.join("linked.properties"))
+            .expect("properties symlink");
+        let fifo = tree.root.join("blocked.properties");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .expect("mkfifo")
+                .success()
+        );
+
+        let names: Vec<_> = project_files(&tree.root)
+            .properties
+            .into_iter()
+            .filter_map(|file| file.entered)
+            .collect();
+        assert_eq!(names, ["outside.properties"]);
     }
 }

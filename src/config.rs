@@ -292,6 +292,28 @@ fn parse_entry(
                 pointer: pointer.to_string(),
             })
         }
+        "properties" => {
+            if entry.name.is_some() || entry.all.is_some() || entry.pointer.is_some() {
+                return Err(EntryProblem::UnexpectedField);
+            }
+            let file = entry
+                .file
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            let key = entry
+                .key
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            if file.is_empty() || key.is_empty() {
+                return Err(EntryProblem::EmptyField);
+            }
+            let path = paths::expand(file, base, home).map_err(EntryProblem::InvalidPath)?;
+            Ok(SourceRef::Properties {
+                entered: file.to_string(),
+                path,
+                key: key.to_string(),
+            })
+        }
         _ => Err(EntryProblem::UnknownSourceType),
     }
 }
@@ -495,6 +517,27 @@ pointer = "/tokens/access_token"
         for field in ["name = \"A\"", "key = \"A\"", "all = false"] {
             let text = format!(
                 "version = 1\n\n[[secret]]\nsource = \"json\"\nfile = \"auth.json\"\npointer = \"/token\"\n{field}\n"
+            );
+            assert_eq!(entry_problem(&text), EntryProblem::UnexpectedField);
+        }
+    }
+
+    #[test]
+    fn properties_entries_require_only_an_exact_file_and_decoded_key() {
+        let config = parse_text(
+            "version = 1\n\n[[secret]]\nsource = \"properties\"\nfile = \"application.properties\"\nkey = \"spring.datasource.password\"\n",
+        )
+        .expect("properties source");
+        assert!(matches!(
+            &config.sources[0],
+            SourceRef::Properties { key, path, .. }
+                if key == "spring.datasource.password"
+                    && path == &PathBuf::from("/project/application.properties")
+        ));
+
+        for field in ["all = true", "pointer = \"/token\"", "name = \"TOKEN\""] {
+            let text = format!(
+                "version = 1\n\n[[secret]]\nsource = \"properties\"\nfile = \"a.properties\"\nkey = \"token\"\n{field}\n"
             );
             assert_eq!(entry_problem(&text), EntryProblem::UnexpectedField);
         }

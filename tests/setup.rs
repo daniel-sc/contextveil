@@ -200,6 +200,45 @@ fn a_database_url_candidate_is_enrolled_as_its_environment_source() {
 }
 
 #[test]
+fn credential_url_admission_uses_trimmed_environment_and_dotenv_values() {
+    let env_canary = Canary::generate("TRIMMED_ENV_URL_PASSWORD");
+    let file_canary = Canary::generate("TRIMMED_DOTENV_URL_PASSWORD");
+    let fixture = Fixture::new();
+    let env_url = format!(
+        "  postgresql://app:{}@env.example.test/app  ",
+        env_canary.value()
+    );
+    let file_url = format!(
+        "  postgresql://app:{}@file.example.test/app  ",
+        file_canary.value()
+    );
+    std::fs::write(
+        fixture.project().join(".env"),
+        format!("SERVICE_ENDPOINT='{file_url}'\n"),
+    )
+    .expect("dotenv fixture");
+    let environment = fixture.environment(&[("SERVICE_ENDPOINT", &env_url)]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(transcript.matches("credential-bearing URL").count(), 2);
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("SERVICE_ENDPOINT"));
+    assert!(project.contains("SERVICE_ENDPOINT"));
+    assert_canary_absent(
+        "trimmed URL setup transcript",
+        transcript.as_bytes(),
+        &env_canary,
+    );
+    assert_canary_absent(
+        "trimmed URL setup transcript",
+        transcript.as_bytes(),
+        &file_canary,
+    );
+}
+
+#[test]
 fn rule_count_does_not_change_candidate_order() {
     let fixture = Fixture::new();
     let environment = fixture.environment(&[
@@ -1025,6 +1064,86 @@ fn exact_json_fields_can_be_enrolled_manually_in_both_scopes() {
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     assert_canary_absent("global config", global.as_bytes(), &canary);
     assert_canary_absent("project config", project.as_bytes(), &canary);
+}
+
+#[test]
+fn properties_are_discovered_and_enrolled_as_exact_keys() {
+    let canary = Canary::generate("PROPERTIES_DISCOVERY");
+    let url_canary = Canary::generate("PROPERTIES_URL");
+    let fixture = Fixture::new();
+    fixture.write(
+        "modules/api/database.properties",
+        &format!(
+            "database.password=  {}  \nREGISTRY=https://user:{}@registry.example.test\nordinary.setting=plain\n",
+            canary.value(),
+            url_canary.value()
+        ),
+    );
+    fixture.write("messages_en.properties", "password.label=Password\n");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(project.contains("source = \"properties\""));
+    assert!(project.contains("modules/api/database.properties"));
+    assert!(project.contains("database.password"));
+    assert!(
+        project.contains("REGISTRY"),
+        "URL admission should bypass key gating"
+    );
+    assert!(!project.contains("ordinary.setting"));
+    assert!(!project.contains("messages_en"));
+    assert!(transcript.contains("properties configuration"));
+    assert!(transcript.contains("credential-bearing URL"));
+    assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("setup transcript", transcript.as_bytes(), &url_canary);
+    assert_canary_absent("project config", project.as_bytes(), &canary);
+    assert_canary_absent("project config", project.as_bytes(), &url_canary);
+}
+
+#[test]
+fn gradle_default_and_override_properties_are_additive() {
+    let fixture = Fixture::new();
+    let default = fixture.home().join(".gradle/gradle.properties");
+    std::fs::create_dir_all(default.parent().expect("default parent")).expect("default directory");
+    std::fs::write(&default, "repository.password=default-value\n").expect("default properties");
+    let override_root = fixture.project().join("custom-gradle");
+    std::fs::create_dir_all(&override_root).expect("override directory");
+    std::fs::write(
+        override_root.join("gradle.properties"),
+        "repository.token=override-value\n",
+    )
+    .expect("override properties");
+    let environment = fixture.environment(&[("GRADLE_USER_HOME", "custom-gradle")]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("~/.gradle/gradle.properties"));
+    assert!(global.contains(&override_root.to_string_lossy().into_owned()));
+    assert!(global.contains("repository.password"));
+    assert!(global.contains("repository.token"));
+}
+
+#[test]
+fn exact_properties_keys_can_be_enrolled_manually_in_both_scopes() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home().join("manual.properties"),
+        "ordinary.name=global-value\n",
+    )
+    .expect("global properties");
+    fixture.write("manual.properties", "ordinary.name=project-value\n");
+    let script =
+        "p\n~/manual.properties\nordinary.name\n\np\nmanual.properties\nordinary.name\n\n\n";
+    let (exit, transcript) = fixture.run(script, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("source = \"properties\""));
+    assert!(global.contains("~/manual.properties"));
+    assert!(project.contains("manual.properties"));
+    assert!(project.contains("ordinary.name"));
 }
 
 #[test]

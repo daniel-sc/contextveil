@@ -51,8 +51,8 @@ The core owns:
 
 - config validation and project selection;
 - global and project registry composition;
-- environment, dotenv, and exact-pointer JSON source resolution using JSON5
-  document grammar;
+- environment, dotenv, exact-pointer JSON, and exact-key properties source
+  resolution;
 - group-level equal-value enrollment state,
   deterministic Source Identity ordering, and collision analysis;
 - canonicalization of duplicate resolved values;
@@ -143,8 +143,8 @@ writer-locking mechanism is tactical.
 
 The minimum conceptual types are:
 
-- `SourceReference`: environment, one dotenv key, all keys in a dotenv file, or
-  one exact JSON file pointer;
+- `SourceReference`: environment, one dotenv key, all keys in a dotenv file, one
+  exact JSON file pointer, or one exact decoded properties key;
 - `SourceIdentity`: the value-free equality and deterministic ordering key for a
   source reference;
 - `KnownSourceRule`: a maintained deterministic setup-time automatic
@@ -184,13 +184,18 @@ must not depend on setup having performed a migration.
 
 ## Source Resolvers
 
-The current source expansion has three concrete resolver families:
+The current source expansion has four concrete resolver families:
 
 - environment variables inherited by the hook process;
 - dotenv files parsed without interpolation or execution;
 - JSON source documents parsed with the full JSON5 grammar and selected by exact
   RFC 6901 pointer, without duplicate object members or transformations, and
   rejected before recursive deserialization beyond 128 nested containers.
+- Java-style properties files parsed through `java-properties` 2.0.0 default
+  Windows-1252 behavior and selected by exact decoded key.
+
+Every resolver trims decoded values with Rust `str::trim()` before resolution;
+all later grouping, collision, registry, and matching behavior uses that value.
 
 Resolvers return resolved, unresolved, or malfunction. They do not decide
 whether a value looks secret. A dotenv file referenced by multiple entries must
@@ -233,6 +238,12 @@ generic structured-file scanner. Machine stores use exact standard or setup-time
 environment-resolved paths. Project discovery performs one bounded walk and
 recognizes only source-specific anchored patterns. Valid unmatched structures are
 ordinary no-match results.
+
+The same project walk also collects eligible lowercase properties files. A small
+path predicate excludes localization bundles; one properties Known Source Rule
+then applies decoded-key gating or the shared credential-bearing URL rule and
+emits exact properties references. It is not a general configuration-schema
+engine or a second traversal.
 
 Codex, OpenCode, Copilot, and Claude representable primary and MCP plaintext
 stores form the first recognized credential-document release. Claude primary

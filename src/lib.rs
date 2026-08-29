@@ -14,6 +14,7 @@ pub mod integration;
 pub mod json;
 pub mod matcher;
 pub mod paths;
+pub mod properties;
 pub mod redact;
 pub mod registry;
 pub mod sanitize;

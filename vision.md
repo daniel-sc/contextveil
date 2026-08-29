@@ -7,7 +7,7 @@ requirements and [architecture.md](architecture.md) for technical boundaries.
 ## Product Promise
 
 ContextVeil keeps enrolled local secrets out of supported coding-agent model
-context by deterministically redacting exact, locally resolved values before the
+context by deterministically redacting normalized, locally resolved values before the
 model sees them.
 
 The concise positioning is:
@@ -50,8 +50,8 @@ supported model-context boundary.
 Most secret scanners ask at runtime whether arbitrary text looks secret.
 ContextVeil instead asks the user during setup which local sources should be
 enrolled, using bounded Known Source Rules where they improve discovery,
-then performs literal matching against their current values at runtime and
-redacts matches before covered content enters model context.
+then trims resolved values and performs literal matching against the normalized
+current values at runtime before covered content enters model context.
 
 ```text
 smart enrollment
@@ -109,7 +109,8 @@ change.
 - **Local by default.** Runtime resolution and redaction make no network calls.
 - **User-authorized enrollment.** Known Source Rules admit setup candidates; the
   user decides what to enroll.
-- **Boring runtime.** Matching is literal, case-sensitive, and deterministic.
+- **Boring runtime.** Source values receive one documented whitespace trim;
+  matching is otherwise literal, case-sensitive, and deterministic.
 - **Source references over snapshots.** Values are resolved from explicit local
   source references rather than copied into ContextVeil configuration.
 - **Known Source Rules, not generic crawling.** Setup applies maintained,

@@ -17,7 +17,7 @@ use contextveil::fuzz;
 
 /// Seed inputs per target, chosen to be valid or nearly valid so mutation
 /// explores interesting states rather than mostly rejecting garbage.
-const SEEDS: [(&str, &[&str]); 9] = [
+const SEEDS: [(&str, &[&str]); 10] = [
     (
         "dotenv",
         &[
@@ -25,6 +25,15 @@ const SEEDS: [(&str, &[&str]); 9] = [
             "export TOKEN=abc # comment\nQUOTED=\"line1\\nline2\"\n",
             "\u{feff}A='multi\nline'\r\nDUP=1\nDUP=2\n",
             "malformed line\n",
+        ],
+    ),
+    (
+        "properties",
+        &[
+            "token=value\n",
+            "escaped\\ key=first\\nsecond\n",
+            "continued=one\\\n  two\n",
+            "broken=\\u12xz\n",
         ],
     ),
     (

@@ -22,13 +22,16 @@ Dynamic names encode `~` as `~0` and `/` as `~1`; empty names and `*` are skippe
 Exact machine file symlinks are followed only when their targets are regular
 files. Project traversal does not follow symlinks. Copilot's MCP directory must
 be a real directory and only its immediate qualifying regular files are read.
+Properties documents use `java-properties` 2.0.0 default Windows-1252 behavior
+and persist exact decoded keys. All resolved source values are trimmed before
+admission, grouping, collision analysis, and runtime matching.
 
 ## Rule Inventory
 
 | Rule | Locations | Bounded container | Credential leaves | Notes |
 | --- | --- | --- | --- | --- |
 | Secret-like source names | Environment and discovered dotenv sources | N/A | Maintained vocabulary in [`SET-006`](../specification.md) | Format and value shape do not affect admission or ordering. |
-| Credential-bearing URLs | Environment and discovered dotenv sources | N/A | The complete URL | Absolute hierarchical URLs with authority and non-empty userinfo password, per [`SET-017`](../specification.md). |
+| Credential-bearing URLs | Values already surfaced by bounded discovery | N/A | The complete URL | Absolute hierarchical URLs with authority and non-empty userinfo password, per [`SET-017`](../specification.md); this rule introduces no recursive structured-file scan. |
 | Codex primary credentials | `~/.codex`; `${CODEX_HOME}` | `auth.json` | `/OPENAI_API_KEY`, `/tokens/id_token`, `/tokens/access_token`, `/tokens/refresh_token`, `/personal_access_token`, `/bedrock_api_key/api_key`, `/agent_identity`, `/agent_identity/agent_private_key` | Both agent identity pointers are independent. Historical support: [`openai/codex@ff0e950`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3). |
 | Codex MCP credentials | `~/.codex`; `${CODEX_HOME}` | `.credentials.json`, then each immediate root member | `access_token`, `refresh_token` | No server metadata or sibling is required. |
 | OpenCode provider credentials | `~/.local/share/opencode`; `${XDG_DATA_HOME}/opencode` | `auth.json`, then each immediate root member | `key`, `token`, `access`, `refresh` | No type, expiry, metadata, account, or enterprise field is inspected. Historical support: [`opencode@31406cc`](https://github.com/anomalyco/opencode/commit/31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d). |
@@ -40,6 +43,7 @@ be a real directory and only its immediate qualifying regular files are read.
 | Claude configured environment | `~/.claude`; `${CLAUDE_CONFIG_DIR}`; project-anchored `.claude/settings.json` | `settings.json`, then immediate `/env` members | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_AWS_API_KEY`, `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE` | Other `/env` names are not admitted by this rule. |
 | Claude MCP OAuth state | `~/.claude/.credentials.json`, `~/.claude.json`; `${CLAUDE_CONFIG_DIR}/.credentials.json`, `${CLAUDE_CONFIG_DIR}/.claude.json` | Immediate members under `/mcpOAuth` and `/mcpOAuthClientConfig` | `/mcpOAuth`: `accessToken`, `refreshToken`, `clientSecret`; `/mcpOAuthClientConfig`: `clientSecret` | No sibling fields are required. |
 | Claude MCP server credentials | `~/.claude.json`; `${CLAUDE_CONFIG_DIR}/.claude.json`; project-anchored `.mcp.json` | Each immediate `/mcpServers` member, then immediate `/headers` and `/env` maps | Headers, case-insensitive: `authorization`, `proxy-authorization`, `x-api-key`, `api-key`, `x-auth-token`, `x-subscription-token`; environment, exact: `API_KEY`, `ACCESS_TOKEN`, `AUTH_TOKEN`, `BEARER_TOKEN`, `CLIENT_SECRET`, `PASSWORD`, `SECRET`, `TOKEN`, plus the eight Claude names above | Other server fields and deeper values are not inspected. |
+| Properties configuration | Eligible lowercase `*.properties` files from the one bounded project walk; `~/.gradle/gradle.properties`; `${GRADLE_USER_HOME}/gradle.properties` | Decoded logical entries | Exact keys passing the secret-name vocabulary, plus values admitted by the credential-bearing URL rule | Localization directory, bundle-basename, and two-letter locale-suffix exclusions apply to project discovery. Recognized application, bootstrap, MicroProfile, Gradle, and Sonar names are eligibility exceptions only. |
 
 ## Boundaries
 

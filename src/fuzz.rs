@@ -82,8 +82,9 @@ pub fn context() -> Option<&'static Context> {
 pub type Target = fn(&[u8]);
 
 /// Every target, by name, for the smoke harness.
-pub const TARGETS: [(&str, Target); 9] = [
+pub const TARGETS: [(&str, Target); 10] = [
     ("dotenv", dotenv),
+    ("properties", properties),
     ("json-source", json_source),
     ("config", config),
     ("matcher", matcher),
@@ -93,6 +94,17 @@ pub const TARGETS: [(&str, Target); 9] = [
     ("copilot", copilot_hook),
     ("opencode", opencode_hook),
 ];
+
+pub fn properties(data: &[u8]) {
+    if let Ok(parsed) = crate::properties::parse(data) {
+        for (key, value) in parsed.entries() {
+            assert_eq!(parsed.get(key), Some(value));
+        }
+        for duplicate in parsed.duplicates() {
+            assert!(parsed.get(duplicate).is_some());
+        }
+    }
+}
 
 /// Dotenv grammar (`SRC-003`).
 pub fn dotenv(data: &[u8]) {

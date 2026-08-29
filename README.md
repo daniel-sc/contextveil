@@ -92,9 +92,10 @@ flowchart TD
 ```
 
 ContextVeil stores where to find each value, such as “the `API_TOKEN` environment
-variable,” “the `STRIPE_KEY` entry in `.env.local`,” or “the exact
-`/tokens/access_token` field in `auth.json`.” It does not copy the value into its
-configuration. Changes to `.env` and JSON files apply on the next supported
+variable,” “the `STRIPE_KEY` entry in `.env.local`,” “the exact
+`/tokens/access_token` field in `auth.json`,” or “the decoded
+`spring.datasource.password` key in `application.properties`.” It does not copy
+the value into its configuration. Changes to dotenv, JSON, and properties files apply on the next supported
 event. Environment changes apply after you restart the coding agent.
 
 ### Known Source Rules
@@ -104,12 +105,14 @@ Currently, the following secret-like sources are automatically detected and sugg
 - **Environment variables** with secret-like names (e.g., `API_TOKEN`, `STRIPE_KEY`) or complete values that are URLs with credentials (e.g., `https://username:password@some-db.com`)
 - **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or complete values that are URLs with credentials (e.g., `mysql://u:pass@some-db`)
 - **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot and OpenCode. Maintained credential fields are probed without modeling complete vendor schemas. (Keychain based/sidecars excluded.)
+- **Java properties files** from the bounded project walk and Gradle machine locations, with localization-bundle exclusions and exact decoded-key enrollment
 - **More to come** INI, YAML, TOML, .npmrc, ...
 
 You can find the full, detailed list of known source rules in the
 [`known-sources.md`](docs/known-sources.md) documentation.
 
-Additionally, you can manually add secret-like sources from environment variables, dotenv files, and JSON (incl. JSON5) files to your configuration.
+Additionally, you can manually add sources from environment variables, dotenv
+files, JSON (including JSON5) files, and exact Java properties keys.
 
 ## Quick Start
 
@@ -163,12 +166,13 @@ Then work normally. ContextVeil stays quiet unless it replaces something - then 
 
 - **Keeping useful output.** Commands and file reads still happen. Only enrolled
   values are replaced on supported model-bound paths.
-- **Being predictable.** Matching is literal, case-sensitive, and deterministic.
+- **Being predictable.** Resolved values are trimmed, then matching is literal,
+  case-sensitive, and deterministic.
   There is no runtime guess about whether arbitrary text looks sensitive.
 - **Handling private token formats.** A value does not need to match a known API
   key pattern. If you enroll its source, its current exact value can be matched.
 - **Following rotation.** ContextVeil reads the selected environment variables,
-  `.env` entries, and exact JSON fields for each supported event instead of
+  `.env` entries, exact JSON fields, and exact properties keys for each supported event instead of
   keeping copied values.
 - **Guiding source enrollment.** Setup applies maintained rules for likely names,
   credential-bearing URLs, and recognized coding-agent credential stores without
