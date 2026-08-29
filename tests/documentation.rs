@@ -21,7 +21,7 @@ fn section<'a>(text: &'a str, heading: &str) -> &'a str {
 fn public_support_matrices_have_the_required_tiers() {
     for (document, heading) in [
         ("README.md", "## Support and Security Limits"),
-        ("vision.md", "## V1 Support Posture"),
+        ("docs/vision.md", "## V1 Support Posture"),
         ("docs/release-notes-template.md", "## Support matrix"),
     ] {
         let text = read(document);
@@ -58,7 +58,7 @@ fn public_support_matrices_have_the_required_tiers() {
 #[test]
 fn release_notes_link_the_boundary_and_reporting_documents() {
     let text = read("docs/release-notes-template.md");
-    for link in ["(../limitations.md)", "(../SECURITY.md)"] {
+    for link in ["(limitations.md)", "(../SECURITY.md)"] {
         assert!(text.contains(link), "release notes omit the `{link}` link");
     }
 }
@@ -115,7 +115,7 @@ fn known_source_inventory_describes_bounded_advisory_rules() {
 
 #[test]
 fn completed_setup_contract_work_has_no_temporary_gap_entries() {
-    let limitations = read("limitations.md");
+    let limitations = read("docs/limitations.md");
     assert!(!limitations.contains("### LIM-011:"));
     assert!(!limitations.contains("### DEV-003:"));
     assert!(!limitations.contains("### DEV-004:"));
@@ -137,7 +137,7 @@ fn completed_setup_contract_work_has_no_temporary_gap_entries() {
 
 #[test]
 fn traceability_has_exactly_one_row_per_requirement_and_known_statuses() {
-    let specification = read("specification.md");
+    let specification = read("docs/specification.md");
     let traceability = read("docs/traceability.md");
     let requirement_ids: HashSet<&str> = specification
         .lines()
@@ -185,7 +185,7 @@ fn traceability_has_exactly_one_row_per_requirement_and_known_statuses() {
 
 #[test]
 fn limitation_and_deviation_entries_are_well_formed() {
-    let text = read("limitations.md");
+    let text = read("docs/limitations.md");
     let mut identifiers = HashSet::new();
 
     for block in text.split("\n### ").skip(1) {

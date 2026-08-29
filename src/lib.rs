@@ -3,7 +3,7 @@
 //!
 //! The library holds every security-relevant behavior: configuration loading,
 //! source resolution, registry composition, and exact-value redaction. Harness
-//! adapters translate host protocols only; see `architecture.md`.
+//! adapters translate host protocols only; see `docs/architecture.md`.
 
 pub mod adapter;
 pub mod cli;

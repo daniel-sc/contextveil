@@ -61,7 +61,7 @@ inspected. Override values resolve during setup, relative overrides use the
 invocation directory, changes require a rerun, and no shell or tilde expansion
 occurs. Raw sidecars, OS keychains, and credential helpers are not covered. See
 the [exact rule inventory](known-sources.md) and
-[`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory).
+[`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).
 
 ## Tested host versions
 
@@ -84,23 +84,23 @@ Linux and macOS on x86_64 and arm64. Each asset is listed in
 ## Known boundaries
 
 ContextVeil is a model-context safety primitive, not a guarantee that credentials
-cannot leave the machine. Read [limitations.md](../limitations.md) before relying on it. The
+cannot leave the machine. Read [limitations.md](limitations.md) before relying on it. The
 most important entries:
 
-- [`LIM-001`](../limitations.md#lim-001-model-context-not-credential-use): model
+- [`LIM-001`](limitations.md#lim-001-model-context-not-credential-use): model
   context only, not credential use or egress.
-- [`LIM-002`](../limitations.md#lim-002-unknown-and-transformed-values): unknown
+- [`LIM-002`](limitations.md#lim-002-unknown-and-transformed-values): unknown
   and transformed values are not recognized.
-- [`LIM-003`](../limitations.md#lim-003-string-values-only): string values only,
+- [`LIM-003`](limitations.md#lim-003-string-values-only): string values only,
   not object keys or binary content.
-- [`LIM-004`](../limitations.md#lim-004-common-values-can-be-destructive):
+- [`LIM-004`](limitations.md#lim-004-common-values-can-be-destructive):
   enrolling a short or common value can replace unrelated text.
-- [`LIM-012`](../limitations.md#lim-012-process-hooks-fail-open): process hooks
+- [`LIM-012`](limitations.md#lim-012-process-hooks-fail-open): process hooks
   fail open when a host crashes, times out, disables, or bypasses them.
-- [`LIM-013`](../limitations.md#lim-013-claude-coverage-gaps) through
-  [`LIM-016`](../limitations.md#lim-016-opencode-v1-api-only): per-host coverage
+- [`LIM-013`](limitations.md#lim-013-claude-coverage-gaps) through
+  [`LIM-016`](limitations.md#lim-016-opencode-v1-api-only): per-host coverage
   gaps.
-- [`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory): Known
+- [`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory): Known
   Source Rules are advisory; raw sidecars, keychains, helpers, and unknown or
   changed locations or fields remain outside coverage.
 

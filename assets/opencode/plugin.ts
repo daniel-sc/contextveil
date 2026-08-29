@@ -1,6 +1,6 @@
 // ContextVeil managed plugin. Do not edit; `contextveil setup` rewrites this file.
 //
-// This file is a thin translator (`architecture.md`, `OCO-004`): it carries no
+// This file is a thin translator (`docs/architecture.md`, `OCO-004`): it carries no
 // matcher, resolver, or replacement logic. It sends the model-visible strings of
 // two documented V1 hooks to the ContextVeil binary and writes the answers back.
 //

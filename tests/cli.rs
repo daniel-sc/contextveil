@@ -1,7 +1,7 @@
 //! Process-level tests for the public command surface.
 //!
 //! These invoke the built binary instead of calling library functions so the
-//! observable CLI contract in `specification.md` section 3 is exercised the way
+//! observable CLI contract in `docs/specification.md` section 3 is exercised the way
 //! a user and a host see it.
 
 use std::process::{Command, Output};

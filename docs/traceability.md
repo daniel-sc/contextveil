@@ -1,7 +1,7 @@
 # Requirement-To-Test Traceability Audit
 
 This document maps every normative requirement ID in
-[specification.md](../specification.md) to its implementation and its test or
+[specification.md](specification.md) to its implementation and its test or
 check evidence. `specification.md` is authoritative for observable behavior;
 this audit does not change it and records no new requirements.
 

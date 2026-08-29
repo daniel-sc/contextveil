@@ -1,7 +1,7 @@
 //! Source references and their resolution.
 //!
 //! V1 has environment, dotenv, exact-pointer JSON, and exact-key properties resolver families
-//! (`architecture.md`). A resolver returns resolved, unresolved, or malfunction;
+//! (`docs/architecture.md`). A resolver returns resolved, unresolved, or malfunction;
 //! it never decides whether a value looks secret.
 //!
 //! `SRC-009`: sources are resolved afresh for every event. The dotenv cache here

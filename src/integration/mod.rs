@@ -2,7 +2,7 @@
 //!
 //! Installers operate through documented host configuration surfaces, identify
 //! their exact managed artifact, and preserve unrelated user configuration
-//! (`architecture.md`, `INT-004`). Observed state, not persisted lifecycle
+//! (`docs/architecture.md`, `INT-004`). Observed state, not persisted lifecycle
 //! flags, determines whether an adapter is installed or functioning
 //! (`INT-006`); the state file here records only ownership and user intent.
 //!

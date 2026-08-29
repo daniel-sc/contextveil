@@ -215,7 +215,7 @@ boundary:
   saving. Unsupported raw sidecars, keychains, helpers, unknown fields, and new
   locations remain outside current coverage as detailed in `LIM-023`.
 
-See [limitations.md](limitations.md) for the complete security boundary and
+See [limitations.md](docs/limitations.md) for the complete security boundary and
 coding-agent-specific gaps.
 
 ## Commands
@@ -293,10 +293,10 @@ mise run release-check
 
 ## More Detail
 
-- [Specification](specification.md): authoritative V1 behavior
-- [Limitations](limitations.md): complete security and coding-agent boundaries
-- [Vision](vision.md): product intent and non-goals
-- [Architecture](architecture.md): implementation boundaries
+- [Specification](docs/specification.md): authoritative V1 behavior
+- [Limitations](docs/limitations.md): complete security and coding-agent boundaries
+- [Vision](docs/vision.md): product intent and non-goals
+- [Architecture](docs/architecture.md): implementation boundaries
 - [Known Source Rule inventory](docs/known-sources.md): supported bounded rules,
   exact locations and fields, and non-contract boundaries
 

@@ -4,7 +4,7 @@
 //! request on stdin and reads one JSON response from stdout. The request and
 //! response shapes below are ContextVeil's own contract, not OpenCode's, so the
 //! plugin stays a thin translator with no matcher or resolver semantics
-//! (`architecture.md`, `OCO-004`).
+//! (`docs/architecture.md`, `OCO-004`).
 //!
 //! `RUN-003`: a malfunction must abort the covered operation, so a malfunction is
 //! reported as a status the plugin turns into a thrown error rather than as

@@ -18,7 +18,7 @@ use crate::sanitize;
 /// Directories never entered by project discovery or collision analysis.
 ///
 /// `SET-003` requires excluding `.git` and maintained dependency, vendor, and
-/// build directories. The exact list is tactical (`architecture.md`).
+/// build directories. The exact list is tactical (`docs/architecture.md`).
 pub const EXCLUDED_DIRECTORIES: [&str; 30] = [
     ".git",
     ".hg",

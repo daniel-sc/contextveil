@@ -43,7 +43,7 @@ jobs:
           restore-keys: cargo-${{ matrix.os }}-
 
       # Routine CI runs the mise tasks themselves; it must not duplicate the
-      # command lines they hide (`AGENTS.md`, `architecture.md`).
+      # command lines they hide (`AGENTS.md`, `docs/architecture.md`).
       - run: mise run check
 
       - run: mise run build

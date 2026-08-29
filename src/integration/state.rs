@@ -1,6 +1,6 @@
 //! Ownership and acknowledgement state for installed integrations.
 //!
-//! `architecture.md`: integration ownership metadata lives beside the global
+//! `docs/architecture.md`: integration ownership metadata lives beside the global
 //! policy file so the policy TOML stays comprehensible. It records only what
 //! ContextVeil installed and what the user approved. It never contains a
 //! resolved value and is never treated as proof of health (`INT-006`).

@@ -7,7 +7,7 @@
 //! key and type shape (`CLA-002`).
 //!
 //! It never implements matching or resolution itself; those live in the core
-//! (`architecture.md`). Failure policy is fail-open (`RUN-001`, `RUN-002`,
+//! (`docs/architecture.md`). Failure policy is fail-open (`RUN-001`, `RUN-002`,
 //! `LIM-012`): a diagnosed malfunction warns and leaves the original content in
 //! place, and the process still exits zero so the host can present the warning
 //! (`CLI-007`).

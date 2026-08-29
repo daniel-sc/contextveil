@@ -8,7 +8,7 @@
 //! is a separate transaction that restores its prior managed state on failure.
 //!
 //! Dispatch is a plain match over a small enum, not a plugin framework
-//! (`architecture.md`).
+//! (`docs/architecture.md`).
 
 use std::fs::Permissions;
 use std::io;

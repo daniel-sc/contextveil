@@ -4,7 +4,7 @@
 //! both describe hooks as `hooks.<Event>` arrays of matcher groups, each holding
 //! command handlers with a seconds-valued `timeout`. This module is the shared
 //! implementation those two installers reuse; it was extracted only after the
-//! second concrete use (`architecture.md`).
+//! second concrete use (`docs/architecture.md`).
 //!
 //! `INT-003`: the installed command is the absolute binary path plus ContextVeil's
 //! own hidden arguments, shell-quoted so a host that runs it through a shell

@@ -1,7 +1,7 @@
 # Security Policy
 
 ContextVeil is a local model-context redaction primitive. Please read
-[limitations.md](limitations.md) before reporting: several gaps are deliberate,
+[limitations.md](docs/limitations.md) before reporting: several gaps are deliberate,
 documented parts of the V1 boundary rather than vulnerabilities.
 
 ## Reporting A Vulnerability
@@ -44,7 +44,7 @@ the report.
 
 ## Out Of Scope
 
-Everything documented in [limitations.md](limitations.md), in particular:
+Everything documented in [limitations.md](docs/limitations.md), in particular:
 
 - direct credential use or network exfiltration by a local process (`LIM-001`);
 - unknown, transformed, or encoded values (`LIM-002`);

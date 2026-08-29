@@ -1,6 +1,6 @@
 //! Public command surface.
 //!
-//! `specification.md` section 3 fixes the public commands: `setup`, `status`,
+//! `docs/specification.md` section 3 fixes the public commands: `setup`, `status`,
 //! `doctor`, `--help`, and `--version`. Harness protocol entry points exist but
 //! stay hidden from ordinary help and are treated as internal interfaces.
 
@@ -235,7 +235,7 @@ fn run_setup(err: &mut dyn Write) -> Exit {
 
 /// Runs the hidden Claude `PostToolUse` entry point.
 ///
-/// Stdout carries host protocol output only (`architecture.md`), and a
+/// Stdout carries host protocol output only (`docs/architecture.md`), and a
 /// diagnosed failure still exits zero so the host can present the warning
 /// (`CLI-007`).
 fn run_claude_hook(input: &mut dyn Read, out: &mut dyn Write) -> Exit {

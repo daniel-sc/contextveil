@@ -4,14 +4,14 @@
 
 Read these files before changing behavior or architecture:
 
-1. [vision.md](vision.md) for product intent and non-goals.
+1. [vision.md](docs/vision.md) for product intent and non-goals.
 2. [CONTEXT.md](CONTEXT.md) for canonical domain language.
-3. [specification.md](specification.md) for normative behavior.
-4. [architecture.md](architecture.md) for mandatory technical boundaries.
-5. [limitations.md](limitations.md) for accepted gaps and active deviations.
+3. [specification.md](docs/specification.md) for normative behavior.
+4. [architecture.md](docs/architecture.md) for mandatory technical boundaries.
+5. [limitations.md](docs/limitations.md) for accepted gaps and active deviations.
 
-`specification.md` is authoritative for observable behavior.
-`architecture.md` is authoritative for technical boundaries. Do not silently
+`docs/specification.md` is authoritative for observable behavior.
+`docs/architecture.md` is authoritative for technical boundaries. Do not silently
 resolve a conflict between them; surface and document it first.
 
 ## Tooling
@@ -79,11 +79,11 @@ they can be pinned by mise or the Rust toolchain configuration.
 
 ## Documentation Discipline
 
-- Observable behavior changes update `specification.md` in the same change.
-- Technical-boundary changes update `architecture.md`.
-- Product direction changes update `vision.md`.
+- Observable behavior changes update `docs/specification.md` in the same change.
+- Technical-boundary changes update `docs/architecture.md`.
+- Product direction changes update `docs/vision.md`.
 - New accepted gaps or deliberate implementation deviations update
-  `limitations.md` with impact, workaround, and verification.
+  `docs/limitations.md` with impact, workaround, and verification.
 - Canonical domain terminology changes update `CONTEXT.md`.
 - Use code comments only for local, non-obvious constraints. Do not duplicate
   broad limitations in comments; link to a limitation ID where useful.

@@ -30,8 +30,8 @@ admission, grouping, collision analysis, and runtime matching.
 
 | Rule | Locations | Bounded container | Credential leaves | Notes |
 | --- | --- | --- | --- | --- |
-| Secret-like source names | Environment and discovered dotenv sources | N/A | Maintained vocabulary in [`SET-006`](../specification.md) | Format and value shape do not affect admission or ordering. |
-| Credential-bearing URLs | Values already surfaced by bounded discovery | N/A | The complete URL | Absolute hierarchical URLs with authority and non-empty userinfo password, per [`SET-017`](../specification.md); this rule introduces no recursive structured-file scan. |
+| Secret-like source names | Environment and discovered dotenv sources | N/A | Maintained vocabulary in [`SET-006`](specification.md) | Format and value shape do not affect admission or ordering. |
+| Credential-bearing URLs | Values already surfaced by bounded discovery | N/A | The complete URL | Absolute hierarchical URLs with authority and non-empty userinfo password, per [`SET-017`](specification.md); this rule introduces no recursive structured-file scan. |
 | Codex primary credentials | `~/.codex`; `${CODEX_HOME}` | `auth.json` | `/OPENAI_API_KEY`, `/tokens/id_token`, `/tokens/access_token`, `/tokens/refresh_token`, `/personal_access_token`, `/bedrock_api_key/api_key`, `/agent_identity`, `/agent_identity/agent_private_key` | Both agent identity pointers are independent. Historical support: [`openai/codex@ff0e950`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3). |
 | Codex MCP credentials | `~/.codex`; `${CODEX_HOME}` | `.credentials.json`, then each immediate root member | `access_token`, `refresh_token` | No server metadata or sibling is required. |
 | OpenCode provider credentials | `~/.local/share/opencode`; `${XDG_DATA_HOME}/opencode` | `auth.json`, then each immediate root member | `key`, `token`, `access`, `refresh` | No type, expiry, metadata, account, or enterprise field is inspected. Historical support: [`opencode@31406cc`](https://github.com/anomalyco/opencode/commit/31406ccc51b4bd2a4e1e086b2bcaa5f7f804f26d). |
@@ -51,4 +51,4 @@ These rules do not query OS keychains, execute credential helpers, read raw
 sidecars, decode values, or add runtime wildcard traversal. Copilot `.secret`,
 `.verifier`, and `mcp-secrets` files remain unsupported. Planned formats such as
 npmrc and generic INI are not scanned. Rerun setup after host locations or field
-inventories change. See [`LIM-023`](../limitations.md#lim-023-known-source-rules-are-advisory).
+inventories change. See [`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).
