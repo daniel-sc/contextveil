@@ -155,6 +155,11 @@ all = true
 source = "json"
 file = "~/.codex/auth.json"
 pointer = "/tokens/access_token"
+
+[[secret]]
+source = "properties"
+file = "src/main/resources/application-local.properties"
+key = "spring.datasource.password"
 ```
 
 Equivalent field naming changes before the first persisted implementation MAY be
@@ -174,6 +179,7 @@ environment:       (env, exact name)
 dotenv key:        (dotenv, normalized absolute path, exact key)
 dotenv wildcard:   (dotenv-all, normalized absolute path)
 JSON field:        (json, normalized absolute path, exact JSON Pointer)
+properties key:    (properties, normalized absolute path, exact decoded key)
 ```
 
 Repeated identical tuples within one file are duplicates. A keyed entry and a
@@ -229,7 +235,18 @@ begin with `/`, MUST have a non-empty final reference token, and MUST NOT use th
 URI-fragment `#/...` form or wildcard extensions. It MUST NOT contain fields for
 another source type.
 
+**CFG-017** A properties entry MUST contain `source = "properties"`, one
+non-empty `file`, and one non-empty exact decoded `key`. It MUST NOT contain
+fields for another source type. Resolver type MUST NOT be inferred from a
+filename, and properties wildcard enrollment is not supported.
+
 ## 6. Source Resolution
+
+**SRC-016** Every source resolver MUST apply Rust `str::trim()` to a decoded
+value before deciding whether it is resolved. A value empty after trimming is
+unresolved. Candidate grouping, collision analysis, registry construction, and
+runtime matching MUST use that trimmed value. Keys, paths, labels, and
+model-visible payload strings MUST NOT be trimmed by this rule.
 
 **SRC-001** An environment reference resolves from the hook process's inherited
 environment using a case-sensitive name.
@@ -315,6 +332,17 @@ documents persisted with `source = "json"`. Harness protocols, hook payloads,
 integration configuration files, and other protocol JSON MUST remain strict JSON
 unless their own requirements separately specify another grammar.
 
+**SRC-017** A properties resolver MUST parse Java-style logical key/value entries
+with the `java-properties` 2.0.0 default Windows-1252 behavior, including its
+separators, continuation lines, escapes, and `\\uXXXX` handling. Decoded keys are
+case-sensitive and the last occurrence wins; setup and doctor SHOULD warn about
+duplicates without values. The resolver MUST select one exact decoded key and
+MUST NOT interpolate, merge profiles, execute commands, or extract components
+from values. An absent file, absent key, or value empty after `SRC-016` is
+unresolved. Permission denial, non-`NotFound` I/O failure, or parser error is a
+malfunction. A file referenced by multiple entries MUST be read and parsed once
+per event where practical, and a parser error MUST discard all entries.
+
 ## 7. Setup Discovery And Enrollment
 
 **SET-001** After TTY validation and successful preflight parsing of both
@@ -341,6 +369,9 @@ vendor, and build directories. It MUST NOT follow file or directory symlinks or
 read FIFOs, devices, sockets, or other special files. A skipped UTF-8 path may
 still be entered manually.
 
+The same single bounded project traversal MUST supply eligible lowercase
+`*.properties` files to `SET-021`; the project tree MUST NOT be walked again.
+
 **SET-004** Global dotenv probing MUST inspect matching files directly under the
 home directory and directly under the supported harness config directories,
 including `~/.claude`, `~/.codex`, `~/.copilot`, and
@@ -348,7 +379,8 @@ including `~/.claude`, `~/.codex`, `~/.copilot`, and
 general config directory.
 
 **SET-005** Both enrollment phases MUST allow manual dotenv paths, individual
-keys, wildcard file enrollment, environment names, and JSON file/pointer pairs.
+keys, wildcard file enrollment, environment names, JSON file/pointer pairs, and
+properties file/decoded-key pairs.
 A currently absent manual file, key, or pointer MAY be saved after explicit
 unresolved-source confirmation.
 
@@ -478,6 +510,7 @@ Source Identity order MUST compare source kind first in this V1 sequence:
 2. dotenv key;
 3. dotenv wildcard;
 4. JSON.
+5. properties.
 
 A source kind added later in V1 MUST append after every source kind already in
 the contractual sequence when that change lands. Within one source kind, the
@@ -516,19 +549,19 @@ once per group and ordered by the fixed inventory order in
 and the number of matching rules MUST NOT affect admission after the first match,
 selection, Group Representative choice, row order, or persistence order.
 
-**SET-017** Under the credential-bearing URL Known Source Rule, environment and
-discovered dotenv values that parse as absolute hierarchical URLs with an
-authority and a non-empty password in userinfo MUST be automatic candidates even
-when their source name does not pass `SET-006`. The
+**SET-017** Under the credential-bearing URL Known Source Rule, every value
+already surfaced by bounded automatic discovery that parses as an absolute
+hierarchical URL with an authority and a non-empty password in userinfo MUST be
+an automatic candidate even when its source name does not pass `SET-006`. The
 complete URL value, not an extracted or decoded component, is enrolled. This
-value-shape rule MUST NOT recursively inspect JSON or any other structured
-source.
+value-shape rule MUST NOT introduce recursive inspection of JSON or any other
+structured source.
 
 **SET-018** A Known Source Rule is a maintained, deterministic setup-time
 automatic candidate-admission rule. The V1 rule inventory consists of the
 secret-like name rule in `SET-006`, the credential-bearing URL rule in `SET-017`,
-and the recognized credential document rules in
-[`docs/known-sources.md`](docs/known-sources.md). Filesystem enumeration and
+the properties configuration rule in `SET-021`, and the recognized credential
+document rules in [`docs/known-sources.md`](docs/known-sources.md). Filesystem enumeration and
 manual source additions are inputs to setup, not Known Source Rules; explicit
 manual addition admits a Candidate by user action. Every applicable rule MUST run
 independently of adapter selection, installation, detection, and runtime
@@ -584,12 +617,32 @@ environment source. ContextVeil MUST NOT query OS keychains or execute
 credential helpers. Raw `.secret`, `.verifier`, and `mcp-secrets` fallback files,
 unlisted locations, and unlisted fields remain outside discovery.
 
+**SET-021** The properties configuration Known Source Rule MUST inspect every
+eligible regular lowercase `*.properties` file supplied by the single project
+walk and the additive machine paths `~/.gradle/gradle.properties` and
+`${GRADLE_USER_HOME}/gradle.properties`. Relative `GRADLE_USER_HOME` values
+resolve from setup's invocation directory. The rule admits an exact properties
+source only when its trimmed value is non-empty and its decoded key passes
+`SET-006` or its value passes `SET-017`.
+
+Project eligibility MUST exclude any file below an ASCII-case-insensitive
+`i18n`, `l10n`, `locale`, `locales`, `lang`, or `languages` segment. It MUST also
+exclude conventional bundle basenames `message`, `messages`, `label`, `labels`,
+`string`, `strings`, `text`, `texts`, `errors`, and `ValidationMessages`, and
+two-letter Java ResourceBundle-style locale suffixes with optional four-letter
+script and two-letter or three-digit region. Recognized names `application`,
+`application-*`, `bootstrap`, `bootstrap-*`, `microprofile-config`, `gradle`, and
+`sonar-project` override basename and locale exclusions at any project depth;
+localization-directory exclusions remain authoritative. These conventions affect
+eligibility only, not admission, selection, attribution, or ordering. Manual
+properties enrollment bypasses localization exclusions.
+
 Rows marked `Planned` in the inventory are non-contract roadmap information.
 They MUST NOT be treated as scanned, discovered, or covered by V1.
 
 ## 8. Effective Registry
 
-**REG-001** Every non-empty UTF-8 resolved value becomes an active match pattern.
+**REG-001** Every non-empty value normalized by `SRC-016` becomes an active match pattern.
 Runtime MUST NOT apply name, entropy, provider-format, length, or collision
 heuristics.
 
@@ -599,8 +652,8 @@ otherwise the first global entry in file order. Doctor SHOULD report the aliases
 without values.
 
 **REG-003** Source and key names are case-sensitive. Safe placeholder labels MUST
-derive from the environment name, dotenv key, or final JSON Pointer reference
-token only, never a file path.
+derive from the environment name, dotenv or properties key, or final JSON
+Pointer reference token only, never a file path.
 
 **REG-004** A label MUST preserve ASCII letters, digits, `_`, `-`, and `.` and
 replace every other non-empty run with `_`. Labels need not be globally unique.

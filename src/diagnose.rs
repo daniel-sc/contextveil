@@ -232,9 +232,12 @@ impl Snapshot {
 
         let mut duplicate_keys: Vec<(PathBuf, Vec<String>)> = Vec::new();
         for (source, _) in &resolutions {
-            if let Some(path) = source.dotenv_file() {
-                let duplicates = resolver.duplicate_keys(path);
-                if !duplicates.is_empty() && !duplicate_keys.iter().any(|(known, _)| known == path)
+            if let Some(path) = source.file() {
+                let duplicates = resolver.duplicate_keys_for(source);
+                if !duplicates.is_empty()
+                    && !duplicate_keys
+                        .iter()
+                        .any(|(known, keys)| known == path && keys == duplicates)
                 {
                     duplicate_keys.push((path.to_path_buf(), duplicates.to_vec()));
                 }
@@ -756,6 +759,11 @@ fn describe_source(id: &SourceId) -> String {
             "json {} pointer {}",
             sanitize::path(path),
             sanitize::text(pointer)
+        ),
+        SourceId::Properties { path, key } => format!(
+            "properties {} key {}",
+            sanitize::path(path),
+            sanitize::text(key)
         ),
     }
 }

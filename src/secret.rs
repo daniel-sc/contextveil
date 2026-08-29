@@ -22,6 +22,8 @@ pub enum SourceId {
     DotenvAll { path: PathBuf },
     /// One exact RFC 6901 pointer in a JSON file.
     Json { path: PathBuf, pointer: String },
+    /// One decoded key in a Java properties file.
+    Properties { path: PathBuf, key: String },
 }
 
 impl SourceId {
@@ -47,6 +49,13 @@ impl SourceId {
         }
     }
 
+    pub fn properties(path: PathBuf, key: impl Into<String>) -> Self {
+        SourceId::Properties {
+            path,
+            key: key.into(),
+        }
+    }
+
     /// Emit-safe label for this source, when it has a key (`REG-003`).
     pub fn label(&self) -> Option<String> {
         match self {
@@ -56,6 +65,7 @@ impl SourceId {
             SourceId::Json { pointer, .. } => crate::json::final_token(pointer)
                 .ok()
                 .map(|token| safe_label(&token)),
+            SourceId::Properties { key, .. } => Some(safe_label(key)),
         }
     }
 
@@ -65,7 +75,8 @@ impl SourceId {
             SourceId::Env { .. } => None,
             SourceId::DotenvKey { path, .. }
             | SourceId::DotenvAll { path }
-            | SourceId::Json { path, .. } => Some(path),
+            | SourceId::Json { path, .. }
+            | SourceId::Properties { path, .. } => Some(path),
         }
     }
 
@@ -75,6 +86,7 @@ impl SourceId {
             SourceId::DotenvKey { .. } => 1,
             SourceId::DotenvAll { .. } => 2,
             SourceId::Json { .. } => 3,
+            SourceId::Properties { .. } => 4,
         }
     }
 }
@@ -108,6 +120,16 @@ impl Ord for SourceId {
             ) => left_path
                 .cmp(right_path)
                 .then(left_pointer.cmp(right_pointer)),
+            (
+                SourceId::Properties {
+                    path: left_path,
+                    key: left_key,
+                },
+                SourceId::Properties {
+                    path: right_path,
+                    key: right_key,
+                },
+            ) => left_path.cmp(right_path).then(left_key.cmp(right_key)),
             _ => self.kind_order().cmp(&other.kind_order()),
         }
     }
@@ -228,6 +250,7 @@ mod tests {
     fn identities_use_the_contractual_total_order() {
         let path = PathBuf::from("/project/source");
         let mut identities = vec![
+            SourceId::properties(path.clone(), "z"),
             SourceId::json(path.clone(), "/b"),
             SourceId::dotenv_all(path.clone()),
             SourceId::dotenv_key(path.clone(), "B"),
@@ -249,6 +272,7 @@ mod tests {
                 SourceId::dotenv_all(PathBuf::from("/project/source")),
                 SourceId::json(PathBuf::from("/project/source"), "/a"),
                 SourceId::json(PathBuf::from("/project/source"), "/b"),
+                SourceId::properties(PathBuf::from("/project/source"), "z"),
             ]
         );
     }

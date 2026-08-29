@@ -18,6 +18,7 @@ Choose an action:
   [k]     add dotenv key
   [w]     add wildcard file
   [j]     add JSON field
+  [p]     add properties key
   [Enter] save
   [s]     skip
   [q]     quit
@@ -30,6 +31,7 @@ Choose an action:
   [k]     add dotenv key
   [w]     add wildcard file
   [j]     add JSON field
+  [p]     add properties key
   [Enter] save
   [s]     skip
   [q]     quit
@@ -55,6 +57,7 @@ Choose an action:
   [k]     add dotenv key
   [w]     add wildcard file
   [j]     add JSON field
+  [p]     add properties key
   [Enter] save
   [s]     skip
   [q]     quit

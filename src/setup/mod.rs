@@ -313,7 +313,7 @@ fn enrollment_phase(
                 }
                 refresh_items(scope, &mut items, &mut context);
             }
-            "e" | "k" | "w" | "j" => {
+            "e" | "k" | "w" | "j" | "p" => {
                 match add_manual(terminal, answer.trim(), scope, &mut items, &mut context) {
                     Ok(()) => {}
                     Err(Cancelled) => return cancelled(terminal),
@@ -372,6 +372,11 @@ fn describe(source: &SourceRef) -> String {
             "json {} pointer {}",
             sanitize::text(entered),
             sanitize::text(pointer)
+        ),
+        SourceRef::Properties { entered, key, .. } => format!(
+            "properties {} key {}",
+            sanitize::text(entered),
+            sanitize::text(key)
         ),
     }
 }
@@ -482,7 +487,7 @@ fn environment_candidates(environment: &Environment) -> Vec<String> {
             vocabulary::gating_term(name).is_some()
                 || environment
                     .get_str(name)
-                    .is_some_and(credential_url::is_credential_bearing)
+                    .is_some_and(|value| credential_url::is_credential_bearing(value.trim()))
         })
         .map(str::to_string)
         .collect();
@@ -502,9 +507,9 @@ fn file_candidates(
     dotenv
         .entries()
         .filter(|(key, value)| {
-            !value.is_empty()
+            !value.trim().is_empty()
                 && (vocabulary::gating_term(key).is_some()
-                    || credential_url::is_credential_bearing(value))
+                    || credential_url::is_credential_bearing(value.trim()))
         })
         .map(|(key, _)| SourceRef::DotenvKey {
             entered: entered.clone(),
@@ -572,6 +577,15 @@ fn item_for(
                 item.wildcard_values = secrets.into_iter().map(|secret| secret.value).collect();
             }
             item.value = value;
+            if automatically_admitted
+                && item
+                    .value
+                    .as_deref()
+                    .is_some_and(credential_url::is_credential_bearing)
+                && !item.members[0].rules.contains(&Rule::CredentialBearingUrl)
+            {
+                item.members[0].rules.push(Rule::CredentialBearingUrl);
+            }
         }
         Resolution::Unresolved { why, .. } => {
             item.detail = format!("unresolved: {}", unresolved_reason(why));
@@ -591,7 +605,9 @@ fn item_for(
 fn admission_rules(source: &SourceRef, value: Option<&str>) -> Vec<Rule> {
     let mut rules = Vec::new();
     let name = match source {
-        SourceRef::Env { name } | SourceRef::DotenvKey { key: name, .. } => Some(name.as_str()),
+        SourceRef::Env { name }
+        | SourceRef::DotenvKey { key: name, .. }
+        | SourceRef::Properties { key: name, .. } => Some(name.as_str()),
         SourceRef::DotenvAll { .. } | SourceRef::Json { .. } => None,
     };
     if name.and_then(vocabulary::gating_term).is_some() {
@@ -931,6 +947,27 @@ fn add_manual(
                 path,
                 pointer,
             }
+        }
+        "p" => {
+            let entered = terminal.ask("Properties file path:")?;
+            let entered = entered.trim().to_string();
+            if entered.is_empty() {
+                terminal.line("  No path entered.");
+                return Ok(());
+            }
+            let path = match paths::expand(&entered, base, context.home) {
+                Ok(path) => path,
+                Err(problem) => {
+                    terminal.line(&format!("  That path {}.", problem.reason()));
+                    return Ok(());
+                }
+            };
+            let key = terminal.ask("Decoded key name:")?;
+            if key.is_empty() {
+                terminal.line("  No key entered.");
+                return Ok(());
+            }
+            SourceRef::Properties { entered, path, key }
         }
         _ => return Ok(()),
     };

@@ -425,6 +425,25 @@ matter.
 `tests/setup.rs::save_order_can_change_the_canonical_alias` preserves the current
 persistence-and-runtime interaction.
 
+### LIM-025: Properties Parsing Follows A Permissive Windows-1252 Library
+
+**Reality:** Properties sources use `java-properties` 2.0.0 default Windows-1252
+decoding and its permissive escape behavior. They do not require UTF-8, and the
+library does not combine UTF-16 surrogate escape pairs into supplementary
+Unicode scalars.
+
+**Impact:** A properties file may decode differently from a framework configured
+for UTF-8, and some malformed-looking escapes are accepted as the library would
+accept them. Valid surrogate-pair escapes are not usable properties values.
+
+**Workaround:** Prefer ASCII or Windows-1252 source text and ordinary Unicode
+escapes supported by the parser; expose a credential through another source type
+when application decoding differs.
+
+**Verification:** Parser fixtures pin Windows-1252, continuation, escape,
+duplicate, transactional-error, and hostile-input behavior. Runtime never uses
+entries from a parse that reports an error.
+
 ## Implementation Deviations
 
 ### DEV-001: The Live Claude Canary Has No Automated Coverage

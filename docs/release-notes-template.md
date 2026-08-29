@@ -22,7 +22,8 @@ contextveil setup
 contextveil doctor
 ```
 
-Setup guides enrollment from environment variables, dotenv files, manual exact
+Setup guides enrollment from environment variables, dotenv files, exact
+properties keys, manual exact
 JSON fields, and maintained Known Source Rules. These rules are advisory and
 version-sensitive, not adapter coverage guarantees, and every applicable rule
 runs independently of selected integrations. Rule applicability is binary and

@@ -31,6 +31,7 @@ pub enum Rule {
     ClaudeConfiguredEnvironment,
     ClaudeMcpOauthState,
     ClaudeMcpServerCredentials,
+    PropertiesConfiguration,
 }
 
 impl Rule {
@@ -49,6 +50,7 @@ impl Rule {
             Self::ClaudeConfiguredEnvironment => "Claude configured environment credentials",
             Self::ClaudeMcpOauthState => "Claude MCP OAuth state",
             Self::ClaudeMcpServerCredentials => "Claude MCP server credentials",
+            Self::PropertiesConfiguration => "properties configuration",
         }
     }
 }
@@ -403,6 +405,34 @@ pub fn machine(environment: &Environment, home: Option<&Path>, base: &Path) -> F
             found.mark_since(start, *rule);
         }
     }
+    let mut gradle_roots = Vec::new();
+    if let Some(home) = home {
+        gradle_roots.push((paths::normalize(&home.join(".gradle")), true));
+    }
+    if let Some(value) = environment.get("GRADLE_USER_HOME") {
+        match value.to_str() {
+            Some("") => {}
+            Some(value) => {
+                let path = explicit_path(value, base);
+                if !gradle_roots.iter().any(|(known, _)| known == &path) {
+                    gradle_roots.push((path, false));
+                }
+            }
+            None => found.notices.push(Notice {
+                display: "GRADLE_USER_HOME".to_string(),
+                reason: "its override is not valid UTF-8",
+            }),
+        }
+    }
+    for (root, default) in gradle_roots {
+        let path = root.join("gradle.properties");
+        let entered = if default {
+            home_entry(home, &path)
+        } else {
+            path.to_str().map(str::to_string)
+        };
+        inspect_properties_document(&mut found, &path, entered);
+    }
     deduplicate(&mut found.sources);
     found
 }
@@ -425,8 +455,79 @@ pub fn project(project_root: &Path, files: &ProjectFiles) -> Found {
             PROJECT_MCP_PROBES,
         );
     }
+    for file in &files.properties {
+        let Some(entered) = file.entered.as_deref() else {
+            unavailable(&mut found, &file.path, "its path is not valid UTF-8");
+            continue;
+        };
+        match &file.state {
+            super::discovery::PropertiesState::Unavailable(why) => {
+                unavailable(&mut found, &file.path, why.reason());
+            }
+            super::discovery::PropertiesState::Available(properties) => {
+                add_properties_candidates(&mut found, &file.path, entered, properties);
+            }
+        }
+    }
     deduplicate(&mut found.sources);
     found
+}
+
+fn inspect_properties_document(found: &mut Found, path: &Path, entered: Option<String>) {
+    let Some(entered) = entered else {
+        unavailable(found, path, "its path is not valid UTF-8");
+        return;
+    };
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return;
+        }
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return;
+        }
+    };
+    match crate::properties::parse(&bytes) {
+        Ok(properties) => add_properties_candidates(found, path, &entered, &properties),
+        Err(_) => unavailable(found, path, "it is malformed properties"),
+    }
+}
+
+fn add_properties_candidates(
+    found: &mut Found,
+    path: &Path,
+    entered: &str,
+    properties: &crate::properties::Properties,
+) {
+    for (key, value) in properties.entries() {
+        let value = value.trim();
+        if value.is_empty()
+            || (super::vocabulary::gating_term(key).is_none()
+                && !super::credential_url::is_credential_bearing(value))
+        {
+            continue;
+        }
+        let source = SourceRef::Properties {
+            entered: entered.to_string(),
+            path: path.to_path_buf(),
+            key: key.to_string(),
+        };
+        let id = source.id();
+        found.sources.push(source);
+        found
+            .rules
+            .entry(id)
+            .or_default()
+            .push(Rule::PropertiesConfiguration);
+    }
 }
 
 fn inspect_location(found: &mut Found, root: &Root, home: Option<&Path>, document: &DocumentSpec) {
@@ -1051,6 +1152,7 @@ mod tests {
         let mcp = tree.write("project/app/.mcp.json", r#"{"mcpServers":{"srv/a":{"headers":{"authorization":"c","Cookie":"d"},"env":{"TOKEN":"e","TOKEN_FILE":"f"}}}}"#);
         let files = ProjectFiles {
             dotenv: vec![],
+            properties: vec![],
             claude_settings: vec![settings],
             claude_mcp: vec![mcp],
         };

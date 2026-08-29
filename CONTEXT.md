@@ -64,8 +64,14 @@ runtime canonicalization in the Effective Registry.
 _Avoid_: Canonical source, preferred source
 
 **Resolved Secret**:
-The current non-empty textual value obtained from an enrolled source.
+The current textual value obtained from an enrolled source, trimmed with Rust's
+standard Unicode whitespace definition and non-empty afterward.
 _Avoid_: Credential record, stored secret
+
+**Properties Source**:
+An enrolled or discovered Java-style properties file persisted with
+`source = "properties"` and resolved through one exact decoded key.
+_Avoid_: Properties wildcard, inferred file source
 
 **Global Registry**:
 The user's machine-scoped collection of enrolled sources.

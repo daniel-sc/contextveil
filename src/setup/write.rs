@@ -103,6 +103,14 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     all: None,
                     pointer: Some(pointer.clone()),
                 },
+                SourceRef::Properties { entered, key, .. } => SecretOut {
+                    source: "properties",
+                    name: None,
+                    file: Some(entered.clone()),
+                    key: Some(key.clone()),
+                    all: None,
+                    pointer: None,
+                },
             })
             .collect(),
     };
@@ -246,6 +254,11 @@ mod tests {
                 entered: "~/.codex/auth.json".to_string(),
                 path: PathBuf::from("/home/user/.codex/auth.json"),
                 pointer: "/tokens/access_token".to_string(),
+            },
+            SourceRef::Properties {
+                entered: "src/main/resources/application.properties".to_string(),
+                path: PathBuf::from("/project/src/main/resources/application.properties"),
+                key: "spring.datasource.password".to_string(),
             },
         ]
     }

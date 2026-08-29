@@ -1,6 +1,6 @@
 //! Source references and their resolution.
 //!
-//! V1 has environment, dotenv, and exact-pointer JSON resolver families
+//! V1 has environment, dotenv, exact-pointer JSON, and exact-key properties resolver families
 //! (`architecture.md`). A resolver returns resolved, unresolved, or malfunction;
 //! it never decides whether a value looks secret.
 //!
@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::dotenv::{self, Dotenv, ParseErrorKind};
 use crate::json;
+use crate::properties::{self, Properties};
 use crate::secret::{ResolvedSecret, SourceId};
 
 /// One enrolled source reference from a configuration file.
@@ -42,6 +43,11 @@ pub enum SourceRef {
         path: PathBuf,
         pointer: String,
     },
+    Properties {
+        entered: String,
+        path: PathBuf,
+        key: String,
+    },
 }
 
 impl SourceRef {
@@ -51,6 +57,7 @@ impl SourceRef {
             SourceRef::DotenvKey { path, key, .. } => SourceId::dotenv_key(path.clone(), key),
             SourceRef::DotenvAll { path, .. } => SourceId::dotenv_all(path.clone()),
             SourceRef::Json { path, pointer, .. } => SourceId::json(path.clone(), pointer),
+            SourceRef::Properties { path, key, .. } => SourceId::properties(path.clone(), key),
         }
     }
 
@@ -59,7 +66,7 @@ impl SourceRef {
         match self {
             SourceRef::Env { .. } => None,
             SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => Some(path),
-            SourceRef::Json { path, .. } => Some(path),
+            SourceRef::Json { path, .. } | SourceRef::Properties { path, .. } => Some(path),
         }
     }
 
@@ -67,7 +74,7 @@ impl SourceRef {
     pub fn dotenv_file(&self) -> Option<&Path> {
         match self {
             SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => Some(path),
-            SourceRef::Env { .. } | SourceRef::Json { .. } => None,
+            SourceRef::Env { .. } | SourceRef::Json { .. } | SourceRef::Properties { .. } => None,
         }
     }
 }
@@ -113,11 +120,15 @@ pub enum SourceMalfunction {
     /// The file is not valid UTF-8.
     NotUtf8,
     /// The file does not match the dotenv grammar.
-    Malformed { line: usize, kind: ParseErrorKind },
+    Malformed {
+        line: usize,
+        kind: ParseErrorKind,
+    },
     /// The file is not a complete valid JSON document.
     MalformedJson,
     /// The JSON document contains a duplicate object member.
     DuplicateJsonMember,
+    MalformedProperties,
 }
 
 impl SourceMalfunction {
@@ -133,6 +144,7 @@ impl SourceMalfunction {
             SourceMalfunction::DuplicateJsonMember => {
                 "contains a duplicate JSON object member".to_string()
             }
+            SourceMalfunction::MalformedProperties => "is malformed properties".to_string(),
         }
     }
 }
@@ -227,11 +239,19 @@ enum JsonFileState {
     Malfunction(SourceMalfunction),
 }
 
+#[derive(Debug, Clone)]
+enum PropertiesFileState {
+    Missing,
+    Parsed(Properties),
+    Malfunction(SourceMalfunction),
+}
+
 /// Resolves source references, reading each dotenv or JSON file once per event.
 #[derive(Debug, Clone, Default)]
 pub struct Resolver {
     files: HashMap<PathBuf, FileState>,
     json_files: HashMap<PathBuf, JsonFileState>,
+    properties_files: HashMap<PathBuf, PropertiesFileState>,
 }
 
 impl Resolver {
@@ -260,13 +280,7 @@ impl Resolver {
                             source: id,
                             why: Unresolved::KeyAbsent,
                         },
-                        Some("") => Resolution::Unresolved {
-                            source: id,
-                            why: Unresolved::Empty,
-                        },
-                        Some(value) => {
-                            Resolution::Resolved(vec![ResolvedSecret::new(id, value.to_string())])
-                        }
+                        Some(value) => resolve_text(id, value),
                     },
                 }
             }
@@ -287,12 +301,14 @@ impl Resolver {
                     FileState::Parsed(dotenv) => Resolution::Resolved(
                         dotenv
                             .entries()
-                            .filter(|(_, value)| !value.is_empty())
-                            .map(|(key, value)| {
-                                ResolvedSecret::new(
-                                    SourceId::dotenv_key(path.clone(), key),
-                                    value.to_string(),
-                                )
+                            .filter_map(|(key, value)| {
+                                let value = value.trim();
+                                (!value.is_empty()).then(|| {
+                                    ResolvedSecret::new(
+                                        SourceId::dotenv_key(path.clone(), key),
+                                        value.to_string(),
+                                    )
+                                })
                             })
                             .collect(),
                     ),
@@ -315,19 +331,32 @@ impl Resolver {
                             source: id,
                             why: Unresolved::PointerAbsent,
                         },
-                        Some(json::Value::String(value)) if value.is_empty() => {
-                            Resolution::Unresolved {
-                                source: id,
-                                why: Unresolved::Empty,
-                            }
-                        }
-                        Some(json::Value::String(value)) => {
-                            Resolution::Resolved(vec![ResolvedSecret::new(id, value.clone())])
-                        }
+                        Some(json::Value::String(value)) => resolve_text(id, value),
                         Some(_) => Resolution::Unresolved {
                             source: id,
                             why: Unresolved::NotString,
                         },
+                    },
+                }
+            }
+            SourceRef::Properties { path, key, .. } => {
+                let id = SourceId::properties(path.clone(), key);
+                match self.properties_file(path) {
+                    PropertiesFileState::Missing => Resolution::Unresolved {
+                        source: id,
+                        why: Unresolved::Absent,
+                    },
+                    PropertiesFileState::Malfunction(why) => Resolution::Malfunction {
+                        source: id,
+                        path: path.clone(),
+                        why: *why,
+                    },
+                    PropertiesFileState::Parsed(properties) => match properties.get(key) {
+                        None => Resolution::Unresolved {
+                            source: id,
+                            why: Unresolved::KeyAbsent,
+                        },
+                        Some(value) => resolve_text(id, value),
                     },
                 }
             }
@@ -336,9 +365,30 @@ impl Resolver {
 
     /// Keys assigned more than once in an already-read file (`SRC-004`).
     pub fn duplicate_keys(&self, path: &Path) -> &[String] {
-        match self.files.get(path) {
-            Some(FileState::Parsed(dotenv)) => dotenv.duplicates(),
-            _ => &[],
+        if let Some(FileState::Parsed(dotenv)) = self.files.get(path) {
+            dotenv.duplicates()
+        } else if let Some(PropertiesFileState::Parsed(properties)) =
+            self.properties_files.get(path)
+        {
+            properties.duplicates()
+        } else {
+            &[]
+        }
+    }
+
+    pub fn duplicate_keys_for(&self, reference: &SourceRef) -> &[String] {
+        match reference {
+            SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => {
+                match self.files.get(path) {
+                    Some(FileState::Parsed(dotenv)) => dotenv.duplicates(),
+                    _ => &[],
+                }
+            }
+            SourceRef::Properties { path, .. } => match self.properties_files.get(path) {
+                Some(PropertiesFileState::Parsed(properties)) => properties.duplicates(),
+                _ => &[],
+            },
+            SourceRef::Env { .. } | SourceRef::Json { .. } => &[],
         }
     }
 
@@ -358,6 +408,16 @@ impl Resolver {
         self.json_files
             .get(path)
             .expect("the JSON file was just inserted")
+    }
+
+    fn properties_file(&mut self, path: &Path) -> &PropertiesFileState {
+        if !self.properties_files.contains_key(path) {
+            let state = read_properties(path);
+            self.properties_files.insert(path.to_path_buf(), state);
+        }
+        self.properties_files
+            .get(path)
+            .expect("the properties file was just inserted")
     }
 }
 
@@ -404,6 +464,32 @@ fn read_json(path: &Path) -> JsonFileState {
     }
 }
 
+fn read_properties(path: &Path) -> PropertiesFileState {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return PropertiesFileState::Missing;
+        }
+        Err(_) => return PropertiesFileState::Malfunction(SourceMalfunction::Unreadable),
+    };
+    match properties::parse(&bytes) {
+        Ok(parsed) => PropertiesFileState::Parsed(parsed),
+        Err(_) => PropertiesFileState::Malfunction(SourceMalfunction::MalformedProperties),
+    }
+}
+
+fn resolve_text(id: SourceId, value: &str) -> Resolution {
+    let value = value.trim();
+    if value.is_empty() {
+        Resolution::Unresolved {
+            source: id,
+            why: Unresolved::Empty,
+        }
+    } else {
+        Resolution::Resolved(vec![ResolvedSecret::new(id, value.to_string())])
+    }
+}
+
 fn resolve_environment(name: &str, environment: &Environment) -> Resolution {
     let id = SourceId::env(name);
     match environment.get(name) {
@@ -416,11 +502,7 @@ fn resolve_environment(name: &str, environment: &Environment) -> Resolution {
                 source: id,
                 why: Unresolved::NonUtf8,
             },
-            Some("") => Resolution::Unresolved {
-                source: id,
-                why: Unresolved::Empty,
-            },
-            Some(value) => Resolution::Resolved(vec![ResolvedSecret::new(id, value.to_string())]),
+            Some(value) => resolve_text(id, value),
         },
     }
 }
@@ -488,6 +570,14 @@ mod tests {
             entered: path.to_string_lossy().into_owned(),
             path: path.to_path_buf(),
             pointer: pointer.to_string(),
+        }
+    }
+
+    fn properties_ref(path: &Path, key: &str) -> SourceRef {
+        SourceRef::Properties {
+            entered: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
+            key: key.to_string(),
         }
     }
 
@@ -853,5 +943,65 @@ mod tests {
             Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "changed"),
             other => panic!("expected fresh event parse, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn properties_resolve_exact_decoded_keys_and_report_duplicates() {
+        let fixture = Fixture::new();
+        let path = fixture.write(
+            "application.properties",
+            "spring.datasource.password=first\nspring.datasource.pass\\u0077ord=  final  \n",
+        );
+        let mut resolver = Resolver::new();
+        match resolver.resolve(
+            &properties_ref(&path, "spring.datasource.password"),
+            &Environment::default(),
+        ) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets[0].value, "final");
+                assert_eq!(secrets[0].label, "spring.datasource.password");
+            }
+            other => panic!("expected properties value, got {other:?}"),
+        }
+        assert_eq!(
+            resolver.duplicate_keys(&path),
+            ["spring.datasource.password"]
+        );
+    }
+
+    #[test]
+    fn every_source_family_trims_values_before_resolution() {
+        let fixture = Fixture::new();
+        let dotenv = fixture.write(".env", "TOKEN=\u{2003}value\u{2003}\nEMPTY=\u{2003}\n");
+        let json = fixture.write("auth.json", "{token: '\u{2003}value\u{2003}'}");
+        let properties = fixture.write("app.properties", "token=\\u2003value\\u2003\n");
+        let environment =
+            Environment::from_pairs([("TOKEN", "\u{2003}value\u{2003}"), ("EMPTY", "\u{2003}")]);
+        let mut resolver = Resolver::new();
+        for source in [
+            env_ref("TOKEN"),
+            key_ref(&dotenv, "TOKEN"),
+            json_ref(&json, "/token"),
+            properties_ref(&properties, "token"),
+        ] {
+            match resolver.resolve(&source, &environment) {
+                Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "value"),
+                other => panic!("expected trimmed value, got {other:?}"),
+            }
+        }
+        assert!(matches!(
+            resolver.resolve(&env_ref("EMPTY"), &environment),
+            Resolution::Unresolved {
+                why: Unresolved::Empty,
+                ..
+            }
+        ));
+        assert!(matches!(
+            resolver.resolve(&key_ref(&dotenv, "EMPTY"), &environment),
+            Resolution::Unresolved {
+                why: Unresolved::Empty,
+                ..
+            }
+        ));
     }
 }

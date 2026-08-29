@@ -27,7 +27,7 @@ pub struct EffectiveRegistry {
     /// during normal runtime (`RED-009`).
     pub unresolved: Vec<(SourceId, Unresolved)>,
     pub warnings: Vec<Warning>,
-    /// Dotenv files with repeated keys, for `SRC-004` reporting.
+    /// Keyed source files with repeated keys, for `SRC-004` reporting.
     pub duplicate_keys: Vec<(PathBuf, Vec<String>)>,
     /// The selected project configuration file, when one exists (`CFG-004`).
     pub project_config: Option<PathBuf>,
@@ -151,12 +151,14 @@ pub fn build(environment: &Environment, project_root: Option<&Path>) -> Outcome 
 
     let mut duplicate_keys = Vec::new();
     for reference in &ordered {
-        if let Some(path) = reference.dotenv_file() {
-            let duplicates = resolver.duplicate_keys(path);
+        if let Some(path) = reference.file() {
+            let duplicates = resolver.duplicate_keys_for(reference);
             if !duplicates.is_empty()
                 && !duplicate_keys
                     .iter()
-                    .any(|(known, _): &(PathBuf, Vec<String>)| known == path)
+                    .any(|(known, keys): &(PathBuf, Vec<String>)| {
+                        known == path && keys == duplicates
+                    })
             {
                 duplicate_keys.push((path.to_path_buf(), duplicates.to_vec()));
             }
@@ -409,6 +411,27 @@ mod tests {
     }
 
     #[test]
+    fn malformed_properties_disables_the_whole_registry() {
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");
+        fixture.write_project(
+            "version = 1\n\n[[secret]]\nsource = \"properties\"\nfile = \"application.properties\"\nkey = \"database.password\"\n",
+        );
+        fixture.write_file(
+            "application.properties",
+            "database.password=hidden\nbroken=\\u12xz\n",
+        );
+
+        assert!(matches!(
+            malfunction(fixture.build(&[("TOKEN", "value")])),
+            Malfunction::Source {
+                why: SourceMalfunction::MalformedProperties,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn json_sources_are_active_and_malformed_json_disables_every_pattern() {
         let canary = Canary::generate("JSON_ACCESS_TOKEN");
         let fixture = Fixture::new();
@@ -488,6 +511,27 @@ mod tests {
         let registry = ready(fixture.build(&[]));
         assert_eq!(registry.duplicate_keys.len(), 1);
         assert_eq!(registry.duplicate_keys[0].1, ["DUPLICATE"]);
+    }
+
+    #[test]
+    fn duplicate_properties_keys_are_reported_without_values() {
+        let canary = Canary::generate("PROPERTIES_DUPLICATE");
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n");
+        fixture.write_project(
+            "version = 1\n\n[[secret]]\nsource = \"properties\"\nfile = \"application.properties\"\nkey = \"database.password\"\n",
+        );
+        fixture.write_file(
+            "application.properties",
+            &format!(
+                "database.password=first\ndatabase.pass\\u0077ord={}\n",
+                canary.value()
+            ),
+        );
+
+        let registry = ready(fixture.build(&[]));
+        assert_eq!(registry.duplicate_keys.len(), 1);
+        assert_eq!(registry.duplicate_keys[0].1, ["database.password"]);
     }
 
     #[test]
