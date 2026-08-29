@@ -127,12 +127,13 @@ fn enrolled_values_are_absent_at_every_process_boundary_after_intervention() {
         let canary = Canary::generate("BOUNDARY_TOKEN");
         let fixture = ProcessFixture::new(canary.label());
         let payload = (case.payload)(canary.value());
+        let resolved = format!("  {}  ", canary.value());
         assert_canary_present(case.name, payload.as_bytes(), &canary);
 
         let output = fixture.run(
             case.arguments,
             payload.as_bytes(),
-            &[(canary.label(), canary.value())],
+            &[(canary.label(), &resolved)],
         );
         assert_eq!(output.status.code(), Some(0), "{}", case.name);
         assert_canary_absent(&format!("{} stdout", case.name), &output.stdout, &canary);

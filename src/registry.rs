@@ -411,12 +411,28 @@ mod tests {
     }
 
     #[test]
-    fn malformed_properties_disables_the_whole_registry() {
+    fn properties_values_are_active_and_malformed_files_disable_the_whole_registry() {
+        let canary = Canary::generate("PROPERTIES_PASSWORD");
         let fixture = Fixture::new();
         fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");
         fixture.write_project(
             "version = 1\n\n[[secret]]\nsource = \"properties\"\nfile = \"application.properties\"\nkey = \"database.password\"\n",
         );
+        fixture.write_file(
+            "application.properties",
+            &format!("database.password=  {}  \n", canary.value()),
+        );
+
+        let registry = ready(fixture.build(&[("TOKEN", "other-value")]));
+        let mut tally = registry.redactor.tally();
+        assert_eq!(
+            registry
+                .redactor
+                .redact(canary.value(), &mut tally)
+                .as_deref(),
+            Some("<SECRET:database.password>")
+        );
+
         fixture.write_file(
             "application.properties",
             "database.password=hidden\nbroken=\\u12xz\n",

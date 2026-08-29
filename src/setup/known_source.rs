@@ -1,6 +1,6 @@
 //! Known Source Rule identities and bounded setup-time credential discovery.
 //!
-//! Every match becomes an ordinary environment or exact JSON reference.
+//! Every match becomes an ordinary exact source reference.
 //! Transformed values, keychains, helpers, and broad directory recursion are
 //! deliberately outside this module.
 
@@ -509,7 +509,8 @@ fn add_properties_candidates(
 ) {
     for (key, value) in properties.entries() {
         let value = value.trim();
-        if value.is_empty()
+        if key.is_empty()
+            || value.is_empty()
             || (super::vocabulary::gating_term(key).is_none()
                 && !super::credential_url::is_credential_bearing(value))
         {
@@ -974,6 +975,24 @@ mod tests {
         let home = tree.0.join("home");
         let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
         (home, environment)
+    }
+
+    #[test]
+    fn properties_candidates_require_a_non_empty_decoded_key() {
+        let properties = crate::properties::parse(
+            b"=https://user:password@example.test\ndatabase.password=value\n",
+        )
+        .expect("properties");
+        let mut found = Found::default();
+        let path = Path::new("/project/application.properties");
+
+        add_properties_candidates(&mut found, path, "application.properties", &properties);
+
+        assert_eq!(found.sources.len(), 1);
+        assert!(matches!(
+            &found.sources[0],
+            SourceRef::Properties { key, .. } if key == "database.password"
+        ));
     }
 
     #[test]
