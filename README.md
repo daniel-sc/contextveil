@@ -1,23 +1,18 @@
-# ContextVeil
+# ContextVeil — The tool can read it. The LLM doesn’t need it.
 
-**A small, local safety net for secrets used around coding agents.**
-
-ContextVeil replaces secret values you choose before supported coding-agent text
-reaches the LLM:
+Coding agents read environment variables, `.env` files, configuration, and command output that may contain credentials.
+ContextVeil locally replaces the secret values you’ve chosen before supported text reaches the LLM — **without blocking the workflow.**
 
 ```text
-GITHUB_TOKEN=ghp_example  ->  GITHUB_TOKEN=<SECRET:GITHUB_TOKEN>
+GITHUB_TOKEN=ghp_secret_example  ->  GITHUB_TOKEN=<SECRET:GITHUB_TOKEN>
 ```
 
-> **You choose what counts as secret. Automatically replace exact matches. Keep working. No magic.**
+**The command still runs. The file still gets read.**
+Only enrolled exact values are replaced; the rest of the output stays intact.
 
-It only replaces exact values from sources you choose.
-It is an extra safety net, not a promise to cover every
-way a secret can be exposed or used.
-
-> **Status:** Pre-release. `v1.0.0-alpha.3` is available, but stable V1 has not
-> been published yet. See [Quick Start](#quick-start) for the current install
-> command.
+1. **A guided setup helps you choose what to protect.**
+2. **Runtime matching is exact and deterministic.**
+3. **Keep working. No magic.**
 
 ## Why Use It?
 
