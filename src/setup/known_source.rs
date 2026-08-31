@@ -559,7 +559,7 @@ fn add_npmrc_candidates(
 ) {
     for (key, value) in npmrc.entries() {
         let value = value.trim();
-        if value.is_empty() || npmrc.issue(key).is_some() {
+        if value.is_empty() {
             continue;
         }
         let mut rules = Vec::new();
