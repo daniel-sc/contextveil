@@ -42,6 +42,11 @@ impl Npmrc {
         Some(self.issues[position].1.as_slice())
     }
 
+    /// Whether parsing retained any issue attributable to an exact key.
+    pub fn has_issues(&self) -> bool {
+        !self.issues.is_empty()
+    }
+
     fn insert(&mut self, key: String, value: String) {
         if let Some(position) = self.index.get(&key).copied() {
             self.entries[position].1 = value;

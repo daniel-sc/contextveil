@@ -699,6 +699,9 @@ colon-delimited key field, while `SET-017` receives its complete scalar value.
 Applicable rule names are deduplicated and retain no admission, selection,
 grouping, or ordering weight.
 
+For automatic discovery, any keyed issue retained by `SRC-018` makes the whole
+file malformed under `SET-013`; ignored unkeyed lines do not.
+
 ## 8. Effective Registry
 
 **REG-001** Every non-empty value normalized by `SRC-016` becomes an active match pattern.

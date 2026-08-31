@@ -1120,6 +1120,28 @@ mod tests {
     }
 
     #[test]
+    fn doctor_warns_about_duplicate_npmrc_keys_without_values() {
+        let canary = Canary::generate("NPMRC_DOUBLE");
+        let fixture = Fixture::new();
+        std::fs::write(
+            fixture.project().join(".npmrc"),
+            format!(
+                "//registry.example/:_authToken=first\n//registry.example/:_authToken={}\n",
+                canary.value()
+            ),
+        )
+        .expect("write npmrc");
+        fixture.write_global("version = 1\n");
+        fixture.write_project(
+            "version = 1\n\n[[secret]]\nsource = \"npmrc\"\nfile = \".npmrc\"\nkey = \"//registry.example/:_authToken\"\n",
+        );
+
+        let (_, output) = fixture.doctor(&[]);
+        assert!(output.contains(".npmrc assigns 1 key more than once"));
+        crate::testing::assert_canary_absent("doctor output", output.as_bytes(), &canary);
+    }
+
+    #[test]
     fn doctor_performs_no_network_call_unless_the_canary_is_selected() {
         // The default is `LiveCanary::Skip`, and nothing else in doctor reaches
         // the network (`SEC-003`, `DIA-005`).

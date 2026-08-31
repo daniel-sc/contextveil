@@ -111,6 +111,7 @@ fn a_large_wildcard_dotenv_file_is_resolved_without_a_cap() {
 
     assert_eq!(output.status.code(), Some(0));
     assert_canary_absent("hook stdout", &output.stdout, &canary);
+    assert_canary_absent("hook stderr", &output.stderr, &canary);
     let response: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
     assert_eq!(
         response["hookSpecificOutput"]["updatedToolOutput"]["stdout"],
@@ -150,6 +151,7 @@ fn a_large_npmrc_file_is_resolved_without_a_cap() {
 
     assert_eq!(output.status.code(), Some(0));
     assert_canary_absent("hook stdout", &output.stdout, &canary);
+    assert_canary_absent("hook stderr", &output.stderr, &canary);
     let response: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
     assert_eq!(
         response["hookSpecificOutput"]["updatedToolOutput"]["stdout"],
