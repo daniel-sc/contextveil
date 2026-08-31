@@ -5,9 +5,15 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+## [1.0.0-alpha.4] - 2026-08-31
+
 ### Added
 
 - Added exact npmrc secret sources and bounded npmrc Known Source discovery. (#13)
+
+### Fixed
+
+- Improved malformed npmrc candidate handling and preserved valid discovery entries.
 
 ## [1.0.0-alpha.3] - 2026-08-29
 

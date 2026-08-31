@@ -120,7 +120,7 @@ While ContextVeil is in pre-release, install the published alpha explicitly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.sh |
-  bash -s -- --version 1.0.0-alpha.3
+  bash -s -- --version 1.0.0-alpha.4
 ```
 
 After stable V1 is published, the shorter command will install the latest stable
