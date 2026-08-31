@@ -21,7 +21,7 @@ such as `printenv`. Most of the output is useful, but it also contains an API ke
 That key may become part of the next request to the model (LLM).
 
 ContextVeil does not block the file read or command. The local operation still
-happens. On a supported integration path, ContextVeil changes the text headed to
+happens. On a supported harness integration path, ContextVeil changes the text headed to
 the model and leaves the rest useful:
 
 ```text
