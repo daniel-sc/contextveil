@@ -254,6 +254,23 @@ mv -f "${staged}" "${binary_path}" || {
 printf 'install.sh: installed contextveil %s to %s\n' "${version}" "${binary_path}"
 case ":${PATH}:" in
   *":${install_dir}:"*) ;;
-  *) printf 'install.sh: add %s to your PATH to run `contextveil`\n' "${install_dir}" ;;
+  *)
+    printf '\ninstall.sh: %s is not on PATH in this shell.\n' "${install_dir}"
+    if [ "${install_dir}" = "${DEFAULT_INSTALL_DIR}" ]; then
+      cat <<'PATH_GUIDANCE'
+install.sh: to use contextveil now, run:
+  export PATH="$HOME/.local/bin:$PATH"
+install.sh: to keep it available, add that line to your shell startup file
+install.sh: (for example, ~/.profile or ~/.bashrc for Bash, or ~/.zshrc for Zsh),
+install.sh: then start a new shell. On Ubuntu, logging out and back in may be
+install.sh: enough because its default ~/.profile adds ~/.local/bin once it exists.
+install.sh: until then, run `~/.local/bin/contextveil setup` directly.
+PATH_GUIDANCE
+    else
+      printf 'install.sh: add the install directory to your shell startup file, then start a new shell.\n'
+      printf 'install.sh: until then, invoke the binary using the full path shown above.\n'
+    fi
+    printf '\n'
+    ;;
 esac
 printf 'install.sh: nothing else was changed. Run `contextveil setup` when you are ready.\n'
