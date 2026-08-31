@@ -102,7 +102,7 @@ Currently, the following secret-like sources are automatically detected and sugg
 - **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or complete values that are URLs with credentials (e.g., `mysql://u:pass@some-db`)
 - **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot and OpenCode. Maintained credential fields are probed without modeling complete vendor schemas. (Keychain based/sidecars excluded.)
 - **Java properties files** from the bounded project walk and Gradle machine locations, with localization-bundle exclusions and exact decoded-key enrollment
-- **npmrc files** from `~/.npmrc`, npm's user/global override paths, and every exact `.npmrc` found by the bounded project walk, with exact credential-key enrollment
+- **npmrc files** from `~/.npmrc` and every `.npmrc` found in the project, with exact credential-key enrollment
 - **More to come** INI, YAML, TOML, ...
 
 You can find the full, detailed list of known source rules in the
