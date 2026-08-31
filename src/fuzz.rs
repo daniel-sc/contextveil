@@ -82,8 +82,9 @@ pub fn context() -> Option<&'static Context> {
 pub type Target = fn(&[u8]);
 
 /// Every target, by name, for the smoke harness.
-pub const TARGETS: [(&str, Target); 10] = [
+pub const TARGETS: [(&str, Target); 11] = [
     ("dotenv", dotenv),
+    ("npmrc", npmrc),
     ("properties", properties),
     ("json-source", json_source),
     ("config", config),
@@ -94,6 +95,19 @@ pub const TARGETS: [(&str, Target); 10] = [
     ("copilot", copilot_hook),
     ("opencode", opencode_hook),
 ];
+
+pub fn npmrc(data: &[u8]) {
+    let Ok(text) = std::str::from_utf8(data) else {
+        return;
+    };
+    let parsed = crate::npmrc::parse(text);
+    for (key, value) in parsed.entries() {
+        assert_eq!(parsed.get(key), Some(value));
+    }
+    for duplicate in parsed.duplicates() {
+        assert!(parsed.get(duplicate).is_some());
+    }
+}
 
 pub fn properties(data: &[u8]) {
     if let Ok(parsed) = crate::properties::parse(data) {

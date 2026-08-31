@@ -119,6 +119,45 @@ fn a_large_wildcard_dotenv_file_is_resolved_without_a_cap() {
 }
 
 #[test]
+fn a_large_npmrc_file_is_resolved_without_a_cap() {
+    let canary = Canary::generate("BIG_NPMRC_TOKEN");
+    let machine = Machine::new();
+    machine.write_global("version = 1\n");
+
+    let mut npmrc = String::with_capacity(4 * 1024 * 1024 + 128);
+    npmrc.push('#');
+    npmrc.push_str(&"padding".repeat((4 * 1024 * 1024) / 7));
+    npmrc.push('\n');
+    npmrc.push_str(&format!(
+        "//registry.example/:_authToken={}\n",
+        canary.value()
+    ));
+    std::fs::write(machine.project().join(".npmrc"), npmrc).expect("write npmrc");
+    std::fs::write(
+        machine.project().join(".contextveil.toml"),
+        "version = 1\n\n[[secret]]\nsource = \"npmrc\"\nfile = \".npmrc\"\nkey = \"//registry.example/:_authToken\"\n",
+    )
+    .expect("write project config");
+
+    let payload = json!({
+        "hook_event_name": "PostToolUse",
+        "cwd": machine.project().to_string_lossy(),
+        "tool_name": "Bash",
+        "tool_response": {"stdout": format!("token={}", canary.value())},
+    })
+    .to_string();
+    let output = machine.run_hook(&payload, &[]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_canary_absent("hook stdout", &output.stdout, &canary);
+    let response: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert_eq!(
+        response["hookSpecificOutput"]["updatedToolOutput"]["stdout"],
+        json!("token=<SECRET:_authToken>")
+    );
+}
+
+#[test]
 fn a_deeply_nested_payload_cannot_exhaust_the_stack() {
     let machine = Machine::new();
     machine.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");

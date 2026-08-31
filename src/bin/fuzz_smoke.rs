@@ -17,7 +17,7 @@ use contextveil::fuzz;
 
 /// Seed inputs per target, chosen to be valid or nearly valid so mutation
 /// explores interesting states rather than mostly rejecting garbage.
-const SEEDS: [(&str, &[&str]); 10] = [
+const SEEDS: [(&str, &[&str]); 11] = [
     (
         "dotenv",
         &[
@@ -25,6 +25,15 @@ const SEEDS: [(&str, &[&str]); 10] = [
             "export TOKEN=abc # comment\nQUOTED=\"line1\\nline2\"\n",
             "\u{feff}A='multi\nline'\r\nDUP=1\nDUP=2\n",
             "malformed line\n",
+        ],
+    ),
+    (
+        "npmrc",
+        &[
+            "//registry.example/:_authToken=value\n",
+            "quoted='literal # value'\nescaped=one\\#two\n",
+            "duplicate=first\nduplicate=last\n",
+            "[section]\nunsupported=value\nliteral=${NAME}\n",
         ],
     ),
     (
@@ -287,9 +296,9 @@ fn mutate(rng: &mut Rng, seeds: &[&str]) -> Vec<u8> {
 }
 
 /// Bytes that carry meaning in the grammars under test.
-const INTERESTING: [u8; 16] = [
+const INTERESTING: [u8; 19] = [
     b'"', b'\'', b'\\', b'\n', b'\r', b'\t', b'#', b'=', b'{', b'}', b'[', b']', b':', b',', 0x00,
-    0xff,
+    0xff, b';', b'$', b'?',
 ];
 
 /// A small xorshift generator. Deterministic and dependency-free.

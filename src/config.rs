@@ -314,6 +314,28 @@ fn parse_entry(
                 key: key.to_string(),
             })
         }
+        "npmrc" => {
+            if entry.name.is_some() || entry.all.is_some() || entry.pointer.is_some() {
+                return Err(EntryProblem::UnexpectedField);
+            }
+            let file = entry
+                .file
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            let key = entry
+                .key
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            if file.is_empty() || key.is_empty() {
+                return Err(EntryProblem::EmptyField);
+            }
+            let path = paths::expand(file, base, home).map_err(EntryProblem::InvalidPath)?;
+            Ok(SourceRef::Npmrc {
+                entered: file.to_string(),
+                path,
+                key: key.to_string(),
+            })
+        }
         _ => Err(EntryProblem::UnknownSourceType),
     }
 }
@@ -377,6 +399,11 @@ all = true
 source = "json"
 file = "~/.codex/auth.json"
 pointer = "/tokens/access_token"
+
+[[secret]]
+source = "npmrc"
+file = "~/.npmrc"
+key = "//registry.npmjs.org/:_authToken"
 "#,
         )
         .expect("valid config");
@@ -400,6 +427,11 @@ pointer = "/tokens/access_token"
                     entered: "~/.codex/auth.json".to_string(),
                     path: PathBuf::from("/home/user/.codex/auth.json"),
                     pointer: "/tokens/access_token".to_string(),
+                },
+                SourceRef::Npmrc {
+                    entered: "~/.npmrc".to_string(),
+                    path: PathBuf::from("/home/user/.npmrc"),
+                    key: "//registry.npmjs.org/:_authToken".to_string(),
                 },
             ]
         );
@@ -541,6 +573,37 @@ pointer = "/tokens/access_token"
             );
             assert_eq!(entry_problem(&text), EntryProblem::UnexpectedField);
         }
+    }
+
+    #[test]
+    fn npmrc_entries_are_strict_exact_and_path_normalized() {
+        let config = parse_text(
+            "version = 1\n\n[[secret]]\nsource = \"npmrc\"\nfile = \"~/.npmrc\"\nkey = \"//registry.example/:_authToken\"\n",
+        )
+        .expect("npmrc source");
+        assert!(matches!(
+            &config.sources[0],
+            SourceRef::Npmrc { entered, path, key }
+                if entered == "~/.npmrc"
+                    && path == &PathBuf::from("/home/user/.npmrc")
+                    && key == "//registry.example/:_authToken"
+        ));
+        for field in ["all = true", "pointer = \"/token\"", "name = \"TOKEN\""] {
+            let text = format!(
+                "version = 1\n\n[[secret]]\nsource = \"npmrc\"\nfile = \".npmrc\"\nkey = \"token\"\n{field}\n"
+            );
+            assert_eq!(entry_problem(&text), EntryProblem::UnexpectedField);
+        }
+        let duplicate = "version = 1\n\n[[secret]]\nsource = \"npmrc\"\nfile = \".npmrc\"\nkey = \"Token\"\n\n[[secret]]\nsource = \"npmrc\"\nfile = \"./nested/../.npmrc\"\nkey = \"Token\"\n";
+        assert_eq!(entry_problem(duplicate), EntryProblem::DuplicateIdentity);
+        let distinct = duplicate.replacen("key = \"Token\"\n", "key = \"token\"\n", 1);
+        assert_eq!(
+            parse_text(&distinct)
+                .expect("case-sensitive keys")
+                .sources
+                .len(),
+            2
+        );
     }
 
     #[test]

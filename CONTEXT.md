@@ -73,6 +73,12 @@ An enrolled or discovered Java-style properties file persisted with
 `source = "properties"` and resolved through one exact decoded key.
 _Avoid_: Properties wildcard, inferred file source
 
+**npmrc Source**:
+An enrolled or discovered npm configuration file persisted with
+`source = "npmrc"` and resolved through one exact case-sensitive key using
+ContextVeil's narrow scalar grammar.
+_Avoid_: Generic INI source, npm configuration snapshot
+
 **Global Registry**:
 The user's machine-scoped collection of enrolled sources.
 _Avoid_: Global vault, system policy

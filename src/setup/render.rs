@@ -65,6 +65,7 @@ pub(super) fn enrollment_actions(row_count: usize) -> String {
         "  [w]     add wildcard file".to_string(),
         "  [j]     add JSON field".to_string(),
         "  [p]     add properties key".to_string(),
+        "  [r]     add npmrc key".to_string(),
         "  [Enter] save".to_string(),
         "  [s]     skip".to_string(),
         "  [q]     quit".to_string(),

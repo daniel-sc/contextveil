@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::dotenv::{self, Dotenv, ParseErrorKind};
+use crate::npmrc::{self, Npmrc};
 use crate::properties::{self, Properties};
 use crate::sanitize;
 
@@ -69,8 +70,40 @@ pub struct Discovered {
 pub struct ProjectFiles {
     pub dotenv: Vec<Discovered>,
     pub properties: Vec<DiscoveredProperties>,
+    pub npmrc: Vec<DiscoveredNpmrc>,
     pub claude_settings: Vec<PathBuf>,
     pub claude_mcp: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredNpmrc {
+    pub path: PathBuf,
+    pub display: String,
+    pub entered: Option<String>,
+    pub state: NpmrcState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NpmrcState {
+    Available(Npmrc),
+    Unavailable(NpmrcUnavailable),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NpmrcUnavailable {
+    NonUtf8Path,
+    Unreadable,
+    NotUtf8,
+}
+
+impl NpmrcUnavailable {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NonUtf8Path => "its path is not valid UTF-8",
+            Self::Unreadable => "it could not be read",
+            Self::NotUtf8 => "it is not valid UTF-8",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +203,9 @@ pub fn project_files(project_root: &Path) -> ProjectFiles {
     found
         .properties
         .sort_by(|left, right| left.path.cmp(&right.path));
+    found
+        .npmrc
+        .sort_by(|left, right| left.path.cmp(&right.path));
     found.claude_settings.sort();
     found.claude_mcp.sort();
     found
@@ -203,7 +239,11 @@ fn walk(root: &Path, directory: &Path, found: &mut ProjectFiles) {
             // FIFOs, devices, sockets, and other special files are never read.
             continue;
         }
-        if is_dotenv_file_name(&entry.file_name()) {
+        if entry.file_name() == ".npmrc" {
+            found
+                .npmrc
+                .push(inspect_npmrc(&path, relative_entry(root, &path)));
+        } else if is_dotenv_file_name(&entry.file_name()) {
             found
                 .dotenv
                 .push(inspect(&path, relative_entry(root, &path)));
@@ -223,6 +263,27 @@ fn walk(root: &Path, directory: &Path, found: &mut ProjectFiles) {
         } else if entry.file_name() == ".mcp.json" {
             found.claude_mcp.push(path);
         }
+    }
+}
+
+pub fn inspect_npmrc(path: &Path, entered: Option<String>) -> DiscoveredNpmrc {
+    let display = sanitize::path(path);
+    let state = if entered.is_none() {
+        NpmrcState::Unavailable(NpmrcUnavailable::NonUtf8Path)
+    } else {
+        match std::fs::read(path) {
+            Err(_) => NpmrcState::Unavailable(NpmrcUnavailable::Unreadable),
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(text) => NpmrcState::Available(npmrc::parse(&text)),
+                Err(_) => NpmrcState::Unavailable(NpmrcUnavailable::NotUtf8),
+            },
+        }
+    };
+    DiscoveredNpmrc {
+        path: path.to_path_buf(),
+        display,
+        entered,
+        state,
     }
 }
 
@@ -496,6 +557,23 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_project_walk_collects_every_exact_npmrc_name() {
+        let tree = Tree::new();
+        tree.file(".npmrc", "token=one\n");
+        tree.file("packages/app/.npmrc", "token=two\n");
+        tree.file("packages/app/npmrc", "token=ignored\n");
+        tree.file("packages/app/.NPMRC", "token=ignored\n");
+        tree.file("node_modules/pkg/.npmrc", "token=ignored\n");
+
+        let names: Vec<_> = project_files(&tree.root)
+            .npmrc
+            .into_iter()
+            .filter_map(|file| file.entered)
+            .collect();
+        assert_eq!(names, [".npmrc", "packages/app/.npmrc"]);
+    }
+
+    #[test]
     fn one_project_walk_collects_only_anchored_known_source_json() {
         let tree = Tree::new();
         tree.file("app/.claude/settings.json", "{}");
@@ -592,6 +670,18 @@ mod tests {
         );
         assert!(properties.display.contains("\\xff"));
         assert!(!properties.display.contains('\u{fffd}'));
+
+        let npmrc_path = tree
+            .root
+            .join(OsString::from_vec(vec![0xfe]))
+            .join(".npmrc");
+        let npmrc = inspect_npmrc(&npmrc_path, None);
+        assert_eq!(
+            npmrc.state,
+            NpmrcState::Unavailable(NpmrcUnavailable::NonUtf8Path)
+        );
+        assert!(npmrc.display.contains("\\xfe"));
+        assert!(!npmrc.display.contains('\u{fffd}'));
 
         // `LIM-022`: APFS rejects file names that are not valid UTF-8, so the
         // discovery half only runs on a filesystem that accepts one.

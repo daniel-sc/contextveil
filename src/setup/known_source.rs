@@ -32,6 +32,7 @@ pub enum Rule {
     ClaudeMcpOauthState,
     ClaudeMcpServerCredentials,
     PropertiesConfiguration,
+    NpmrcCredentials,
 }
 
 impl Rule {
@@ -51,6 +52,7 @@ impl Rule {
             Self::ClaudeMcpOauthState => "Claude MCP OAuth state",
             Self::ClaudeMcpServerCredentials => "Claude MCP server credentials",
             Self::PropertiesConfiguration => "properties configuration",
+            Self::NpmrcCredentials => "npmrc credentials",
         }
     }
 }
@@ -433,6 +435,34 @@ pub fn machine(environment: &Environment, home: Option<&Path>, base: &Path) -> F
         };
         inspect_properties_document(&mut found, &path, entered);
     }
+    let mut npmrc_files = Vec::new();
+    if let Some(home) = home {
+        npmrc_files.push((
+            paths::normalize(&home.join(".npmrc")),
+            Some("~/.npmrc".to_string()),
+        ));
+    }
+    for name in ["NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG"] {
+        let Some(value) = environment.get(name) else {
+            continue;
+        };
+        match value.to_str() {
+            Some("") => {}
+            Some(value) => {
+                let path = explicit_path(value, base);
+                if !npmrc_files.iter().any(|(known, _)| known == &path) {
+                    npmrc_files.push((path.clone(), path.to_str().map(str::to_string)));
+                }
+            }
+            None => found.notices.push(Notice {
+                display: name.to_string(),
+                reason: "its override is not valid UTF-8",
+            }),
+        }
+    }
+    for (path, entered) in npmrc_files {
+        inspect_npmrc_document(&mut found, &path, entered);
+    }
     deduplicate(&mut found.sources);
     found
 }
@@ -469,8 +499,96 @@ pub fn project(project_root: &Path, files: &ProjectFiles) -> Found {
             }
         }
     }
+    for file in &files.npmrc {
+        let Some(entered) = file.entered.as_deref() else {
+            unavailable(&mut found, &file.path, "its path is not valid UTF-8");
+            continue;
+        };
+        match &file.state {
+            super::discovery::NpmrcState::Unavailable(why) => {
+                unavailable(&mut found, &file.path, why.reason());
+            }
+            super::discovery::NpmrcState::Available(npmrc) => {
+                add_npmrc_candidates(&mut found, &file.path, entered, npmrc);
+            }
+        }
+    }
     deduplicate(&mut found.sources);
     found
+}
+
+fn inspect_npmrc_document(found: &mut Found, path: &Path, entered: Option<String>) {
+    let Some(entered) = entered else {
+        unavailable(found, path, "its path is not valid UTF-8");
+        return;
+    };
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return;
+        }
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return;
+        }
+    };
+    match String::from_utf8(bytes) {
+        Ok(text) => add_npmrc_candidates(found, path, &entered, &crate::npmrc::parse(&text)),
+        Err(_) => unavailable(found, path, "it is not valid UTF-8"),
+    }
+}
+
+fn add_npmrc_candidates(
+    found: &mut Found,
+    path: &Path,
+    entered: &str,
+    npmrc: &crate::npmrc::Npmrc,
+) {
+    for (key, value) in npmrc.entries() {
+        let value = value.trim();
+        if value.is_empty() || npmrc.issue(key).is_some() {
+            continue;
+        }
+        let mut rules = Vec::new();
+        if is_npmrc_credential_key(key) {
+            rules.push(Rule::NpmrcCredentials);
+        }
+        if super::vocabulary::gating_term(crate::secret::npmrc_label(key)).is_some() {
+            rules.push(Rule::SecretLikeName);
+        }
+        if super::credential_url::is_credential_bearing(value) {
+            rules.push(Rule::CredentialBearingUrl);
+        }
+        if rules.is_empty() {
+            continue;
+        }
+        rules.sort_unstable();
+        rules.dedup();
+        let source = SourceRef::Npmrc {
+            entered: entered.to_string(),
+            path: path.to_path_buf(),
+            key: key.to_string(),
+        };
+        found.rules.insert(source.id(), rules);
+        found.sources.push(source);
+    }
+}
+
+fn is_npmrc_credential_key(key: &str) -> bool {
+    let Some(scoped) = key.strip_prefix("//") else {
+        return false;
+    };
+    let Some((prefix, field)) = scoped.rsplit_once(':') else {
+        return false;
+    };
+    !prefix.is_empty() && matches!(field, "_authToken" | "_auth" | "_password")
 }
 
 fn inspect_properties_document(found: &mut Found, path: &Path, entered: Option<String>) {
@@ -971,6 +1089,94 @@ mod tests {
         }
     }
 
+    #[test]
+    fn npmrc_machine_paths_are_additive_and_rules_compose_by_exact_entry() {
+        let tree = Tree::new();
+        let canary = Canary::generate("NPMRC_RULE");
+        let url_canary = Canary::generate("NPMRC_URL");
+        let home = tree.0.join("home");
+        tree.write(
+            "home/.npmrc",
+            &format!(
+                "//registry.example/:_authToken={}\nservice.password={}\nendpoint=https://user:{}@registry.example/\n//:_auth=ignored\n//registry.example/:_authtoken=ignored\n",
+                canary.value(), canary.value(), url_canary.value()
+            ),
+        );
+        let override_path = tree.write(
+            "work/config/custom.npmrc",
+            &format!("//other.example/:_auth={}\n", canary.value()),
+        );
+        let environment = Environment::from_pairs([
+            ("HOME", home.to_string_lossy().into_owned()),
+            ("NPM_CONFIG_USERCONFIG", "config/custom.npmrc".to_string()),
+            (
+                "NPM_CONFIG_GLOBALCONFIG",
+                home.join("./nested/../.npmrc")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        ]);
+
+        let found = machine(&environment, Some(&home), &tree.0.join("work"));
+        let keys: Vec<_> = found
+            .sources
+            .iter()
+            .filter_map(|source| match source {
+                SourceRef::Npmrc { key, .. } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "//registry.example/:_authToken",
+                "service.password",
+                "endpoint",
+                "//registry.example/:_authtoken",
+                "//other.example/:_auth",
+            ]
+        );
+        let credential = SourceId::npmrc(home.join(".npmrc"), "//registry.example/:_authToken");
+        assert_eq!(
+            found.rules[&credential],
+            [Rule::SecretLikeName, Rule::NpmrcCredentials]
+        );
+        let named = SourceId::npmrc(home.join(".npmrc"), "service.password");
+        assert_eq!(found.rules[&named], [Rule::SecretLikeName]);
+        let url = SourceId::npmrc(home.join(".npmrc"), "endpoint");
+        assert_eq!(found.rules[&url], [Rule::CredentialBearingUrl]);
+        let generic_only = SourceId::npmrc(home.join(".npmrc"), "//registry.example/:_authtoken");
+        assert_eq!(found.rules[&generic_only], [Rule::SecretLikeName]);
+        assert!(found.sources.iter().any(|source| matches!(
+            source,
+            SourceRef::Npmrc { entered, path, .. }
+                if entered == &override_path.to_string_lossy()
+                    && path == &override_path
+        )));
+        assert_found_is_canary_free(&found, &canary);
+        assert_found_is_canary_free(&found, &url_canary);
+    }
+
+    #[test]
+    fn npmrc_credential_keys_require_exact_case_and_a_nonempty_scope() {
+        for accepted in [
+            "//registry.example/:_authToken",
+            "//@scope:registry:_auth",
+            "//host/path/:_password",
+        ] {
+            assert!(is_npmrc_credential_key(accepted), "{accepted}");
+        }
+        for rejected in [
+            "//:_auth",
+            "registry.example/:_auth",
+            "//registry.example/:_authtoken",
+            "//registry.example/:password",
+            "//registry.example/",
+        ] {
+            assert!(!is_npmrc_credential_key(rejected), "{rejected}");
+        }
+    }
+
     fn default_environment(tree: &Tree) -> (PathBuf, Environment) {
         let home = tree.0.join("home");
         let environment = Environment::from_pairs([("HOME", home.to_string_lossy().into_owned())]);
@@ -1172,6 +1378,7 @@ mod tests {
         let files = ProjectFiles {
             dotenv: vec![],
             properties: vec![],
+            npmrc: vec![],
             claude_settings: vec![settings],
             claude_mcp: vec![mcp],
         };

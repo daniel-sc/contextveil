@@ -84,7 +84,7 @@ where appropriate; do not paste them back into prompts.
 
 ### LIM-006: Resolution Race
 
-**Reality:** A tool may emit a dotenv value and rotate or delete its source before
+**Reality:** A tool may emit a file-backed value and rotate or delete its source before
 the post-tool hook resolves current values.
 
 **Impact:** The old emitted value is not matched.
@@ -101,18 +101,18 @@ value history is persisted.
 shell does not modify an already-running harness environment.
 
 **Impact:** Rotated environment values become active only in a newly launched
-harness process. Dotenv values remain per-event fresh.
+harness process. File-backed values remain per-event fresh.
 
 **Workaround:** Restart the coding-agent harness after rotating an enrolled
 environment variable.
 
-**Verification:** Status and documentation distinguish environment and dotenv
+**Verification:** Status and documentation distinguish environment and file-backed
 rotation behavior.
 
 ### LIM-008: Project Config Is Trusted To Read Host Paths
 
-**Reality:** Automatically loaded project config may reference arbitrary dotenv
-paths and environment names, including paths outside the project.
+**Reality:** Automatically loaded project config may reference arbitrary supported
+source paths and environment names, including paths outside the project.
 
 **Impact:** A cloned project can cause local host-file reads, influence redaction,
 or act as a limited presence/equality oracle. Source values are still never
@@ -139,7 +139,7 @@ review project policy before starting the harness.
 
 ### LIM-010: Unbounded Input Size
 
-**Reality:** V1 imposes no ContextVeil-specific size cap on dotenv files or
+**Reality:** V1 imposes no ContextVeil-specific size cap on dotenv or npmrc files or
 intercepted payloads. JSON source documents are limited to 128 nested object or
 array containers so untrusted source files cannot exhaust the hook process stack.
 
@@ -155,7 +155,7 @@ source is a malfunction and disables the effective registry for that event.
 **Workaround:** Keep credential files small and rely on normal harness output
 limits. Diagnose slow paths with `contextveil doctor` and benchmarks.
 
-**Verification:** Functional large-input tests cover a 4 MiB dotenv file, 201
+**Verification:** Functional large-input tests cover 4 MiB dotenv and npmrc files, 201
 active values over a 512 KiB payload, moderate successful nesting, and rejection
 of a 20,000-level JSON source without a stack overflow. Portable tests make no
 machine-sensitive duration assertion; `mise run bench` owns performance evidence.
@@ -369,16 +369,16 @@ external automation, then run human-readable diagnostics.
 ### LIM-022: Non-UTF-8 Source Paths
 
 **Reality:** TOML can represent only UTF-8 strings. Automatic discovery skips
-dotenv and properties files whose project-relative path contains non-UTF-8
+dotenv, properties, and npmrc files whose project-relative path contains non-UTF-8
 bytes, although it renders the unavailable path safely in setup.
 
-**Impact:** A dotenv or properties source at such a path cannot be enrolled
+**Impact:** A dotenv, properties, or npmrc source at such a path cannot be enrolled
 directly in V1.
 
 **Workaround:** Rename the file or an ancestor directory to a UTF-8 name, or
 expose the credential through an enrolled environment variable.
 
-**Verification:** Unix tests assert dotenv and properties paths are safely
+**Verification:** Unix tests assert dotenv, properties, and npmrc paths are safely
 reported, not parsed or persisted. Discovery additionally creates a non-UTF-8
 dotenv path where the filesystem permits it; APFS rejects one, so macOS covers
 the reporting half alone.
@@ -402,7 +402,7 @@ are skipped. No complete vendor schema is validated.
 
 **Workaround:** Review masked candidates before saving, heed collision warnings,
 and rerun setup after host path or field inventory updates. Manually enroll a
-representable environment, dotenv, or exact JSON reference when needed. Use
+representable environment, dotenv, exact JSON, properties, or npmrc reference when needed. Use
 separate keychain or helper controls for sources outside the inventory.
 
 **Verification:** Probe fixtures cover independent non-empty string admission,
@@ -444,6 +444,21 @@ when application decoding differs.
 **Verification:** Parser fixtures pin Windows-1252, continuation, escape,
 duplicate, transactional-error, and hostile-input behavior. Runtime never uses
 entries from a parse that reports an error.
+
+### LIM-026: npmrc Environment Expressions Stay Literal
+
+**Reality:** ContextVeil does not reproduce npm's environment interpolation.
+Text such as `${NAME}` is the literal resolved npmrc value.
+
+**Impact:** When npm substitutes an environment-derived credential, the value
+npm uses may differ from the value ContextVeil enrolls from the npmrc entry.
+
+**Workaround:** Enroll the underlying environment variable or another source
+containing the concrete value.
+
+**Verification:** npmrc parser and resolver tests assert expressions remain
+literal, and the leak suite exercises npmrc without substituting environment
+content.
 
 ## Implementation Deviations
 

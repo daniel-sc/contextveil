@@ -160,6 +160,11 @@ pointer = "/tokens/access_token"
 source = "properties"
 file = "src/main/resources/application-local.properties"
 key = "spring.datasource.password"
+
+[[secret]]
+source = "npmrc"
+file = "~/.npmrc"
+key = "//registry.npmjs.org/:_authToken"
 ```
 
 Equivalent field naming changes before the first persisted implementation MAY be
@@ -180,6 +185,7 @@ dotenv key:        (dotenv, normalized absolute path, exact key)
 dotenv wildcard:   (dotenv-all, normalized absolute path)
 JSON field:        (json, normalized absolute path, exact JSON Pointer)
 properties key:    (properties, normalized absolute path, exact decoded key)
+npmrc entry:       (npmrc, normalized absolute path, exact key)
 ```
 
 Repeated identical tuples within one file are duplicates. A keyed entry and a
@@ -239,6 +245,11 @@ another source type.
 non-empty `file`, and one non-empty exact decoded `key`. It MUST NOT contain
 fields for another source type. Resolver type MUST NOT be inferred from a
 filename, and properties wildcard enrollment is not supported.
+
+**CFG-018** An npmrc entry MUST contain `source = "npmrc"`, one non-empty
+`file`, and one non-empty case-sensitive exact `key`. It MUST NOT contain fields
+for another source type. Resolver type MUST NOT be inferred from a filename, and
+npmrc wildcard enrollment is not supported.
 
 ## 6. Source Resolution
 
@@ -343,6 +354,38 @@ unresolved. Permission denial, non-`NotFound` I/O failure, or parser error is a
 malfunction. A file referenced by multiple entries MUST be read and parsed once
 per event where practical, and a parser error MUST discard all entries.
 
+**SRC-018** An npmrc resolver MUST use this ContextVeil-owned scalar grammar:
+
+- input is UTF-8 with an optional leading BOM and LF or CRLF line endings;
+- blank lines and lines whose first non-whitespace character is `#` or `;` are
+  ignored;
+- top-level assignments split at the first `=`, trim their keys, and require a
+  non-empty key;
+- unquoted values end at the first unescaped `#` or `;`, are trimmed, and decode
+  only `\\#`, `\\;`, and `\\\\` to their literal characters; other backslashes
+  remain literal;
+- single-quoted values are literal until the matching quote;
+- double-quoted values decode only `\\\\`, `\\\"`, `\\n`, `\\r`, and `\\t`;
+- quoted comment characters are literal, and after a closing quote only
+  whitespace and an optional `#` or `;` comment are permitted;
+- multiline values, sections, array fields, and key-only fields are unsupported.
+
+The parser MUST retain valid top-level scalar entries and issues attributable to
+recoverable exact keys while ignoring unrelated or unkeyed unparsable lines. A
+selected key with any malformed or unsupported occurrence is a malfunction,
+including a manually selected form that automatic discovery otherwise ignores.
+Duplicate valid scalar keys use the last valid assignment and produce a
+value-free setup and doctor warning; any malformed or unsupported occurrence of
+that selected key still makes resolution malfunction.
+
+The resolver MUST NOT interpolate environment expressions or otherwise decode,
+canonicalize, or transform values. Text such as `${NAME}` is an ordinary literal
+value. An absent file, absent key, or value empty after `SRC-016` is unresolved.
+Invalid UTF-8, permission or non-`NotFound` I/O failure, or a selected keyed
+syntax issue is a malfunction. One npmrc file referenced by multiple entries
+MUST be read and parsed once per event where practical, read afresh on the next
+event, and have no ContextVeil-specific size cap.
+
 ## 7. Setup Discovery And Enrollment
 
 **SET-001** After TTY validation and successful preflight parsing of both
@@ -370,7 +413,8 @@ read FIFOs, devices, sockets, or other special files. A skipped UTF-8 path may
 still be entered manually.
 
 The same single bounded project traversal MUST supply eligible lowercase
-`*.properties` files to `SET-021`; the project tree MUST NOT be walked again.
+`*.properties` files to `SET-021` and every regular file named exactly `.npmrc`
+to `SET-022`; the project tree MUST NOT be walked again.
 
 **SET-004** Global dotenv probing MUST inspect matching files directly under the
 home directory and directly under the supported harness config directories,
@@ -379,8 +423,8 @@ including `~/.claude`, `~/.codex`, `~/.copilot`, and
 general config directory.
 
 **SET-005** Both enrollment phases MUST allow manual dotenv paths, individual
-keys, wildcard file enrollment, environment names, JSON file/pointer pairs, and
-properties file/decoded-key pairs.
+keys, wildcard file enrollment, environment names, JSON file/pointer pairs,
+properties file/decoded-key pairs, and npmrc file/exact-key pairs.
 A currently absent manual file, key, or pointer MAY be saved after explicit
 unresolved-source confirmation.
 
@@ -511,6 +555,7 @@ Source Identity order MUST compare source kind first in this V1 sequence:
 3. dotenv wildcard;
 4. JSON.
 5. properties.
+6. npmrc.
 
 A source kind added later in V1 MUST append after every source kind already in
 the contractual sequence when that change lands. Within one source kind, the
@@ -637,8 +682,22 @@ localization-directory exclusions remain authoritative. These conventions affect
 eligibility only, not admission, selection, attribution, or ordering. Manual
 properties enrollment bypasses localization exclusions.
 
-Rows marked `Planned` in the inventory are non-contract roadmap information.
-They MUST NOT be treated as scanned, discovered, or covered by V1.
+**SET-022** The npmrc credentials Known Source Rule MUST inspect the additive
+machine files `~/.npmrc`, `${NPM_CONFIG_USERCONFIG}`, and
+`${NPM_CONFIG_GLOBALCONFIG}`, plus every project `.npmrc` supplied by the shared
+walk in `SET-003`. Override names are exact and uppercase. Their path values use
+the override semantics in `SET-018`; valid defaults and overrides remain
+additive and normalized duplicate paths are inspected once.
+
+The rule MUST admit an exact npmrc source for every non-empty scalar entry whose
+case-sensitive key starts with `//`, has a non-empty prefix before its final
+colon-delimited field, and ends in exactly `:_authToken`, `:_auth`, or
+`:_password`. The registry or scope prefix is not parsed or canonicalized and
+credential values are not decoded. Every valid scalar entry is also offered
+independently to the generic rules: `SET-006` receives only its final
+colon-delimited key field, while `SET-017` receives its complete scalar value.
+Applicable rule names are deduplicated and retain no admission, selection,
+grouping, or ordering weight.
 
 ## 8. Effective Registry
 
@@ -652,8 +711,9 @@ otherwise the first global entry in file order. Doctor SHOULD report the aliases
 without values.
 
 **REG-003** Source and key names are case-sensitive. Safe placeholder labels MUST
-derive from the environment name, dotenv or properties key, or final JSON
-Pointer reference token only, never a file path.
+derive from the environment name, dotenv or properties key, final JSON Pointer
+reference token, or final colon-delimited npmrc key field only, never a file
+path. An npmrc key without a colon uses the complete key.
 
 **REG-004** A label MUST preserve ASCII letters, digits, `_`, `-`, and `.` and
 replace every other non-empty run with `_`. Labels need not be globally unique.
@@ -939,7 +999,8 @@ no recursive replacement.
 **TST-002** Config and source tests MUST cover strict unknown fields, duplicate
 identities, cross-scope duplicates, missing sources, empty values, non-UTF-8
 environment values, malformed/invalid-UTF-8 dotenv and JSON sources, the full
-JSON5 grammar, duplicate dotenv keys and JSON members, JSON Pointer escaping and wrong-type targets, path
+JSON5 grammar, npmrc scalar grammar and keyed issues, duplicate dotenv and npmrc
+keys and JSON members, JSON Pointer escaping and wrong-type targets, path
 expansion, wildcard future keys, and all-or-nothing malfunction behavior.
 
 **TST-003** Filesystem tests MUST cover project-root selection, recursive ignored
@@ -948,7 +1009,8 @@ permissive field probes without sibling-schema gating, exact and anchored paths,
 exclusions, symlink traversal, grouped collision source-file exclusion,
 permissions, atomic writes, invalid-config preservation, repeat setup, and
 partial multi-phase failure. They MUST retain malformed-file, JSON Pointer, and
-secret-leak coverage.
+secret-leak coverage, including npmrc project traversal and exact override path
+semantics.
 
 **TST-004** Every shipped adapter path MUST have protocol decision fixtures for
 clean, intervened, unresolved, and explicitly unsupported behavior. Every
@@ -965,7 +1027,8 @@ tests MAY focus on setup persistence, diagnostics, logging, and telemetry rather
 than repeat adapter conformance.
 
 **TST-006** Fuzz targets MUST cover robustness of the matcher, sanitizer,
-untrusted JSON5 source, strict adapter protocol JSON, TOML, and dotenv inputs.
+untrusted JSON5 source, strict adapter protocol JSON, TOML, dotenv, and npmrc
+inputs.
 Committed corpora MUST replay routinely with mutation disabled. Bounded mutation
 MUST run separately through mise.
 

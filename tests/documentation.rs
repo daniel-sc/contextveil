@@ -91,6 +91,8 @@ fn known_source_inventory_describes_bounded_advisory_rules() {
         "Dynamic names",
         "keychains",
         "LIM-023",
+        "npmrc credentials",
+        "do not interpolate",
     ] {
         assert!(
             text.contains(disclosure),
@@ -108,7 +110,8 @@ fn completed_setup_contract_work_has_no_temporary_gap_entries() {
 
     let traceability = read("docs/traceability.md");
     for requirement in [
-        "SET-002", "SET-006", "SET-016", "SET-018", "SET-019", "SET-020", "TST-003",
+        "CFG-018", "SRC-018", "SET-002", "SET-006", "SET-016", "SET-018", "SET-019", "SET-020",
+        "SET-022", "TST-003",
     ] {
         let row = traceability
             .lines()

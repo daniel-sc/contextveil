@@ -19,6 +19,7 @@ Choose an action:
   [w]     add wildcard file
   [j]     add JSON field
   [p]     add properties key
+  [r]     add npmrc key
   [Enter] save
   [s]     skip
   [q]     quit
@@ -32,6 +33,7 @@ Choose an action:
   [w]     add wildcard file
   [j]     add JSON field
   [p]     add properties key
+  [r]     add npmrc key
   [Enter] save
   [s]     skip
   [q]     quit
@@ -58,6 +60,7 @@ Choose an action:
   [w]     add wildcard file
   [j]     add JSON field
   [p]     add properties key
+  [r]     add npmrc key
   [Enter] save
   [s]     skip
   [q]     quit

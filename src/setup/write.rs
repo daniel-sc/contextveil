@@ -111,6 +111,14 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     all: None,
                     pointer: None,
                 },
+                SourceRef::Npmrc { entered, key, .. } => SecretOut {
+                    source: "npmrc",
+                    name: None,
+                    file: Some(entered.clone()),
+                    key: Some(key.clone()),
+                    all: None,
+                    pointer: None,
+                },
             })
             .collect(),
     };
@@ -259,6 +267,11 @@ mod tests {
                 entered: "src/main/resources/application.properties".to_string(),
                 path: PathBuf::from("/project/src/main/resources/application.properties"),
                 key: "spring.datasource.password".to_string(),
+            },
+            SourceRef::Npmrc {
+                entered: "~/.npmrc".to_string(),
+                path: PathBuf::from("/home/user/.npmrc"),
+                key: "//registry.npmjs.org/:_authToken".to_string(),
             },
         ]
     }

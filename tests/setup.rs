@@ -1152,6 +1152,61 @@ fn exact_properties_keys_can_be_enrolled_manually_in_both_scopes() {
 }
 
 #[test]
+fn npmrc_discovery_enrolls_machine_overrides_and_nested_project_files() {
+    let canary = Canary::generate("NPMRC_SETUP");
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home().join(".npmrc"),
+        format!("//default.example/:_authToken={}\n", canary.value()),
+    )
+    .expect("default npmrc");
+    let override_path = fixture.write(
+        "config/global.npmrc",
+        &format!("//global.example/:_password={}\n", canary.value()),
+    );
+    fixture.write(
+        "packages/app/.npmrc",
+        &format!("project.secret={}\n", canary.value()),
+    );
+    let environment =
+        fixture.environment(&[("NPM_CONFIG_GLOBALCONFIG", &override_path.to_string_lossy())]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("~/.npmrc"));
+    assert!(global.contains(&override_path.to_string_lossy().into_owned()));
+    assert!(project.contains("packages/app/.npmrc"));
+    assert!(project.contains("project.secret"));
+    assert!(transcript.contains("npmrc credentials"));
+    assert!(transcript.contains("secret-like source name"));
+    assert_canary_absent("npmrc setup transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("npmrc global config", global.as_bytes(), &canary);
+    assert_canary_absent("npmrc project config", project.as_bytes(), &canary);
+}
+
+#[test]
+fn exact_npmrc_keys_can_be_enrolled_manually_in_both_scopes() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home().join("manual.npmrc"),
+        "ordinary=global-value\n",
+    )
+    .expect("global npmrc");
+    fixture.write("manual.npmrc", "ordinary=project-value\n");
+    let script = "r\n~/manual.npmrc\nordinary\n\nr\nmanual.npmrc\nordinary\n\n\n";
+    let (exit, transcript) = fixture.run(script, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("source = \"npmrc\""));
+    assert!(global.contains("~/manual.npmrc"));
+    assert!(project.contains("manual.npmrc"));
+    assert!(project.contains("key = \"ordinary\""));
+}
+
+#[test]
 fn unresolved_json_may_be_confirmed_but_malformed_json_cannot() {
     let fixture = Fixture::new();
     let missing = fixture.home().join("missing.json");

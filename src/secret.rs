@@ -24,6 +24,8 @@ pub enum SourceId {
     Json { path: PathBuf, pointer: String },
     /// One decoded key in a Java properties file.
     Properties { path: PathBuf, key: String },
+    /// One exact key in an npmrc file.
+    Npmrc { path: PathBuf, key: String },
 }
 
 impl SourceId {
@@ -56,6 +58,13 @@ impl SourceId {
         }
     }
 
+    pub fn npmrc(path: PathBuf, key: impl Into<String>) -> Self {
+        SourceId::Npmrc {
+            path,
+            key: key.into(),
+        }
+    }
+
     /// Emit-safe label for this source, when it has a key (`REG-003`).
     pub fn label(&self) -> Option<String> {
         match self {
@@ -66,6 +75,7 @@ impl SourceId {
                 .ok()
                 .map(|token| safe_label(&token)),
             SourceId::Properties { key, .. } => Some(safe_label(key)),
+            SourceId::Npmrc { key, .. } => Some(safe_label(npmrc_label(key))),
         }
     }
 
@@ -76,7 +86,8 @@ impl SourceId {
             SourceId::DotenvKey { path, .. }
             | SourceId::DotenvAll { path }
             | SourceId::Json { path, .. }
-            | SourceId::Properties { path, .. } => Some(path),
+            | SourceId::Properties { path, .. }
+            | SourceId::Npmrc { path, .. } => Some(path),
         }
     }
 
@@ -87,6 +98,7 @@ impl SourceId {
             SourceId::DotenvAll { .. } => 2,
             SourceId::Json { .. } => 3,
             SourceId::Properties { .. } => 4,
+            SourceId::Npmrc { .. } => 5,
         }
     }
 }
@@ -130,9 +142,24 @@ impl Ord for SourceId {
                     key: right_key,
                 },
             ) => left_path.cmp(right_path).then(left_key.cmp(right_key)),
+            (
+                SourceId::Npmrc {
+                    path: left_path,
+                    key: left_key,
+                },
+                SourceId::Npmrc {
+                    path: right_path,
+                    key: right_key,
+                },
+            ) => left_path.cmp(right_path).then(left_key.cmp(right_key)),
             _ => self.kind_order().cmp(&other.kind_order()),
         }
     }
+}
+
+/// Final colon-delimited npmrc field used for labels and generic name gating.
+pub fn npmrc_label(key: &str) -> &str {
+    key.rsplit_once(':').map_or(key, |(_, field)| field)
 }
 
 impl PartialOrd for SourceId {
@@ -226,6 +253,21 @@ mod tests {
                 .as_deref(),
             Some("a_b")
         );
+        assert_eq!(
+            SourceId::npmrc(
+                PathBuf::from("/secret/.npmrc"),
+                "//registry.example/:_authToken"
+            )
+            .label()
+            .as_deref(),
+            Some("_authToken")
+        );
+        assert_eq!(
+            SourceId::npmrc(PathBuf::from("/secret/.npmrc"), "token")
+                .label()
+                .as_deref(),
+            Some("token")
+        );
     }
 
     #[test]
@@ -250,6 +292,8 @@ mod tests {
     fn identities_use_the_contractual_total_order() {
         let path = PathBuf::from("/project/source");
         let mut identities = vec![
+            SourceId::npmrc(path.clone(), "//z/:_authToken"),
+            SourceId::npmrc(path.clone(), "//a/:_authToken"),
             SourceId::properties(path.clone(), "z"),
             SourceId::json(path.clone(), "/b"),
             SourceId::dotenv_all(path.clone()),
@@ -273,6 +317,8 @@ mod tests {
                 SourceId::json(PathBuf::from("/project/source"), "/a"),
                 SourceId::json(PathBuf::from("/project/source"), "/b"),
                 SourceId::properties(PathBuf::from("/project/source"), "z"),
+                SourceId::npmrc(PathBuf::from("/project/source"), "//a/:_authToken"),
+                SourceId::npmrc(PathBuf::from("/project/source"), "//z/:_authToken"),
             ]
         );
     }

@@ -25,6 +25,9 @@ be a real directory and only its immediate qualifying regular files are read.
 Properties documents use `java-properties` 2.0.0 default Windows-1252 behavior
 and persist exact decoded keys. All resolved source values are trimmed before
 admission, grouping, collision analysis, and runtime matching.
+Npmrc documents use ContextVeil's narrow UTF-8 scalar grammar and persist exact
+case-sensitive keys. They support common comments and quoting, isolate keyed
+syntax issues, and do not interpolate `${NAME}` expressions.
 
 ## Rule Inventory
 
@@ -44,11 +47,12 @@ admission, grouping, collision analysis, and runtime matching.
 | Claude MCP OAuth state | `~/.claude/.credentials.json`, `~/.claude.json`; `${CLAUDE_CONFIG_DIR}/.credentials.json`, `${CLAUDE_CONFIG_DIR}/.claude.json` | Immediate members under `/mcpOAuth` and `/mcpOAuthClientConfig` | `/mcpOAuth`: `accessToken`, `refreshToken`, `clientSecret`; `/mcpOAuthClientConfig`: `clientSecret` | No sibling fields are required. |
 | Claude MCP server credentials | `~/.claude.json`; `${CLAUDE_CONFIG_DIR}/.claude.json`; project-anchored `.mcp.json` | Each immediate `/mcpServers` member, then immediate `/headers` and `/env` maps | Headers, case-insensitive: `authorization`, `proxy-authorization`, `x-api-key`, `api-key`, `x-auth-token`, `x-subscription-token`; environment, exact: `API_KEY`, `ACCESS_TOKEN`, `AUTH_TOKEN`, `BEARER_TOKEN`, `CLIENT_SECRET`, `PASSWORD`, `SECRET`, `TOKEN`, plus the eight Claude names above | Other server fields and deeper values are not inspected. |
 | Properties configuration | Eligible lowercase `*.properties` files from the one bounded project walk; `~/.gradle/gradle.properties`; `${GRADLE_USER_HOME}/gradle.properties` | Decoded logical entries | Exact keys passing the secret-name vocabulary, plus values admitted by the credential-bearing URL rule | Localization directory, bundle-basename, and two-letter locale-suffix exclusions apply to project discovery. Recognized application, bootstrap, MicroProfile, Gradle, and Sonar names are eligibility exceptions only. |
+| npmrc credentials | `~/.npmrc`; `${NPM_CONFIG_USERCONFIG}`; `${NPM_CONFIG_GLOBALCONFIG}`; every exact project `.npmrc` from the one bounded walk | Top-level scalar assignments | Exact keys beginning `//`, with a non-empty scope and ending `:_authToken`, `:_auth`, or `:_password` | Generic name gating uses only the final colon-delimited field; the complete value is independently offered to the credential-bearing URL rule. Values and registry fragments are not decoded or canonicalized. |
 
 ## Boundaries
 
 These rules do not query OS keychains, execute credential helpers, read raw
 sidecars, decode values, or add runtime wildcard traversal. Copilot `.secret`,
-`.verifier`, and `mcp-secrets` files remain unsupported. Planned formats such as
-npmrc and generic INI are not scanned. Rerun setup after host locations or field
+`.verifier`, and `mcp-secrets` files remain unsupported. Generic INI, YAML, and
+TOML sources are not scanned. Rerun setup after host locations or field
 inventories change. See [`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).

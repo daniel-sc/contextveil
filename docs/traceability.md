@@ -78,6 +78,7 @@ the end of the audit.
 | CFG-015 | Setup preserves existing valid enrollment by default; permits deliberate removal; never auto-removes unresolved entries | src/setup/mod.rs (enrollment-preservation logic) | tests/setup.rs::existing_enrollment_survives_a_rerun_even_when_unresolved, ::an_enrolled_entry_can_be_removed_deliberately | covered |
 | CFG-016 | JSON entries require an explicit file and non-empty plain RFC 6901 pointer, with no wildcards or cross-source fields | src/config.rs (`parse_entry`, JSON arm); src/json.rs (`final_token`) | config.rs::json_entries_are_strict_and_require_a_supported_pointer; json.rs pointer-validation tests | covered |
 | CFG-017 | Properties entries require an explicit file and exact decoded key, with no wildcard or inferred resolver | src/config.rs (`parse_entry`, properties arm) | config.rs::properties_entries_require_only_an_exact_file_and_decoded_key | covered |
+| CFG-018 | npmrc entries require an explicit file and exact case-sensitive key, with no wildcard or inferred resolver | src/config.rs (`parse_entry`, npmrc arm) | config.rs::npmrc_entries_are_strict_exact_and_path_normalized | covered |
 
 ## 5. Configuration Schema
 
@@ -106,6 +107,7 @@ for section 5.
 | SRC-015 | JSON5 applies only to persisted JSON sources; protocols and integration files remain strict unless separately specified | Source parsing is isolated in src/json.rs; adapters and integration editors continue using strict `serde_json` protocol/config parsing | Existing malformed-protocol fixtures and integration parsing tests reject non-strict input | covered |
 | SRC-016 | Every decoded source value is trimmed before resolution and all downstream semantics use it | src/source.rs (`resolve_text` and wildcard resolution) | source.rs::every_source_family_trims_values_before_resolution; registry.rs::properties_values_are_active_and_malformed_files_disable_the_whole_registry; tests/process_boundaries.rs::enrolled_values_are_absent_at_every_process_boundary_after_intervention | covered |
 | SRC-017 | Exact-key properties resolution follows transactional java-properties 2.0.0 behavior with last-key-wins duplicates | src/properties.rs; src/source.rs (`PropertiesFileState`) | properties.rs parser fixtures; source.rs::properties_resolve_exact_decoded_keys_and_report_duplicates, ::unreadable_file_sources_are_malfunctions; registry.rs::properties_values_are_active_and_malformed_files_disable_the_whole_registry | covered |
+| SRC-018 | Exact-key npmrc resolution uses the narrow scalar grammar, key-local issues, literal environment expressions, last-valid duplicates, and fresh one-event parsing | src/npmrc.rs; src/source.rs (`NpmrcFileState`) | npmrc.rs grammar fixtures; source.rs::npmrc_resolution_is_exact_key_local_and_fresh_per_event, ::selected_npmrc_issues_malfunction_while_absent_and_empty_are_unresolved | covered |
 
 ## 7. Setup Discovery And Enrollment (`SET-*`)
 
@@ -132,6 +134,7 @@ for section 5.
 | SET-019 | Recognized credential documents use JSON5 and bounded permissive probes; non-empty listed strings admit independently, while malformed documents are unavailable | src/setup/known_source.rs declarative probes and shared evaluator delegate parsing to src/json.rs | known_source.rs::probes_are_bounded_and_accept_only_non_empty_strings; tests/setup.rs::known_sources_persist_explicit_refs_and_bypass_name_gating | covered |
 | SET-020 | Credential document rules cover only the additive host locations, bounded containers, and inventory leaves; keychains, helpers, sidecars, and unlisted fields remain outside | src/setup/known_source.rs data descriptors and src/setup/discovery.rs anchored project traversal | known_source.rs exact-path safety tests; discovery.rs::one_project_walk_collects_only_anchored_known_source_json; tests/setup.rs::known_sources_persist_explicit_refs_and_bypass_name_gating | covered |
 | SET-021 | Properties Known Source discovery covers eligible project files and additive Gradle roots with localization exclusions | src/setup/discovery.rs properties predicate; src/setup/known_source.rs properties admission | discovery.rs::properties_discovery_handles_monorepos_and_localization_exclusions; tests/setup.rs properties and Gradle fixtures | covered |
+| SET-022 | npmrc discovery covers additive exact machine paths and every project `.npmrc`, with exact credential-key and generic-rule composition | src/setup/discovery.rs; src/setup/known_source.rs | known_source.rs npmrc path/key/rule fixtures; tests/setup.rs::npmrc_discovery_enrolls_machine_overrides_and_nested_project_files | covered |
 
 ## 8. Effective Registry (`REG-*`)
 
@@ -268,11 +271,12 @@ for section 5.
 | Behavior | Record | Status |
 | --- | --- | --- |
 | Setup save may change the canonical placeholder alias | LIM-024 and `save_order_can_change_the_canonical_alias` | accepted-limitation |
+| npmrc environment expressions stay literal | LIM-026 and npmrc parser/source fixtures | accepted-limitation |
 
-No implementation or evidence gap remains in the confirmed Known Source Rule and
-JSON5 source-document requirements. Strict harness protocols and integration
-files remain separate from JSON sources. Planned npmrc and recognized INI store
-rows are non-contract and require no current implementation evidence.
+No implementation or evidence gap remains in the confirmed Known Source Rule,
+JSON5 source-document, or npmrc requirements. Strict harness protocols and
+integration files remain separate from JSON sources. Generic INI remains
+non-contract.
 
 **Manual (verifiable only by a human or a paid/networked run):**
 
