@@ -1207,14 +1207,16 @@ fn npmrc_source_files_are_excluded_from_collision_counts() {
 }
 
 #[test]
-fn a_malformed_npmrc_key_does_not_hide_independent_valid_scalars() {
-    let canary = Canary::generate("NPMRC_KEY_LOCAL");
+fn a_malformed_npmrc_key_is_unavailable_without_hiding_independent_valid_scalars() {
+    let malformed_canary = Canary::generate("NPMRC_MALFORMED_KEY");
+    let valid_canary = Canary::generate("NPMRC_VALID_KEY");
     let fixture = Fixture::new();
     std::fs::write(
         fixture.home().join(".npmrc"),
         format!(
-            "//broken.example/:_auth='unterminated\n//registry.example/:_authToken={}\n",
-            canary.value()
+            "//broken.example/:_auth={}\n//broken.example/:_auth='unterminated\n//registry.example/:_authToken={}\n",
+            malformed_canary.value(),
+            valid_canary.value()
         ),
     )
     .expect("npmrc");
@@ -1222,10 +1224,13 @@ fn a_malformed_npmrc_key_does_not_hide_independent_valid_scalars() {
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(transcript.contains("unavailable: has an invalid npmrc entry"));
     assert!(global.contains("//registry.example/:_authToken"));
     assert!(!global.contains("//broken.example/:_auth"));
-    assert_canary_absent("npmrc setup transcript", transcript.as_bytes(), &canary);
-    assert_canary_absent("npmrc global config", global.as_bytes(), &canary);
+    for canary in [&malformed_canary, &valid_canary] {
+        assert_canary_absent("npmrc setup transcript", transcript.as_bytes(), canary);
+        assert_canary_absent("npmrc global config", global.as_bytes(), canary);
+    }
 }
 
 #[test]
