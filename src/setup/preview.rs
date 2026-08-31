@@ -8,7 +8,8 @@
 //! | --- | --- |
 //! | 0-4 | fully masked |
 //! | 5-15 | first 2 and last 2 characters |
-//! | 16+ | first 4 and last 4 characters |
+//! | 16-39 | first 4 and last 4 characters |
+//! | 40+ | first 4 and last 4 characters, with a compact skipped-character marker |
 //!
 //! Deterministic value fingerprints are forbidden, so nothing here hashes a
 //! value. Selection happens before escaping, so an escape representation cannot
@@ -17,6 +18,8 @@
 use crate::sanitize;
 
 const MASK: char = '*';
+const COMPACT_PREVIEW_THRESHOLD: usize = 40;
+const COMPACT_MASK_COUNT: usize = 4;
 
 /// Renders a masked, terminal-safe preview with its character length.
 pub fn describe(value: &str) -> String {
@@ -47,7 +50,16 @@ pub fn mask(value: &str) -> String {
     }
     preview.extend(characters.iter().take(revealed));
     let masked = length - revealed * 2;
-    preview.push_str(&MASK.to_string().repeat(masked));
+    if length >= COMPACT_PREVIEW_THRESHOLD {
+        preview.push_str(&MASK.to_string().repeat(COMPACT_MASK_COUNT));
+        preview.push_str(&format!(
+            "...skipped {} chars...",
+            masked - COMPACT_MASK_COUNT * 2
+        ));
+        preview.push_str(&MASK.to_string().repeat(COMPACT_MASK_COUNT));
+    } else {
+        preview.push_str(&MASK.to_string().repeat(masked));
+    }
     preview.extend(characters.iter().skip(length - revealed));
     sanitize::text(&preview)
 }
@@ -74,8 +86,19 @@ mod tests {
     fn long_values_reveal_four_characters_at_each_end() {
         assert_eq!(mask("0123456789abcdef"), "0123********cdef");
         let long = "x".repeat(64);
-        assert_eq!(mask(&long).chars().count(), 64);
-        assert!(mask(&long).starts_with("xxxx"));
+        assert_eq!(mask(&long), "xxxx****...skipped 48 chars...****xxxx");
+    }
+
+    #[test]
+    fn compact_previews_start_at_forty_characters() {
+        assert_eq!(
+            mask(&"y".repeat(39)),
+            "yyyy*******************************yyyy"
+        );
+        assert_eq!(
+            mask(&"y".repeat(40)),
+            "yyyy****...skipped 24 chars...****yyyy"
+        );
     }
 
     #[test]
