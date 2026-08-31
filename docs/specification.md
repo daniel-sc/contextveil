@@ -472,7 +472,12 @@ clusters. Preview masking MUST be:
 | --- | --- |
 | 0-4 | fully masked |
 | 5-15 | first 2 and last 2 characters |
-| 16+ | first 4 and last 4 characters |
+| 16-39 | first 4 and last 4 characters |
+| 40+ | first 4 and last 4 characters, plus `****...skipped N chars...****` for the concealed middle |
+
+For a 40+ character value, `N` is the number of concealed middle characters not
+represented by the eight displayed mask characters. Previews MUST remain bounded
+and `N` is counted in Unicode scalar values.
 
 The total character length SHOULD be shown. Deterministic value fingerprints
 MUST NOT be shown. Apart from this masked preview and length and the applicable
