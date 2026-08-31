@@ -551,6 +551,42 @@ mod tests {
     }
 
     #[test]
+    fn npmrc_duplicates_resolve_but_a_selected_keyed_issue_disables_the_registry() {
+        let canary = Canary::generate("NPMRC_DUPLICATE");
+        let fixture = Fixture::new();
+        fixture.write_global("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"TOKEN\"\n");
+        fixture.write_project(
+            "version = 1\n\n[[secret]]\nsource = \"npmrc\"\nfile = \".npmrc\"\nkey = \"//registry.example/:_authToken\"\n",
+        );
+        fixture.write_file(
+            ".npmrc",
+            &format!(
+                "//registry.example/:_authToken=first\n//registry.example/:_authToken={}\n",
+                canary.value()
+            ),
+        );
+
+        let registry = ready(fixture.build(&[("TOKEN", "other-value")]));
+        assert_eq!(registry.redactor.active_count(), 2);
+        assert_eq!(
+            registry.duplicate_keys[0].1,
+            ["//registry.example/:_authToken"]
+        );
+
+        fixture.write_file(
+            ".npmrc",
+            "//registry.example/:_authToken=valid\n//registry.example/:_authToken='broken' junk\n",
+        );
+        assert!(matches!(
+            malfunction(fixture.build(&[("TOKEN", "other-value")])),
+            Malfunction::Source {
+                why: SourceMalfunction::MalformedNpmrc { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn cross_scope_duplicate_identities_are_allowed() {
         // `CFG-009`: the same identity may appear in both scopes.
         let fixture = Fixture::new();

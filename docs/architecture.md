@@ -51,8 +51,8 @@ The core owns:
 
 - config validation and project selection;
 - global and project registry composition;
-- environment, dotenv, exact-pointer JSON, and exact-key properties source
-  resolution;
+- environment, dotenv, exact-pointer JSON, exact-key properties, and exact-key
+  npmrc source resolution;
 - group-level equal-value enrollment state,
   deterministic Source Identity ordering, and collision analysis;
 - canonicalization of duplicate resolved values;
@@ -144,7 +144,8 @@ writer-locking mechanism is tactical.
 The minimum conceptual types are:
 
 - `SourceReference`: environment, one dotenv key, all keys in a dotenv file, one
-  exact JSON file pointer, or one exact decoded properties key;
+  exact JSON file pointer, one exact decoded properties key, or one exact npmrc
+  key;
 - `SourceIdentity`: the value-free equality and deterministic ordering key for a
   source reference;
 - `KnownSourceRule`: a maintained deterministic setup-time automatic
@@ -184,7 +185,7 @@ must not depend on setup having performed a migration.
 
 ## Source Resolvers
 
-The current source expansion has four concrete resolver families:
+The current source expansion has five concrete resolver families:
 
 - environment variables inherited by the hook process;
 - dotenv files parsed without interpolation or execution;
@@ -193,6 +194,8 @@ The current source expansion has four concrete resolver families:
   rejected before recursive deserialization beyond 128 nested containers.
 - Java-style properties files parsed through `java-properties` 2.0.0 default
   Windows-1252 behavior and selected by exact decoded key.
+- npmrc files parsed with ContextVeil's narrow UTF-8 scalar grammar and selected
+  by exact case-sensitive key, without environment interpolation.
 
 Every resolver trims decoded values with Rust `str::trim()` before resolution;
 all later grouping, collision, registry, and matching behavior uses that value.
@@ -203,9 +206,8 @@ be read and parsed once per event where practical, but caching must not survive
 the process.
 
 Additional file formats should be implemented as explicit source variants behind
-the same registry operation. Exact INI fields and npmrc entries are non-contract
-plans only; neither is currently scanned or covered. Do not expose a public
-plugin API or dynamic resolver loading in anticipation.
+the same registry operation. Generic INI fields remain a non-contract plan. Do
+not expose a public plugin API or dynamic resolver loading in anticipation.
 
 ## Known Source Rules
 
@@ -228,7 +230,7 @@ The closed location and field definitions live as data in
 `src/setup/known_source.rs`; one bounded probe engine evaluates them. The engine
 supports exact pointers, immediate dynamic members, bounded maps, and bounded
 filename predicates. `src/setup/discovery.rs` performs one shared bounded
-project traversal for dotenv files and the anchored Claude
+project traversal for dotenv and npmrc files and the anchored Claude
 `.claude/settings.json` and `.mcp.json` patterns. There is no runtime
 Known Source Rule runtime variant: discovery emits existing `SourceReference`
 variants only.
@@ -244,6 +246,12 @@ path predicate excludes localization bundles; one properties Known Source Rule
 then applies decoded-key gating or the shared credential-bearing URL rule and
 emits exact properties references. It is not a general configuration-schema
 engine or a second traversal.
+
+The npmrc credentials rule inspects `~/.npmrc`, the two exact npm override file
+paths, and every exact `.npmrc` found by that shared project walk. It emits exact
+npmrc references for credential keys and offers every valid scalar independently
+to the shared name and credential-bearing URL rules. The parser remains a
+source-specific primitive, not an INI framework.
 
 Codex, OpenCode, Copilot, and Claude representable primary and MCP plaintext
 stores form the first recognized credential-document release. Claude primary
@@ -384,7 +392,7 @@ for reproducibility.
 - Leak-regression tests assert canaries are absent from stdout, stderr,
   diagnostics, and returned model content.
 - Fuzz targets distinguish untrusted JSON5 source documents from strict harness
-  protocol JSON, and also cover TOML, dotenv, and matcher inputs.
+  protocol JSON, and also cover TOML, dotenv, npmrc, and matcher inputs.
 - Live networked tests are optional; Claude resume behavior is a manual release
   qualification.
 

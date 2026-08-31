@@ -765,6 +765,9 @@ fn describe_source(id: &SourceId) -> String {
             sanitize::path(path),
             sanitize::text(key)
         ),
+        SourceId::Npmrc { path, key } => {
+            format!("npmrc {} key {}", sanitize::path(path), sanitize::text(key))
+        }
     }
 }
 

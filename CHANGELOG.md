@@ -5,6 +5,10 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+### Added
+
+- Added exact npmrc secret sources and bounded npmrc Known Source discovery. (#13)
+
 ## [1.0.0-alpha.3] - 2026-08-29
 
 ### Added

@@ -16,8 +16,7 @@ struct Machine {
 }
 
 impl Machine {
-    /// A machine with the canary enrolled through environment, dotenv, and JSON
-    /// references, so every source kind is exercised.
+    /// A machine with the canary enrolled through every source family.
     fn new() -> Self {
         let canary = Canary::generate("LEAK_TOKEN");
         // The directory name must not contain any part of the canary: paths are
@@ -42,7 +41,7 @@ impl Machine {
         .expect("global config");
         std::fs::write(
             project.join(".contextveil.toml"),
-            "version = 1\n\n[[secret]]\nsource = \"json\"\nfile = \"auth.json\"\npointer = \"/tokens/access_token\"\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n",
+            "version = 1\n\n[[secret]]\nsource = \"json\"\nfile = \"auth.json\"\npointer = \"/tokens/access_token\"\n\n[[secret]]\nsource = \"dotenv\"\nfile = \".env\"\nall = true\n\n[[secret]]\nsource = \"properties\"\nfile = \"application.properties\"\nkey = \"service.password\"\n\n[[secret]]\nsource = \"npmrc\"\nfile = \"nested/.npmrc\"\nkey = \"//registry.example/:_authToken\"\n",
         )
         .expect("project config");
         std::fs::write(
@@ -64,6 +63,16 @@ impl Machine {
             ),
         )
         .expect("dotenv");
+        std::fs::write(
+            project.join("application.properties"),
+            format!("service.password={}\n", canary.value()),
+        )
+        .expect("properties");
+        std::fs::write(
+            project.join("nested").join(".npmrc"),
+            format!("//registry.example/:_authToken={}\n", canary.value()),
+        )
+        .expect("npmrc");
         // A file that also contains the value, so collision analysis reports it.
         std::fs::write(project.join("nested").join("notes.txt"), canary.value())
             .expect("colliding file");
@@ -127,10 +136,18 @@ impl Machine {
         let dotenv = self.project().join(".env");
         let json = self.project().join("auth.json");
         let known_source = self.home().join(".codex").join("auth.json");
+        let properties = self.project().join("application.properties");
+        let npmrc = self.project().join("nested").join(".npmrc");
         let notes = self.project().join("nested").join("notes.txt");
         let mut checked = 0;
         for path in walk(&self.home()) {
-            if path == dotenv || path == json || path == known_source || path == notes {
+            if path == dotenv
+                || path == json
+                || path == known_source
+                || path == properties
+                || path == npmrc
+                || path == notes
+            {
                 continue;
             }
             let Ok(bytes) = std::fs::read(&path) else {

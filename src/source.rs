@@ -1,6 +1,6 @@
 //! Source references and their resolution.
 //!
-//! V1 has environment, dotenv, exact-pointer JSON, and exact-key properties resolver families
+//! V1 has environment, dotenv, exact-pointer JSON, properties, and npmrc resolver families
 //! (`docs/architecture.md`). A resolver returns resolved, unresolved, or malfunction;
 //! it never decides whether a value looks secret.
 //!
@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::dotenv::{self, Dotenv, ParseErrorKind};
 use crate::json;
+use crate::npmrc::{self, IssueKind, Npmrc};
 use crate::properties::{self, Properties};
 use crate::secret::{ResolvedSecret, SourceId};
 
@@ -48,6 +49,11 @@ pub enum SourceRef {
         path: PathBuf,
         key: String,
     },
+    Npmrc {
+        entered: String,
+        path: PathBuf,
+        key: String,
+    },
 }
 
 impl SourceRef {
@@ -58,6 +64,7 @@ impl SourceRef {
             SourceRef::DotenvAll { path, .. } => SourceId::dotenv_all(path.clone()),
             SourceRef::Json { path, pointer, .. } => SourceId::json(path.clone(), pointer),
             SourceRef::Properties { path, key, .. } => SourceId::properties(path.clone(), key),
+            SourceRef::Npmrc { path, key, .. } => SourceId::npmrc(path.clone(), key),
         }
     }
 
@@ -66,7 +73,9 @@ impl SourceRef {
         match self {
             SourceRef::Env { .. } => None,
             SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => Some(path),
-            SourceRef::Json { path, .. } | SourceRef::Properties { path, .. } => Some(path),
+            SourceRef::Json { path, .. }
+            | SourceRef::Properties { path, .. }
+            | SourceRef::Npmrc { path, .. } => Some(path),
         }
     }
 }
@@ -121,6 +130,10 @@ pub enum SourceMalfunction {
     /// The JSON document contains a duplicate object member.
     DuplicateJsonMember,
     MalformedProperties,
+    MalformedNpmrc {
+        line: usize,
+        kind: IssueKind,
+    },
 }
 
 impl SourceMalfunction {
@@ -137,6 +150,9 @@ impl SourceMalfunction {
                 "contains a duplicate JSON object member".to_string()
             }
             SourceMalfunction::MalformedProperties => "is malformed properties".to_string(),
+            SourceMalfunction::MalformedNpmrc { line, kind } => {
+                format!("has an invalid npmrc entry: line {line} {}", kind.reason())
+            }
         }
     }
 }
@@ -238,12 +254,20 @@ enum PropertiesFileState {
     Malfunction(SourceMalfunction),
 }
 
+#[derive(Debug, Clone)]
+enum NpmrcFileState {
+    Missing,
+    Parsed(Npmrc),
+    Malfunction(SourceMalfunction),
+}
+
 /// Resolves source references, reading each dotenv or JSON file once per event.
 #[derive(Debug, Clone, Default)]
 pub struct Resolver {
     files: HashMap<PathBuf, FileState>,
     json_files: HashMap<PathBuf, JsonFileState>,
     properties_files: HashMap<PathBuf, PropertiesFileState>,
+    npmrc_files: HashMap<PathBuf, NpmrcFileState>,
 }
 
 impl Resolver {
@@ -352,6 +376,40 @@ impl Resolver {
                     },
                 }
             }
+            SourceRef::Npmrc { path, key, .. } => {
+                let id = SourceId::npmrc(path.clone(), key);
+                match self.npmrc_file(path) {
+                    NpmrcFileState::Missing => Resolution::Unresolved {
+                        source: id,
+                        why: Unresolved::Absent,
+                    },
+                    NpmrcFileState::Malfunction(why) => Resolution::Malfunction {
+                        source: id,
+                        path: path.clone(),
+                        why: *why,
+                    },
+                    NpmrcFileState::Parsed(npmrc) => {
+                        if let Some(issue) = npmrc.issue(key).and_then(|issues| issues.first()) {
+                            Resolution::Malfunction {
+                                source: id,
+                                path: path.clone(),
+                                why: SourceMalfunction::MalformedNpmrc {
+                                    line: issue.line,
+                                    kind: issue.kind,
+                                },
+                            }
+                        } else {
+                            match npmrc.get(key) {
+                                None => Resolution::Unresolved {
+                                    source: id,
+                                    why: Unresolved::KeyAbsent,
+                                },
+                                Some(value) => resolve_text(id, value),
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -367,6 +425,18 @@ impl Resolver {
                 Some(PropertiesFileState::Parsed(properties)) => properties.duplicates(),
                 _ => &[],
             },
+            SourceRef::Npmrc { path, key, .. } => self
+                .npmrc_files
+                .get(path)
+                .and_then(|state| match state {
+                    NpmrcFileState::Parsed(npmrc) => npmrc
+                        .duplicates()
+                        .iter()
+                        .find(|duplicate| *duplicate == key),
+                    _ => None,
+                })
+                .map(std::slice::from_ref)
+                .unwrap_or(&[]),
             SourceRef::Env { .. } | SourceRef::Json { .. } => &[],
         }
     }
@@ -397,6 +467,16 @@ impl Resolver {
         self.properties_files
             .get(path)
             .expect("the properties file was just inserted")
+    }
+
+    fn npmrc_file(&mut self, path: &Path) -> &NpmrcFileState {
+        if !self.npmrc_files.contains_key(path) {
+            self.npmrc_files
+                .insert(path.to_path_buf(), read_npmrc(path));
+        }
+        self.npmrc_files
+            .get(path)
+            .expect("the npmrc file was just inserted")
     }
 }
 
@@ -455,6 +535,21 @@ fn read_properties(path: &Path) -> PropertiesFileState {
         Ok(parsed) => PropertiesFileState::Parsed(parsed),
         Err(_) => PropertiesFileState::Malfunction(SourceMalfunction::MalformedProperties),
     }
+}
+
+fn read_npmrc(path: &Path) -> NpmrcFileState {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return NpmrcFileState::Missing;
+        }
+        Err(_) => return NpmrcFileState::Malfunction(SourceMalfunction::Unreadable),
+    };
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => return NpmrcFileState::Malfunction(SourceMalfunction::NotUtf8),
+    };
+    NpmrcFileState::Parsed(npmrc::parse(&text))
 }
 
 fn resolve_text(id: SourceId, value: &str) -> Resolution {
@@ -554,6 +649,14 @@ mod tests {
 
     fn properties_ref(path: &Path, key: &str) -> SourceRef {
         SourceRef::Properties {
+            entered: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
+            key: key.to_string(),
+        }
+    }
+
+    fn npmrc_ref(path: &Path, key: &str) -> SourceRef {
+        SourceRef::Npmrc {
             entered: path.to_string_lossy().into_owned(),
             path: path.to_path_buf(),
             key: key.to_string(),
@@ -731,6 +834,14 @@ mod tests {
             let mut resolver = Resolver::new();
             assert!(matches!(
                 resolver.resolve(&json_ref(&path, "/token"), &Environment::default()),
+                Resolution::Malfunction {
+                    why: SourceMalfunction::Unreadable,
+                    ..
+                }
+            ));
+            let mut resolver = Resolver::new();
+            assert!(matches!(
+                resolver.resolve(&npmrc_ref(&path, "token"), &Environment::default()),
                 Resolution::Malfunction {
                     why: SourceMalfunction::Unreadable,
                     ..
@@ -992,11 +1103,78 @@ mod tests {
     }
 
     #[test]
+    fn npmrc_resolution_is_exact_key_local_and_fresh_per_event() {
+        let fixture = Fixture::new();
+        let path = fixture.write(
+            ".npmrc",
+            "unrelated='broken' junk\n//registry.example/:_authToken= first \n//registry.example/:_authToken= final \nliteral=${NAME}\n",
+        );
+        let source = npmrc_ref(&path, "//registry.example/:_authToken");
+        let mut resolver = Resolver::new();
+        match resolver.resolve(&source, &Environment::from_pairs([("NAME", "expanded")])) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets[0].value, "final");
+                assert_eq!(secrets[0].label, "_authToken");
+            }
+            other => panic!("expected npmrc value, got {other:?}"),
+        }
+        assert_eq!(
+            resolver.duplicate_keys_for(&source),
+            ["//registry.example/:_authToken"]
+        );
+        match resolver.resolve(&npmrc_ref(&path, "literal"), &Environment::default()) {
+            Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "${NAME}"),
+            other => panic!("expected literal expression, got {other:?}"),
+        }
+
+        std::fs::write(&path, "//registry.example/:_authToken=rotated\n").expect("rotate npmrc");
+        match resolver.resolve(&source, &Environment::default()) {
+            Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "final"),
+            other => panic!("expected cached event value, got {other:?}"),
+        }
+        match Resolver::new().resolve(&source, &Environment::default()) {
+            Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "rotated"),
+            other => panic!("expected fresh npmrc value, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn selected_npmrc_issues_malfunction_while_absent_and_empty_are_unresolved() {
+        let fixture = Fixture::new();
+        let path = fixture.write(
+            ".npmrc",
+            "broken='value' junk\nbroken=valid\nempty=  \nvalid=value\n",
+        );
+        let environment = Environment::default();
+        assert!(matches!(
+            Resolver::new().resolve(&npmrc_ref(&path, "broken"), &environment),
+            Resolution::Malfunction {
+                why: SourceMalfunction::MalformedNpmrc { line: 1, .. },
+                ..
+            }
+        ));
+        for (source, why) in [
+            (npmrc_ref(&path, "missing"), Unresolved::KeyAbsent),
+            (npmrc_ref(&path, "empty"), Unresolved::Empty),
+            (
+                npmrc_ref(&fixture.path("missing.npmrc"), "key"),
+                Unresolved::Absent,
+            ),
+        ] {
+            assert!(matches!(
+                Resolver::new().resolve(&source, &environment),
+                Resolution::Unresolved { why: actual, .. } if actual == why
+            ));
+        }
+    }
+
+    #[test]
     fn every_source_family_trims_values_before_resolution() {
         let fixture = Fixture::new();
         let dotenv = fixture.write(".env", "TOKEN=\u{2003}value\u{2003}\nEMPTY=\u{2003}\n");
         let json = fixture.write("auth.json", "{token: '\u{2003}value\u{2003}'}");
         let properties = fixture.write("app.properties", "token=\\u2003value\\u2003\n");
+        let npmrc = fixture.write(".npmrc", "token=\u{2003}value\u{2003}\n");
         let environment =
             Environment::from_pairs([("TOKEN", "\u{2003}value\u{2003}"), ("EMPTY", "\u{2003}")]);
         let mut resolver = Resolver::new();
@@ -1005,6 +1183,7 @@ mod tests {
             key_ref(&dotenv, "TOKEN"),
             json_ref(&json, "/token"),
             properties_ref(&properties, "token"),
+            npmrc_ref(&npmrc, "token"),
         ] {
             match resolver.resolve(&source, &environment) {
                 Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "value"),

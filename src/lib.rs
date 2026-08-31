@@ -13,6 +13,7 @@ pub mod dotenv;
 pub mod integration;
 pub mod json;
 pub mod matcher;
+pub mod npmrc;
 pub mod paths;
 pub mod properties;
 pub mod redact;

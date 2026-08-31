@@ -313,7 +313,7 @@ fn enrollment_phase(
                 }
                 refresh_items(scope, &mut items, &mut context);
             }
-            "e" | "k" | "w" | "j" | "p" => {
+            "e" | "k" | "w" | "j" | "p" | "r" => {
                 match add_manual(terminal, answer.trim(), scope, &mut items, &mut context) {
                     Ok(()) => {}
                     Err(Cancelled) => return cancelled(terminal),
@@ -375,6 +375,11 @@ fn describe(source: &SourceRef) -> String {
         ),
         SourceRef::Properties { entered, key, .. } => format!(
             "properties {} key {}",
+            sanitize::text(entered),
+            sanitize::text(key)
+        ),
+        SourceRef::Npmrc { entered, key, .. } => format!(
+            "npmrc {} key {}",
             sanitize::text(entered),
             sanitize::text(key)
         ),
@@ -608,6 +613,7 @@ fn admission_rules(source: &SourceRef, value: Option<&str>) -> Vec<Rule> {
         SourceRef::Env { name }
         | SourceRef::DotenvKey { key: name, .. }
         | SourceRef::Properties { key: name, .. } => Some(name.as_str()),
+        SourceRef::Npmrc { key, .. } => Some(crate::secret::npmrc_label(key)),
         SourceRef::DotenvAll { .. } | SourceRef::Json { .. } => None,
     };
     if name.and_then(vocabulary::gating_term).is_some() {
@@ -968,6 +974,27 @@ fn add_manual(
                 return Ok(());
             }
             SourceRef::Properties { entered, path, key }
+        }
+        "r" => {
+            let entered = terminal.ask("npmrc file path:")?;
+            let entered = entered.trim().to_string();
+            if entered.is_empty() {
+                terminal.line("  No path entered.");
+                return Ok(());
+            }
+            let path = match paths::expand(&entered, base, context.home) {
+                Ok(path) => path,
+                Err(problem) => {
+                    terminal.line(&format!("  That path {}.", problem.reason()));
+                    return Ok(());
+                }
+            };
+            let key = terminal.ask("Exact npmrc key:")?;
+            if key.is_empty() {
+                terminal.line("  No key entered.");
+                return Ok(());
+            }
+            SourceRef::Npmrc { entered, path, key }
         }
         _ => return Ok(()),
     };

@@ -89,8 +89,9 @@ flowchart TD
 ContextVeil stores where to find each value, such as “the `API_TOKEN` environment
 variable,” “the `STRIPE_KEY` entry in `.env.local`,” “the exact
 `/tokens/access_token` field in `auth.json`,” or “the decoded
-`spring.datasource.password` key in `application.properties`.” It does not copy
-the value into its configuration. Changes to dotenv, JSON, and properties files apply on the next supported
+`spring.datasource.password` key in `application.properties`,” or “the exact
+`//registry.npmjs.org/:_authToken` entry in `.npmrc`.” It does not copy
+the value into its configuration. Changes to dotenv, JSON, properties, and npmrc files apply on the next supported
 event. Environment changes apply after you restart the coding agent.
 
 ### Known Source Rules
@@ -101,13 +102,15 @@ Currently, the following secret-like sources are automatically detected and sugg
 - **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or complete values that are URLs with credentials (e.g., `mysql://u:pass@some-db`)
 - **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot and OpenCode. Maintained credential fields are probed without modeling complete vendor schemas. (Keychain based/sidecars excluded.)
 - **Java properties files** from the bounded project walk and Gradle machine locations, with localization-bundle exclusions and exact decoded-key enrollment
-- **More to come** INI, YAML, TOML, .npmrc, ...
+- **npmrc files** from `~/.npmrc`, npm's user/global override paths, and every exact `.npmrc` found by the bounded project walk, with exact credential-key enrollment
+- **More to come** INI, YAML, TOML, ...
 
 You can find the full, detailed list of known source rules in the
 [`known-sources.md`](docs/known-sources.md) documentation.
 
 Additionally, you can manually add sources from environment variables, dotenv
-files, JSON (including JSON5) files, and exact Java properties keys.
+files, JSON (including JSON5) files, exact Java properties keys, and exact npmrc
+keys.
 
 ## Quick Start
 
@@ -167,7 +170,7 @@ Then work normally. ContextVeil stays quiet unless it replaces something - then 
 - **Handling private token formats.** A value does not need to match a known API
   key pattern. If you enroll its source, its current exact value can be matched.
 - **Following rotation.** ContextVeil reads the selected environment variables,
-  `.env` entries, exact JSON fields, and exact properties keys for each supported event instead of
+  `.env` entries, exact JSON fields, exact properties keys, and exact npmrc entries for each supported event instead of
   keeping copied values.
 - **Guiding source enrollment.** Setup applies maintained rules for likely names,
   credential-bearing URLs, and recognized coding-agent credential stores without
@@ -209,6 +212,8 @@ boundary:
   new suggestions unless collisions are found; review masked candidates before
   saving. Unsupported raw sidecars, keychains, helpers, unknown fields, and new
   locations remain outside current coverage as detailed in `LIM-023`.
+- ContextVeil treats npmrc `${NAME}` expressions literally; enroll the underlying
+  environment variable when npm substitutes the concrete credential.
 
 See [limitations.md](docs/limitations.md) for the complete security boundary and
 coding-agent-specific gaps.
@@ -238,7 +243,7 @@ ContextVeil keeps source references in:
 - `.contextveil.toml` at the selected project root for project sources.
 
 The two files are additive. Review `.contextveil.toml` before using an untrusted
-project: it can refer to environment variables, `.env` files, or JSON files outside the
+project: it can refer to environment variables or supported source files outside the
 project. If a selected config is invalid or unreadable,
 ContextVeil uses none of the sources for that event instead of applying partial redaction.
 
