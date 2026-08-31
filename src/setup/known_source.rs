@@ -540,7 +540,14 @@ fn inspect_npmrc_document(found: &mut Found, path: &Path, entered: Option<String
         }
     };
     match String::from_utf8(bytes) {
-        Ok(text) => add_npmrc_candidates(found, path, &entered, &crate::npmrc::parse(&text)),
+        Ok(text) => {
+            let npmrc = crate::npmrc::parse(&text);
+            if npmrc.has_issues() {
+                unavailable(found, path, "it is malformed npmrc");
+            } else {
+                add_npmrc_candidates(found, path, &entered, &npmrc);
+            }
+        }
         Err(_) => unavailable(found, path, "it is not valid UTF-8"),
     }
 }
@@ -553,7 +560,7 @@ fn add_npmrc_candidates(
 ) {
     for (key, value) in npmrc.entries() {
         let value = value.trim();
-        if value.is_empty() || npmrc.issue(key).is_some() {
+        if value.is_empty() {
             continue;
         }
         let mut rules = Vec::new();
