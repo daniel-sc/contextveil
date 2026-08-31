@@ -522,22 +522,8 @@ fn inspect_npmrc_document(found: &mut Found, path: &Path, entered: Option<String
         unavailable(found, path, "its path is not valid UTF-8");
         return;
     };
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
-    }
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
+    let Some(bytes) = read_regular_document_bytes(found, path) else {
+        return;
     };
     match String::from_utf8(bytes) {
         Ok(text) => {
@@ -549,6 +535,26 @@ fn inspect_npmrc_document(found: &mut Found, path: &Path, entered: Option<String
             }
         }
         Err(_) => unavailable(found, path, "it is not valid UTF-8"),
+    }
+}
+
+fn read_regular_document_bytes(found: &mut Found, path: &Path) -> Option<Vec<u8>> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            return None;
+        }
+    }
+    match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => {
+            unavailable(found, path, "it could not be read");
+            None
+        }
     }
 }
 
@@ -603,22 +609,8 @@ fn inspect_properties_document(found: &mut Found, path: &Path, entered: Option<S
         unavailable(found, path, "its path is not valid UTF-8");
         return;
     };
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
-    }
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-        Err(_) => {
-            unavailable(found, path, "it could not be read");
-            return;
-        }
+    let Some(bytes) = read_regular_document_bytes(found, path) else {
+        return;
     };
     match crate::properties::parse(&bytes) {
         Ok(properties) => add_properties_candidates(found, path, &entered, &properties),
