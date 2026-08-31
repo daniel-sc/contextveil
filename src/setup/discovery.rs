@@ -94,7 +94,6 @@ pub enum NpmrcUnavailable {
     NonUtf8Path,
     Unreadable,
     NotUtf8,
-    Malformed,
 }
 
 impl NpmrcUnavailable {
@@ -103,7 +102,6 @@ impl NpmrcUnavailable {
             Self::NonUtf8Path => "its path is not valid UTF-8",
             Self::Unreadable => "it could not be read",
             Self::NotUtf8 => "it is not valid UTF-8",
-            Self::Malformed => "it is malformed npmrc",
         }
     }
 }
@@ -276,14 +274,7 @@ pub fn inspect_npmrc(path: &Path, entered: Option<String>) -> DiscoveredNpmrc {
         match std::fs::read(path) {
             Err(_) => NpmrcState::Unavailable(NpmrcUnavailable::Unreadable),
             Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) => {
-                    let npmrc = npmrc::parse(&text);
-                    if npmrc.has_issues() {
-                        NpmrcState::Unavailable(NpmrcUnavailable::Malformed)
-                    } else {
-                        NpmrcState::Available(npmrc)
-                    }
-                }
+                Ok(text) => NpmrcState::Available(npmrc::parse(&text)),
                 Err(_) => NpmrcState::Unavailable(NpmrcUnavailable::NotUtf8),
             },
         }
@@ -711,10 +702,6 @@ mod tests {
         let tree = Tree::new();
         tree.file(".env", "A=1\n");
         tree.file(".env.broken", "A=1\nnot an assignment\n");
-        tree.file(
-            ".npmrc",
-            "//registry.example/:_authToken=valid\nbroken='unterminated\n",
-        );
         let binary = tree.root.join(".env.binary");
         std::fs::write(&binary, [b'A', b'=', 0xff, b'\n']).expect("write binary file");
 
@@ -732,10 +719,6 @@ mod tests {
             .find(|item| item.path.ends_with(".env.binary"))
             .expect("the binary file is listed");
         assert_eq!(binary.state, State::Unavailable(Unavailable::NotUtf8));
-        assert_eq!(
-            project_files(&tree.root).npmrc[0].state,
-            NpmrcState::Unavailable(NpmrcUnavailable::Malformed)
-        );
         // Discovery continues past an unavailable file.
         assert!(
             found

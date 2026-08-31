@@ -1207,6 +1207,28 @@ fn npmrc_source_files_are_excluded_from_collision_counts() {
 }
 
 #[test]
+fn a_malformed_npmrc_key_does_not_hide_independent_valid_scalars() {
+    let canary = Canary::generate("NPMRC_KEY_LOCAL");
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home().join(".npmrc"),
+        format!(
+            "//broken.example/:_auth='unterminated\n//registry.example/:_authToken={}\n",
+            canary.value()
+        ),
+    )
+    .expect("npmrc");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("//registry.example/:_authToken"));
+    assert!(!global.contains("//broken.example/:_auth"));
+    assert_canary_absent("npmrc setup transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("npmrc global config", global.as_bytes(), &canary);
+}
+
+#[test]
 fn exact_npmrc_keys_can_be_enrolled_manually_in_both_scopes() {
     let fixture = Fixture::new();
     std::fs::write(
@@ -2223,17 +2245,11 @@ fn malformed_and_non_utf8_known_sources_are_visible_and_secret_safe() {
         [b'{', b'"', 0xff, b'"', b':', b'1', b'}'],
     )
     .expect("non UTF-8 auth");
-    std::fs::write(
-        fixture.home().join(".npmrc"),
-        format!("//registry.example/:_authToken='{}\n", canary.value()),
-    )
-    .expect("malformed npmrc");
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("unavailable:"));
     assert!(transcript.contains("malformed JSON"));
-    assert!(transcript.contains("malformed npmrc"));
     assert!(transcript.contains("not valid UTF-8"));
     assert_canary_absent(
         "known source unavailable transcript",
@@ -2242,7 +2258,6 @@ fn malformed_and_non_utf8_known_sources_are_visible_and_secret_safe() {
     );
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     assert!(!global.contains("auth.json"));
-    assert!(!global.contains(".npmrc"));
 }
 
 #[test]
