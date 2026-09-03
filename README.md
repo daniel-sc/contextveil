@@ -96,21 +96,28 @@ event. Environment changes apply after you restart the coding agent.
 
 ### Known Source Rules
 
-Currently, the following secret-like sources are automatically detected and suggested during `contextveil setup`:
+During setup, the following shared vocabulary identifies secret-like source names:
 
-- **Environment variables** with secret-like names (e.g., `API_TOKEN`, `STRIPE_KEY`) or complete values that are URLs with credentials (e.g., `https://username:password@some-db.com`)
-- **dotenv files entries** with secret-like names (e.g., `STRIPE_KEY` in `.env.local`) or complete values that are URLs with credentials (e.g., `mysql://u:pass@some-db`)
-- **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot and OpenCode. Maintained credential fields are probed without modeling complete vendor schemas. (Keychain based/sidecars excluded.)
-- **Java properties files** from the bounded project walk and Gradle machine locations, with localization-bundle exclusions and exact decoded-key enrollment
-- **npmrc files** from `~/.npmrc` and every `.npmrc` found in the project, with exact credential-key enrollment
-- **More to come** INI, YAML, TOML, ...
+| Terms | Whole token | Compact suffix |
+| --- | ---: | ---: |
+| `token`, `secret`, `password`, `passwd`, `passphrase`, `credential`, `credentials` | Yes | Yes |
+| `key` | Yes | No |
+| `apikey`, `accesskey`, `privatekey`, `clientsecret`, `authtoken`, `refreshtoken` | No | Yes |
 
-You can find the full, detailed list of known source rules in the
-[`known-sources.md`](docs/known-sources.md) documentation.
+Matching is ASCII case-insensitive: **Whole token** means the term appears anywhere as a distinct part separated by `_`, `-`, `.`, spaces, or other non-ASCII-alphanumeric characters, such as `DB_PASSWORD_PROD`.
+**Compact suffix** means those separators are removed and the resulting name ends with the term, such as `StripeApiKey`; plain `key` is excluded here to limit false positives.
 
-Additionally, you can manually add sources from environment variables, dotenv
-files, JSON (including JSON5) files, exact Java properties keys, and exact npmrc
-keys.
+Automatic suggestions currently cover:
+
+- **Environment variables and dotenv entries** whose names match the table above, or whose complete values are credential-bearing URLs.
+- **Java properties files** from eligible project and Gradle locations. Decoded keys use the table above, complete credential-bearing URLs qualify regardless of key, and localization bundles are excluded.
+- **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot, and OpenCode, using maintained credential fields rather than scanning arbitrary keys. Keychain-based credentials and sidecars are excluded.
+- **npmrc files** from documented machine locations and every project `.npmrc`, using exact credential keys plus the same general name and URL checks.
+- **More to come:** additional formats such as INI, YAML, and TOML.
+
+See the full [`Known Source Rule inventory`](docs/known-sources.md) for exact locations, fields, and exclusions.
+
+Environment variables, dotenv files, JSON (including JSON5) files, exact Java properties keys, and exact npmrc keys can also be added manually without matching these automatic discovery rules.
 
 ## Quick Start
 
