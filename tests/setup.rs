@@ -857,6 +857,52 @@ fn a_collision_can_be_overridden_by_the_user() {
 }
 
 #[test]
+fn toggling_an_ordinary_group_does_not_rescan_the_project() {
+    struct WriteBeforeRead {
+        script: std::io::Cursor<String>,
+        path: PathBuf,
+        contents: String,
+        written: bool,
+    }
+
+    impl std::io::Read for WriteBeforeRead {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if !self.written {
+                std::fs::write(&self.path, &self.contents)?;
+                self.written = true;
+            }
+            std::io::Read::read(&mut self.script, buffer)
+        }
+    }
+
+    let canary = Canary::generate("TOGGLE_SCAN_TOKEN");
+    let fixture = Fixture::new();
+    let environment = fixture.environment(&[("APP_SECRET", canary.value())]);
+    let input = WriteBeforeRead {
+        script: std::io::Cursor::new("1\n\n\n\n".to_string()),
+        path: fixture.project().join("created-after-initial-scan.txt"),
+        contents: canary.value().to_string(),
+        written: false,
+    };
+    let mut output = Vec::new();
+
+    let exit = {
+        let mut terminal = Terminal::new(input, &mut output);
+        setup::run(
+            &mut terminal,
+            &environment,
+            &fixture.project(),
+            Some(Path::new(env!("CARGO_BIN_EXE_contextveil"))),
+        )
+    };
+    let transcript = String::from_utf8(output).expect("UTF-8 transcript");
+
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!transcript.contains("collision:"), "{transcript}");
+    assert_canary_absent("toggle transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
 fn a_manual_collision_warns_without_reversing_selection() {
     let fixture = Fixture::new();
     fixture.write("notes.txt", "common\n");
