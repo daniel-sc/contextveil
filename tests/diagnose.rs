@@ -245,7 +245,7 @@ fn status_recognizes_a_hook_that_points_at_the_running_binary() {
         !text.contains("pointing at another binary"),
         "status misreported its own hook: {text}"
     );
-    assert!(text.contains("Claude Code (production)  detected, installed"));
+    assert!(text.contains("Claude Code (production)  detected, ContextVeil integration installed"));
 }
 
 #[test]
