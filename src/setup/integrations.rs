@@ -168,7 +168,7 @@ pub(super) fn render_rows(rows: &[Row]) -> String {
 pub(super) fn render_actions(row_count: usize) -> String {
     let mut lines = vec!["Choose an action:".to_string()];
     if row_count > 0 {
-        lines.push("  [1 3]   toggle row(s)".to_string());
+        lines.push("  [1 3]   toggle row(s) by space separated row numbers".to_string());
     }
     lines.extend([
         "  [Enter] apply".to_string(),
