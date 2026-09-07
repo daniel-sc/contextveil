@@ -1,9 +1,8 @@
-//! Name gating for setup candidates.
+//! Admission vocabularies for setup candidates.
 //!
-//! `SET-006` fixes the V1 vocabulary exactly. Candidate admission is represented
-//! by Known Source Rule identities; value shape never ranks or explains a
-//! candidate. Vocabulary changes are observable setup behavior and must update
-//! the specification and its fixtures in the same change.
+//! `SET-006` and `SET-023` fix the V1 vocabularies exactly. Vocabulary changes
+//! are observable setup behavior and must update the specification and its
+//! fixtures in the same change.
 
 /// Whole tokens that gate a name.
 const EXACT_TOKENS: [&str; 8] = [
@@ -32,6 +31,27 @@ const COMPACT_SUFFIXES: [&str; 13] = [
     "clientsecret",
     "authtoken",
     "refreshtoken",
+];
+
+/// Complete normalized values excluded from wholly new automatic candidates.
+const COMMON_LITERALS: [&str; 17] = [
+    "true",
+    "false",
+    "yes",
+    "no",
+    "on",
+    "off",
+    "0",
+    "1",
+    "enabled",
+    "disabled",
+    "null",
+    "nil",
+    "none",
+    "undefined",
+    "n/a",
+    "default",
+    "auto",
 ];
 
 /// Returns the vocabulary term that gates `name`, if any.
@@ -70,6 +90,13 @@ pub fn gating_term(name: &str) -> Option<&'static str> {
     suffixes
         .into_iter()
         .find(|suffix| compact.ends_with(suffix))
+}
+
+/// Whether a complete, already normalized source value is a Common Literal.
+pub fn is_common_literal(value: &str) -> bool {
+    COMMON_LITERALS
+        .iter()
+        .any(|literal| value.eq_ignore_ascii_case(literal))
 }
 
 #[cfg(test)]
@@ -135,5 +162,22 @@ mod tests {
         assert_eq!(gating_term("TÖKEN"), None);
         assert_eq!(gating_term("secret✓"), Some("secret"));
         assert_eq!(gating_term("prefix✓token"), Some("token"));
+    }
+
+    #[test]
+    fn common_literals_are_exact_and_ascii_case_insensitive() {
+        for value in COMMON_LITERALS {
+            assert!(is_common_literal(value), "`{value}` should be excluded");
+            assert!(
+                is_common_literal(&value.to_ascii_uppercase()),
+                "`{value}` should be excluded regardless of ASCII case"
+            );
+        }
+        for value in ["", " true ", "truex", "xtrue", "n\\a", "áuto"] {
+            assert!(
+                !is_common_literal(value),
+                "`{value}` should remain eligible"
+            );
+        }
     }
 }

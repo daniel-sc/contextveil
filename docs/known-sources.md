@@ -1,10 +1,10 @@
 # Known Source Rule Inventory
 
 A **Known Source Rule** is a maintained, deterministic setup-time rule that
-automatically admits candidates. Credential document rules are bounded location
-and field probes: a listed non-empty string is admitted without validating
-unrelated surrounding schema. Rules are advisory, run independently of
-adapters, and persist only ordinary explicit source references. They do not
+identifies automatic candidate eligibility. Credential document rules are
+bounded location and field probes: a listed non-empty string is eligible without
+validating unrelated surrounding schema. Rules are advisory, run independently
+of adapters, and persist only ordinary explicit source references. They do not
 recursively classify arbitrary structured files.
 
 All machine default and valid override roots are inspected additively. Unset or
@@ -29,11 +29,19 @@ Npmrc documents use ContextVeil's narrow UTF-8 scalar grammar and persist exact
 case-sensitive keys. They support common comments and quoting, isolate keyed
 syntax issues, and do not interpolate `${NAME}` expressions.
 
+Before grouping or presentation, every wholly new automatic source is silently
+excluded when its complete trimmed value equals, under ASCII case-insensitive
+comparison, `true`, `false`, `yes`, `no`, `on`, `off`, `0`, `1`, `enabled`,
+`disabled`, `null`, `nil`, `none`, `undefined`, `n/a`, `default`, or `auto`.
+This Common Literal exclusion applies across every rule below. It does not apply
+to existing enrollment, manual additions, dotenv wildcards, source resolution,
+or runtime matching; see [`SET-023`](specification.md).
+
 ## Rule Inventory
 
 | Rule | Locations | Bounded container | Credential leaves | Notes |
 | --- | --- | --- | --- | --- |
-| Secret-like source names | Environment and discovered dotenv sources | N/A | Maintained vocabulary in [`SET-006`](specification.md) | Format and value shape do not affect admission or ordering. |
+| Secret-like source names | Environment and discovered dotenv sources | N/A | Maintained vocabulary in [`SET-006`](specification.md) | Name gating does not inspect format or value shape; final admission remains subject to the shared Common Literal exclusion. |
 | Credential-bearing URLs | Values already surfaced by bounded discovery | N/A | The complete URL | Absolute hierarchical URLs with authority and non-empty userinfo password, per [`SET-017`](specification.md); this rule introduces no recursive structured-file scan. |
 | Codex primary credentials | `~/.codex`; `${CODEX_HOME}` | `auth.json` | `/OPENAI_API_KEY`, `/tokens/id_token`, `/tokens/access_token`, `/tokens/refresh_token`, `/personal_access_token`, `/bedrock_api_key/api_key`, `/agent_identity`, `/agent_identity/agent_private_key` | Both agent identity pointers are independent. Historical support: [`openai/codex@ff0e950`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3). |
 | Codex MCP credentials | `~/.codex`; `${CODEX_HOME}` | `.credentials.json`, then each immediate root member | `access_token`, `refresh_token` | No server metadata or sibling is required. |
@@ -55,4 +63,5 @@ These rules do not query OS keychains, execute credential helpers, read raw
 sidecars, decode values, or add runtime wildcard traversal. Copilot `.secret`,
 `.verifier`, and `mcp-secrets` files remain unsupported. Generic INI, YAML, and
 TOML sources are not scanned. Rerun setup after host locations or field
-inventories change. See [`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).
+inventories change. A Common Literal may still be enrolled manually or through a
+wildcard. See [`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).

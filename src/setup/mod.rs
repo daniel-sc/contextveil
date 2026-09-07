@@ -419,28 +419,16 @@ fn build_items(
     for source in discovered_known.sources {
         let id = source.id();
         let rules = discovered_known.rules.remove(&id).unwrap_or_default();
-        if known.insert(id.clone()) {
-            merge_item(
-                &mut items,
-                item_for(source, false, rules, &mut resolver, environment),
-            );
-        } else {
-            add_rules(&mut items, &id, rules);
-        }
+        let item = item_for(source, false, rules, &mut resolver, environment);
+        merge_automatic_item(&mut items, &mut known, item);
     }
 
     if scope == Scope::Global {
         // `SET-002`: the current process environment is inspected automatically.
         for name in environment_candidates(environment) {
             let source = SourceRef::Env { name };
-            let id = source.id();
             let candidate = automatic_item_for(source, &mut resolver, environment);
-            if known.insert(id.clone()) {
-                merge_item(&mut items, candidate);
-            } else {
-                let rules = candidate.members[0].rules.clone();
-                add_rules(&mut items, &id, rules);
-            }
+            merge_automatic_item(&mut items, &mut known, candidate);
         }
     }
 
@@ -452,13 +440,7 @@ fn build_items(
     };
     for file in &discovered {
         for candidate in file_candidates(file, &mut resolver, environment) {
-            let id = candidate.members[0].source.id();
-            if known.insert(id.clone()) {
-                merge_item(&mut items, candidate);
-            } else {
-                let rules = candidate.members[0].rules.clone();
-                add_rules(&mut items, &id, rules);
-            }
+            merge_automatic_item(&mut items, &mut known, candidate);
         }
     }
 
@@ -537,6 +519,20 @@ fn automatic_item_for(
     }
     item.members[0].rules = rules;
     item
+}
+
+fn merge_automatic_item(items: &mut Vec<Item>, known: &mut HashSet<SourceId>, item: Item) {
+    let id = item.members[0].source.id();
+    if known.contains(&id) {
+        add_rules(items, &id, &item.members[0].rules);
+    } else if !item
+        .value
+        .as_deref()
+        .is_some_and(vocabulary::is_common_literal)
+    {
+        known.insert(id);
+        merge_item(items, item);
+    }
 }
 
 fn item_for(
@@ -625,10 +621,10 @@ fn admission_rules(source: &SourceRef, value: Option<&str>) -> Vec<Rule> {
     rules
 }
 
-fn add_rules(items: &mut [Item], source: &SourceId, rules: Vec<Rule>) {
+fn add_rules(items: &mut [Item], source: &SourceId, rules: &[Rule]) {
     for member in items.iter_mut().flat_map(|item| &mut item.members) {
         if member.source.id() == *source {
-            member.rules.extend(rules);
+            member.rules.extend_from_slice(rules);
             member.rules.sort_unstable();
             member.rules.dedup();
             return;

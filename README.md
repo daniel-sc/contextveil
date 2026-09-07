@@ -38,10 +38,10 @@ secret or control everything an agent can do.
 `contextveil setup` does the thoughtful part: it checks bounded known credential
 files and probes maintained credential fields, alongside secret-like names and
 credential-bearing URLs. These probes may suggest stale or non-secret strings.
-New suggestions are automatically selected unless collisions are found. You can
-also add sources manually. Setup shows only masked previews, lets you choose what
-to protect, and installs the integrations you select. It does not scan arbitrary
-structured files or keys.
+New suggestions are automatically selected unless collisions are found; common
+configuration literals are omitted. You can also add sources manually. Setup
+shows only masked previews, lets you choose what to protect, and installs the
+integrations you select. It does not scan arbitrary structured files or keys.
 
 Daily use is boring on purpose: ContextVeil reads the current values, performs
 local exact-text replacement, and exits. There is no daemon, no network request,
@@ -114,6 +114,13 @@ Automatic suggestions currently cover:
 - **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot, and OpenCode, using maintained credential fields rather than scanning arbitrary keys. Keychain-based credentials and sidecars are excluded.
 - **npmrc files** from documented machine locations and every project `.npmrc`, using exact credential keys plus the same general name and URL checks.
 - **More to come:** additional formats such as INI, YAML, and TOML.
+
+Across these rules, setup silently omits wholly new automatic suggestions whose
+complete trimmed value is `true`, `false`, `yes`, `no`, `on`, `off`, `0`, `1`,
+`enabled`, `disabled`, `null`, `nil`, `none`, `undefined`, `n/a`, `default`, or
+`auto`, compared without ASCII case sensitivity. Exact manual additions, existing
+enrollment, and dotenv wildcards remain authoritative, and runtime continues to
+protect every enrolled value.
 
 See the full [`Known Source Rule inventory`](docs/known-sources.md) for exact locations, fields, and exclusions.
 
@@ -213,12 +220,14 @@ boundary:
   OpenCode can stop a covered operation only after its plugin has loaded.
 - ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
-- Short or common enrolled values can also match and replace ordinary text. (This is shown during setup as a warning.)
+- Short or common enrolled values can also match and replace ordinary text.
+  Setup omits a small fixed vocabulary from wholly new automatic suggestions,
+  but manual, existing, and wildcard enrollment can still activate those values.
 - Known source rules are version-sensitive setup advice, not a coverage
   guarantee. They may suggest stale or non-secret values and automatically select
-  new suggestions unless collisions are found; review masked candidates before
-  saving. Unsupported raw sidecars, keychains, helpers, unknown fields, and new
-  locations remain outside current coverage as detailed in `LIM-023`.
+  eligible new suggestions unless collisions are found; review masked candidates
+  before saving. Unsupported raw sidecars, keychains, helpers, unknown fields,
+  and new locations remain outside current coverage as detailed in `LIM-023`.
 - ContextVeil treats npmrc `${NAME}` expressions literally; enroll the underlying
   environment variable when npm substitutes the concrete credential.
 

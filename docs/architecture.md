@@ -24,7 +24,7 @@ resolved explicitly before implementation continues.
 │ CLI                                                              │
 │ setup | status | doctor                                          │
 ├──────────────────────────────────────────────────────────────────┤
-│ enrollment | Known Source Rules | collision analysis             │
+│ enrollment | Known Source Rules | admission filter | collisions   │
 ├──────────────────────────────────────────────────────────────────┤
 │ config loading | registry composition | source resolution        │
 ├──────────────────────────────────────────────────────────────────┤
@@ -80,9 +80,11 @@ classification, placeholder rules, or registry precedence.
 
 ### Setup And Installers
 
-Setup owns deterministic enrollment and integration installation. Harness
-plugins or hooks must never download the Rust binary, alter enrollment, or ask
-an LLM to interpret policy.
+Setup owns deterministic enrollment, the centralized Common Literal exclusion,
+and integration installation. The exclusion runs after automatic rule
+composition and before grouping; probes and adapters must not reimplement it.
+Harness plugins or hooks must never download the Rust binary, alter enrollment,
+or ask an LLM to interpret policy.
 
 Installers operate through documented host configuration surfaces. They must
 identify their exact managed artifact and preserve unrelated user configuration.
@@ -148,8 +150,10 @@ The minimum conceptual types are:
   key;
 - `SourceIdentity`: the value-free equality and deterministic ordering key for a
   source reference;
-- `KnownSourceRule`: a maintained deterministic setup-time automatic
-  candidate-admission rule, absent from runtime policy;
+- `KnownSourceRule`: a maintained deterministic setup-time automatic candidate
+  eligibility rule, absent from runtime policy;
+- `CommonLiteral`: a setup-only exclusion from wholly new automatic Candidates,
+  absent from persisted policy and runtime matching;
 - `CandidateGroup`: one selectable enrollment unit containing equal-value
   candidates from one enrollment scope;
 - `Registry`: ordered source references from one config scope;
@@ -198,7 +202,9 @@ The current source expansion has five concrete resolver families:
   by exact case-sensitive key, without environment interpolation.
 
 Every resolver trims decoded values with Rust `str::trim()` before resolution;
-all later grouping, collision, registry, and matching behavior uses that value.
+all later setup and runtime behavior uses that value. Setup may apply `SET-023`
+after resolution, but resolvers and runtime registry construction do not discard
+Common Literals.
 
 Resolvers return resolved, unresolved, or malfunction. They do not decide
 whether a value looks secret. A dotenv file referenced by multiple entries must
@@ -212,14 +218,19 @@ not expose a public plugin API or dynamic resolver loading in anticipation.
 ## Known Source Rules
 
 Known Source Rules belong to setup, not runtime. A rule is maintained,
-deterministic setup-time logic that automatically admits candidates. V1 has a
-secret-like name rule, a credential-bearing URL rule, and recognized credential
-document rules. Filesystem enumeration and manual additions supply possible
-sources but are not rules. Filesystem enumeration does not itself admit a
-candidate; explicit manual addition does. Every applicable rule runs
-independently of adapter selection or installation. Rule applicability is binary
-admission and display attribution only: rule identity and match count never
-score, select, or order a candidate.
+deterministic setup-time logic that identifies automatic candidate eligibility.
+V1 has secret-like name, credential-bearing URL, properties configuration, npmrc
+credentials, and recognized credential document rules. Filesystem enumeration
+and manual additions supply possible sources but are not rules. Filesystem
+enumeration does not itself admit a candidate; explicit manual addition does.
+Every applicable rule runs independently of adapter selection or installation.
+Rule applicability is binary eligibility and display attribution only: rule
+identity and match count never score, select, or order a candidate.
+
+After composing applicable rules, setup applies the Common Literal exclusion once
+to wholly new automatic references, before grouping, collision analysis, and
+presentation. Existing enrollment, manual additions, and wildcard policies
+bypass it. The exclusion is not persisted and cannot change runtime reads.
 
 Maintained bounded locations and field probes yield ordinary environment, dotenv,
 or JSON source references. The persisted policy never names a Known Source Rule,
@@ -273,6 +284,8 @@ transformations remain outside this discovery layer.
 The matcher works on UTF-8 string values and implements the exact semantics in
 the specification. A straightforward algorithm is acceptable for small
 registries. Aho-Corasick is an optimization, not part of the security model.
+The matcher has no Common Literal vocabulary; every enrolled resolved value
+remains eligible for exact matching.
 
 The implementation must keep source values out of diagnostics. Avoiding all
 in-memory copies, zeroizing memory, or locking pages is not an architectural

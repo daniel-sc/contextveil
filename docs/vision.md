@@ -94,8 +94,9 @@ The normal journey is:
 
 1. Install the standalone binary.
 2. Run `contextveil setup` from a project directory.
-3. Review global and project candidates admitted by supported Known Source Rules
-   without exposing complete plaintext values.
+3. Review global and project candidates identified by supported Known Source
+   Rules and admitted after the Common Literal exclusion, without exposing
+   complete plaintext values.
 4. Select supported coding-agent integrations.
 5. Work normally; clean events are silent.
 6. See a concise notification only when ContextVeil redacts a value.
@@ -107,14 +108,16 @@ change.
 ## Principles
 
 - **Local by default.** Runtime resolution and redaction make no network calls.
-- **User-authorized enrollment.** Known Source Rules admit setup candidates; the
-  user decides what to enroll.
+- **User-authorized enrollment.** Known Source Rules identify setup candidates;
+  one small, transparent Common Literal exclusion removes destructive automatic
+  suggestions, and the user decides what to enroll. Manual enrollment remains
+  authoritative.
 - **Boring runtime.** Source values receive one documented whitespace trim;
   matching is otherwise literal, case-sensitive, and deterministic.
 - **Source references over snapshots.** Values are resolved from explicit local
   source references rather than copied into ContextVeil configuration.
 - **Known Source Rules, not generic crawling.** Setup applies maintained,
-  deterministic candidate-admission rules for secret-like names,
+  deterministic candidate-eligibility rules for secret-like names,
   credential-bearing URLs, and bounded host credential documents. Their field
   probes are explicit and maintained; complete host schemas are not modeled.
   Setup does not recursively classify arbitrary structured files by secret-like

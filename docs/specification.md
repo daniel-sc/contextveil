@@ -400,8 +400,9 @@ Each config phase MUST present existing entries as selected and provide a
 no-change path.
 
 **SET-002** Setup MUST automatically inspect the current process environment for
-candidates admitted by every applicable Known Source Rule. Rule application MUST
-NOT depend on which adapters are selected, installed, or detected.
+sources eligible under every applicable Known Source Rule, then apply `SET-023`.
+Rule application MUST NOT depend on which adapters are selected, installed, or
+detected.
 
 **SET-003** Project dotenv discovery MUST recursively include regular files named
 `.env` or beginning `.env.`, including ignored and untracked files, when their
@@ -426,13 +427,14 @@ general config directory.
 keys, wildcard file enrollment, environment names, JSON file/pointer pairs,
 properties file/decoded-key pairs, and npmrc file/exact-key pairs.
 A currently absent manual file, key, or pointer MAY be saved after explicit
-unresolved-source confirmation.
+unresolved-source confirmation. Explicit manual addition MUST bypass `SET-023`.
 
-**SET-006** The secret-like name Known Source Rule MUST admit automatic
-candidates using a maintained, case-insensitive vocabulary, including concepts
-such as token, secret, password, key, and credential. Format, entropy, length,
-and source type MUST NOT independently introduce a name-admitted candidate or
-assign candidate rank, admission weight, selection preference, or confidence.
+**SET-006** The secret-like name Known Source Rule MUST identify automatic
+candidate eligibility using a maintained, case-insensitive vocabulary, including
+concepts such as token, secret, password, key, and credential. Final admission is
+subject to `SET-023`. Format, entropy, length, and source type MUST NOT
+independently introduce a name-eligible source or assign candidate rank,
+admission weight, selection preference, or confidence.
 
 V1 name gating uses ASCII case folding. It splits the name into tokens at every
 run of non-ASCII-alphanumeric characters and also creates a compact form by
@@ -457,7 +459,8 @@ enrollment or an explicitly added manual Candidate MUST remain selected despite
 collisions.
 
 **SET-008** The user is authoritative. Setup MUST allow enrollment after a
-collision warning and MUST NOT impose a minimum runtime value length.
+collision warning, MUST allow explicit manual enrollment of a Common Literal,
+and MUST NOT impose a minimum runtime value length.
 
 **SET-009** Setup MUST offer wildcard enrollment for every current and future
 key in a selected dotenv file. Before saving it, setup MUST require an additional
@@ -534,13 +537,13 @@ references with equal current resolved values as one Candidate Group. The group
 MUST have one selection marker and numeric toggle, and toggling it MUST select or
 deselect every represented source together. If any represented source was
 enrolled at the start of the phase, the group MUST initially be selected. A
-newly discovered equal-value alias MUST join that selected group and MUST be
-persisted on `Save`. An explicitly added resolvable alias MUST likewise select
-its group. If previously equal enrolled aliases later resolve to different
-values, they MUST appear as separate selected enrollment units. Collision
-defaults MUST NOT deselect a group containing an enrolled or explicitly added
-source. `Skip` remains the exact no-change path and MUST NOT persist newly
-discovered aliases or any selection changes.
+newly discovered equal-value alias that passes automatic admission MUST join that
+selected group and MUST be persisted on `Save`. An explicitly added resolvable
+alias MUST likewise select its group. If previously equal enrolled aliases later
+resolve to different values, they MUST appear as separate selected enrollment
+units. Collision defaults MUST NOT deselect a group containing an enrolled or
+explicitly added source. `Skip` remains the exact no-change path and MUST NOT
+persist newly discovered aliases or any selection changes.
 
 Groups MUST NOT combine global and project references. Manual resolvable sources
 MUST join an equal-value group immediately. Unresolved sources and dotenv
@@ -602,21 +605,25 @@ selection, Group Representative choice, row order, or persistence order.
 **SET-017** Under the credential-bearing URL Known Source Rule, every value
 already surfaced by bounded automatic discovery that parses as an absolute
 hierarchical URL with an authority and a non-empty password in userinfo MUST be
-an automatic candidate even when its source name does not pass `SET-006`. The
-complete URL value, not an extracted or decoded component, is enrolled. This
+eligible for automatic admission even when its source name does not pass
+`SET-006`; final admission is subject to `SET-023`. The complete URL value, not
+an extracted or decoded component, is enrolled. This
 value-shape rule MUST NOT introduce recursive inspection of JSON or any other
 structured source.
 
-**SET-018** A Known Source Rule is a maintained, deterministic setup-time
-automatic candidate-admission rule. The V1 rule inventory consists of the
-secret-like name rule in `SET-006`, the credential-bearing URL rule in `SET-017`,
-the properties configuration rule in `SET-021`, and the recognized credential
-document rules in [`docs/known-sources.md`](docs/known-sources.md). Filesystem enumeration and
+**SET-018** A Known Source Rule is a maintained, deterministic setup-time rule
+that identifies automatic candidate eligibility. The V1 rule inventory consists
+of the secret-like name rule in `SET-006`, the credential-bearing URL rule in `SET-017`,
+the properties configuration rule in `SET-021`, the npmrc credentials rule in
+`SET-022`, and the recognized credential document rules in
+[`docs/known-sources.md`](docs/known-sources.md). Filesystem enumeration and
 manual source additions are inputs to setup, not Known Source Rules; explicit
 manual addition admits a Candidate by user action. Every applicable rule MUST run
 independently of adapter selection, installation, detection, and runtime
-coverage. Rule applicability is binary and MUST NOT carry a score, admission
-weight, selection preference, ordering preference, or confidence level.
+coverage. Rule applicability is binary eligibility and display attribution;
+`SET-023` applies once after rule composition. Applicability MUST NOT carry a
+score, admission weight, selection preference, ordering preference, or
+confidence level.
 
 A recognized credential document rule MUST produce ordinary exact source
 references and MUST NOT be persisted as runtime indirection. All default and
@@ -643,10 +650,11 @@ discovery.
 
 **SET-019** A recognized credential document uses JSON5 and the duplicate-member
 and nesting behavior in `SRC-011`. Any bounded probe that reaches a listed field
-and selects a non-empty string MUST admit a Candidate; unrelated surrounding or
-sibling schema MUST NOT be validated. Missing, empty, null, numeric, boolean,
-array, or object targets silently no-match, and one unusable field MUST NOT
-suppress another usable field in the same document. Malformed, non-UTF-8,
+and selects a non-empty string MUST produce an automatically eligible exact
+source reference, subject to `SET-023`; unrelated surrounding or sibling schema
+MUST NOT be validated. Missing, empty, null, numeric, boolean, array, or object
+targets silently no-match, and one unusable field MUST NOT suppress another
+usable field in the same document. Malformed, non-UTF-8,
 duplicate-member, or unreadable recognized documents follow `SET-013`. Dynamic
 names MUST be representable as exact JSON Pointers under `CFG-016`; empty names
 and `*` silently no-match. Setup MUST NOT recursively classify arbitrary JSON
@@ -673,7 +681,7 @@ walk and the additive machine paths `~/.gradle/gradle.properties` and
 `${GRADLE_USER_HOME}/gradle.properties`. Relative `GRADLE_USER_HOME` values
 resolve from setup's invocation directory. The rule admits an exact properties
 source only when its trimmed value is non-empty and its decoded key passes
-`SET-006` or its value passes `SET-017`.
+`SET-006` or its value passes `SET-017`; final admission is subject to `SET-023`.
 
 Project eligibility MUST exclude any file below an ASCII-case-insensitive
 `i18n`, `l10n`, `locale`, `locales`, `lang`, or `languages` segment. It MUST also
@@ -694,21 +702,43 @@ walk in `SET-003`. Override names are exact and uppercase. Their path values use
 the override semantics in `SET-018`; valid defaults and overrides remain
 additive and normalized duplicate paths are inspected once.
 
-The rule MUST admit an exact npmrc source for every non-empty scalar entry whose
-case-sensitive key starts with `//`, has a non-empty prefix before its final
-colon-delimited field, and ends in exactly `:_authToken`, `:_auth`, or
-`:_password`. The registry or scope prefix is not parsed or canonicalized and
+The rule MUST identify an exact npmrc source as automatically eligible for every
+non-empty scalar entry whose case-sensitive key starts with `//`, has a non-empty
+prefix before its final colon-delimited field, and ends in exactly `:_authToken`,
+`:_auth`, or `:_password`; final admission is subject to `SET-023`. The registry
+or scope prefix is not parsed or canonicalized and
 credential values are not decoded. Every valid scalar entry is also offered
 independently to the generic rules: `SET-006` receives only its final
 colon-delimited key field, while `SET-017` receives its complete scalar value.
 Applicable rule names are deduplicated and retain no admission, selection,
 grouping, or ordering weight.
 
+**SET-023** After `SRC-016` normalization and before grouping or presentation,
+setup MUST exclude a wholly new Source Reference eligible only through automatic
+Known Source Rules when its complete trimmed value equals, using ASCII
+case-insensitive comparison, one of `true`, `false`, `yes`, `no`, `on`, `off`,
+`0`, `1`, `enabled`, `disabled`, `null`, `nil`, `none`, `undefined`, `n/a`,
+`default`, or `auto`. Comparison MUST be exact over the complete value and MUST
+NOT use substring, token, locale-sensitive, or Unicode case-insensitive matching.
+The exclusion MUST apply once after all applicable rules compose, regardless of
+which or how many rules matched.
+
+The Common Literal exclusion MUST NOT remove or deselect an existing Enrolled
+Source, apply to an explicitly added manual Candidate, prevent dotenv wildcard
+enrollment or expansion, or affect registry construction or runtime matching. A
+newly discovered automatic alias MUST NOT bypass the exclusion because an
+equal-value existing or manual Candidate is present. Unresolved and empty
+name-eligible sources retain their existing behavior. Exclusion is silent and
+carries no rule attribution, score, selection preference, or ordering weight.
+Vocabulary changes are observable setup behavior and MUST update this requirement
+and its fixtures.
+
 ## 8. Effective Registry
 
-**REG-001** Every non-empty value normalized by `SRC-016` becomes an active match pattern.
-Runtime MUST NOT apply name, entropy, provider-format, length, or collision
-heuristics.
+**REG-001** Every non-empty value normalized by `SRC-016` from an Enrolled Source,
+including a Common Literal and every wildcard-resolved value, becomes an active
+match pattern. Runtime MUST NOT apply `SET-023` or name, entropy, provider-format,
+length, or collision heuristics.
 
 **REG-002** If multiple references resolve to the same value, the matcher MUST
 store one pattern. Its canonical source is the first project entry in file order,
@@ -1015,7 +1045,9 @@ exclusions, symlink traversal, grouped collision source-file exclusion,
 permissions, atomic writes, invalid-config preservation, repeat setup, and
 partial multi-phase failure. They MUST retain malformed-file, JSON Pointer, and
 secret-leak coverage, including npmrc project traversal and exact override path
-semantics.
+semantics. Common Literal coverage MUST include the complete vocabulary,
+normalization and exact-match boundaries, every automatic source family, manual
+and existing enrollment, wildcard expansion, and exclusion before alias grouping.
 
 **TST-004** Every shipped adapter path MUST have protocol decision fixtures for
 clean, intervened, unresolved, and explicitly unsupported behavior. Every
