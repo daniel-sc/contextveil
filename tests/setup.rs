@@ -563,6 +563,36 @@ fn project_dotenv_keys_are_discovered_and_gated() {
 }
 
 #[test]
+fn common_literals_are_excluded_from_every_automatic_source_family() {
+    let fixture = Fixture::new();
+    fixture.write(".env.common", "DOTENV_SECRET=' FaLsE '\n");
+    fixture.write(
+        ".claude/settings.json",
+        r#"{"env":{"ANTHROPIC_API_KEY":" YES "}}"#,
+    );
+    fixture.write("application.properties", "database.password= No \n");
+    fixture.write(".npmrc", "//registry.example.test/:_authToken=\"ON\"\n");
+    let environment = fixture.environment(&[("SECRET_ENABLED", " TrUe ")]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+
+    for excluded in [
+        "SECRET_ENABLED",
+        "DOTENV_SECRET",
+        "ANTHROPIC_API_KEY",
+        "database.password",
+        "_authToken",
+    ] {
+        assert!(!transcript.contains(excluded), "{transcript}");
+        assert!(!global.contains(excluded), "{global}");
+        assert!(!project.contains(excluded), "{project}");
+    }
+}
+
+#[test]
 fn registry_and_proxy_urls_are_discovered_in_dotenv_files() {
     let registry = Canary::generate("REGISTRY_URL_PASSWORD");
     let proxy = Canary::generate("PROXY_URL_PASSWORD");
@@ -717,6 +747,37 @@ fn an_enrolled_alias_keeps_its_colliding_group_selected() {
 }
 
 #[test]
+fn a_common_literal_alias_does_not_join_an_existing_enrollment() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+        .expect("config directory");
+    std::fs::write(
+        fixture.global_config(),
+        "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"FIRST_TOKEN\"\n",
+    )
+    .expect("global config");
+    let environment =
+        fixture.environment(&[("FIRST_TOKEN", "disabled"), ("SECOND_TOKEN", "disabled")]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        transcript.contains("env FIRST_TOKEN (enrolled)"),
+        "{transcript}"
+    );
+    assert!(
+        transcript.contains("secret-like source name"),
+        "{transcript}"
+    );
+    assert!(!transcript.contains("SECOND_TOKEN"), "{transcript}");
+    assert!(!transcript.contains("Same current value"), "{transcript}");
+
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(global.contains("FIRST_TOKEN"), "{global}");
+    assert!(!global.contains("SECOND_TOKEN"), "{global}");
+}
+
+#[test]
 fn aliases_split_into_separate_rows_after_their_values_diverge() {
     let fixture = Fixture::new();
     let first = fixture.environment(&[("FIRST_TOKEN", "same"), ("SECOND_TOKEN", "same")]);
@@ -828,6 +889,33 @@ fn wildcard_enrollment_requires_an_extra_confirmation() {
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("all = true"));
     assert!(project.contains("\".env.shared\""));
+}
+
+#[test]
+fn manual_and_wildcard_enrollment_can_protect_common_literals() {
+    let fixture = Fixture::new();
+    fixture.write(".env.flags", "ORDINARY=default\n");
+    let environment = fixture.environment(&[("API_TOKEN", "true")]);
+
+    let (exit, transcript) = fixture.run("e\nAPI_TOKEN\n\nw\n.env.flags\ny\n\n\n", &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(global.contains("API_TOKEN"), "{global}");
+    assert!(project.contains("all = true"), "{project}");
+
+    let registry = match registry::build(&environment, Some(&fixture.project())) {
+        registry::Outcome::Ready(registry) => registry,
+        registry::Outcome::Malfunction(problem) => panic!("registry malfunction: {problem:?}"),
+    };
+    assert_eq!(registry.redactor.active_count(), 2);
+    let mut tally = registry.redactor.tally();
+    let redacted = registry
+        .redactor
+        .redact("true default", &mut tally)
+        .expect("both common literals should be redacted");
+    assert!(!redacted.contains("true"), "{redacted}");
+    assert!(!redacted.contains("default"), "{redacted}");
 }
 
 #[test]

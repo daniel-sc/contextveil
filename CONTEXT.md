@@ -16,14 +16,17 @@ source kind and identifying fields, never a resolved value or advisory detail.
 _Avoid_: Candidate rank, confidence key
 
 **Known Source Rule**:
-A maintained, deterministic setup-time rule that automatically admits
-candidates. The supported rule families are the secret-like name rule, the
-credential-bearing URL rule, and recognized credential document rules. Every
+A maintained, deterministic setup-time rule that identifies a source as eligible
+for automatic Candidate admission. The supported rule families are the
+secret-like name rule, credential-bearing URL rule, properties configuration
+rule, npmrc credentials rule, and recognized credential document rules. Every
 applicable rule runs regardless of which adapters are selected or installed.
 _Avoid_: Detector, source adapter, adapter-specific discovery
 
 Recognized credential document rules are bounded location and field probes that
-admit non-empty string values without validating unrelated surrounding schema.
+identify eligible non-empty string values without validating unrelated
+surrounding schema. Automatic eligibility remains subject to the Common Literal
+exclusion.
 
 **Known Source**:
 A local source recognized by a Known Source Rule. Use this shorter phrase only
@@ -36,13 +39,22 @@ A source reference or file policy the user has chosen to protect.
 _Avoid_: Detected secret, scanned secret
 
 **Candidate**:
-A Source Reference that setup presents for possible enrollment after admission
-by a Known Source Rule or explicit manual addition.
+A Source Reference that setup presents for possible enrollment after Known Source
+Rule eligibility and automatic-candidate exclusions, or after explicit manual
+addition.
 _Avoid_: Detected secret, confirmed secret
 
 Filesystem enumeration supplies inputs to Known Source Rules but does not admit
 a Candidate by itself. Manual addition admits a Candidate but is not a Known
-Source Rule.
+Source Rule and bypasses automatic-candidate exclusions.
+
+**Common Literal**:
+A decoded, trimmed textual value excluded from wholly new automatic Candidates
+when its complete value exactly matches a small maintained vocabulary under
+ASCII case folding. This setup-only exclusion does not affect existing
+enrollment, explicit manual additions, dotenv wildcard enrollment, source
+resolution, or runtime matching.
+_Avoid_: Non-secret value, runtime ignore list, secret denylist
 
 **JSON Source**:
 An enrolled or discovered UTF-8 JSON5 document persisted with `source = "json"`
