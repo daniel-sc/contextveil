@@ -732,12 +732,14 @@ fn describe_load(load: &Load) -> String {
 
 fn describe_installed(installed: &Installed) -> &'static str {
     match installed {
-        Installed::Absent => "not installed",
-        Installed::Current => "installed",
-        Installed::Outdated { .. } => "installed, pointing at another binary",
-        Installed::Modified { .. } => "installed entry modified by hand",
-        Installed::Unreadable => "host file is not valid JSON",
-        Installed::Unexpected => "host file has an unexpected shape",
+        Installed::Absent => "ContextVeil integration not installed",
+        Installed::Current => "ContextVeil integration installed",
+        Installed::Outdated { .. } => {
+            "ContextVeil integration installed, pointing at another binary"
+        }
+        Installed::Modified { .. } => "ContextVeil integration entry modified by hand",
+        Installed::Unreadable => "ContextVeil integration host file is not valid JSON",
+        Installed::Unexpected => "ContextVeil integration host file has an unexpected shape",
     }
 }
 

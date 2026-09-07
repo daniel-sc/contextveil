@@ -40,9 +40,9 @@ Choose an action:
 
 Integrations
 
-   1 [x] Claude Code (production) - detected, installed
+   1 [x] Claude Code (production) - detected, ContextVeil integration installed
         file: /home/user/.claude/settings.json
-   2 [ ] Codex CLI (EXPERIMENTAL) - not detected, not installed
+   2 [ ] Codex CLI (EXPERIMENTAL) - not detected, ContextVeil integration not installed
         file: /home/user/.codex/hooks.json
   Installation is not proof of protection; run `contextveil doctor` to check it.
 Choose an action:
