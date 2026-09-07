@@ -115,12 +115,9 @@ Automatic suggestions currently cover:
 - **npmrc files** from documented machine locations and every project `.npmrc`, using exact credential keys plus the same general name and URL checks.
 - **More to come:** additional formats such as INI, YAML, and TOML.
 
-Across these rules, setup silently omits wholly new automatic suggestions whose
-complete trimmed value is `true`, `false`, `yes`, `no`, `on`, `off`, `0`, `1`,
-`enabled`, `disabled`, `null`, `nil`, `none`, `undefined`, `n/a`, `default`, or
-`auto`, compared without ASCII case sensitivity. Exact manual additions, existing
-enrollment, and dotenv wildcards remain authoritative, and runtime continues to
-protect every enrolled value.
+Across these rules, setup skips automatic suggestions whose
+value are common literals, such as `true`, `yes`, `on`, `0`,
+`enabled`, `null`, `nil`, `none`, `undefined`, etc.
 
 See the full [`Known Source Rule inventory`](docs/known-sources.md) for exact locations, fields, and exclusions.
 
