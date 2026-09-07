@@ -238,7 +238,7 @@ fn enrollment_phase(
     notices: Vec<known_source::Notice>,
     mut context: EnrollmentContext<'_>,
 ) -> PhaseResult {
-    refresh_items(scope, &mut items, &mut context);
+    refresh_items_and_collisions(scope, &mut items, &mut context);
 
     loop {
         terminal.line(scope.title());
@@ -298,20 +298,28 @@ fn enrollment_phase(
             }
             "q" => return cancelled(terminal),
             "a" => {
+                let mut wildcard_changed = false;
                 for item in &mut items {
                     if item.problem.is_none() {
+                        wildcard_changed |= item.is_wildcard() && !item.selected;
                         item.selected = true;
                         item.selection_touched = true;
                     }
                 }
-                refresh_items(scope, &mut items, &mut context);
+                if wildcard_changed {
+                    refresh_items_and_collisions(scope, &mut items, &mut context);
+                }
             }
             "n" => {
+                let mut wildcard_changed = false;
                 for item in &mut items {
+                    wildcard_changed |= item.is_wildcard() && item.selected;
                     item.selected = false;
                     item.selection_touched = true;
                 }
-                refresh_items(scope, &mut items, &mut context);
+                if wildcard_changed {
+                    refresh_items_and_collisions(scope, &mut items, &mut context);
+                }
             }
             "e" | "k" | "w" | "j" | "p" | "r" => {
                 match add_manual(terminal, answer.trim(), scope, &mut items, &mut context) {
@@ -320,8 +328,9 @@ fn enrollment_phase(
                 }
             }
             selection => {
-                toggle(terminal, &mut items, selection);
-                refresh_items(scope, &mut items, &mut context);
+                if toggle(terminal, &mut items, selection) {
+                    refresh_items_and_collisions(scope, &mut items, &mut context);
+                }
             }
         }
     }
@@ -798,13 +807,14 @@ fn selected_sources(items: &[Item]) -> Vec<SourceRef> {
     selected
 }
 
-fn toggle(terminal: &mut Terminal<'_>, items: &mut [Item], selection: &str) {
+fn toggle(terminal: &mut Terminal<'_>, items: &mut [Item], selection: &str) -> bool {
     let visible: Vec<usize> = items
         .iter()
         .enumerate()
         .filter_map(|(index, item)| item.visible().then_some(index))
         .collect();
     let mut unknown = Vec::new();
+    let mut wildcard_changed = false;
     for token in selection.split_whitespace() {
         match token.parse::<usize>() {
             Ok(number) if number >= 1 && number <= visible.len() => {
@@ -818,6 +828,7 @@ fn toggle(terminal: &mut Terminal<'_>, items: &mut [Item], selection: &str) {
                 }
                 item.selected = !item.selected;
                 item.selection_touched = true;
+                wildcard_changed |= item.is_wildcard();
             }
             _ => unknown.push(sanitize::text(token)),
         }
@@ -825,6 +836,7 @@ fn toggle(terminal: &mut Terminal<'_>, items: &mut [Item], selection: &str) {
     if !unknown.is_empty() {
         terminal.line(&format!("  Not a choice: {}", unknown.join(", ")));
     }
+    wildcard_changed
 }
 
 fn visible_count(items: &[Item]) -> usize {
@@ -852,7 +864,11 @@ fn update_suppression(items: &mut [Item], aliases: &AliasInventory) {
     }
 }
 
-fn refresh_items(scope: Scope, items: &mut [Item], context: &mut EnrollmentContext<'_>) {
+fn refresh_items_and_collisions(
+    scope: Scope,
+    items: &mut [Item],
+    context: &mut EnrollmentContext<'_>,
+) {
     context.aliases.sync_wildcards(scope, items);
     update_suppression(items, context.aliases);
     annotate_collisions(items, context.project_root, context.aliases);
@@ -1038,7 +1054,7 @@ fn add_manual(
         );
     }
     merge_item(items, item);
-    refresh_items(scope, items, context);
+    refresh_items_and_collisions(scope, items, context);
     Ok(())
 }
 
