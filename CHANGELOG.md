@@ -5,6 +5,20 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+## [1.0.0-alpha.5] - 2026-09-08
+
+### Changed
+
+- Excluded common literals from automatic setup suggestions while preserving
+  manual enrollment. (#27)
+- Bounded collision analysis and limited binary scanning to textual regions.
+- Improved setup guidance, masked previews, installer instructions, and harness
+  integration documentation. (#24, #25, #29)
+
+### Fixed
+
+- Avoided repeated collision scans for ordinary setup selection changes. (#28)
+
 ## [1.0.0-alpha.4] - 2026-08-31
 
 ### Added

@@ -142,28 +142,30 @@ review project policy before starting the harness.
 
 **Verification:** Conformance tests assert no partial global fallback occurs.
 
-### LIM-010: Unbounded Input Size
+### LIM-010: Input Size Limits
 
 **Reality:** V1 imposes no ContextVeil-specific size cap on dotenv or npmrc files or
 intercepted payloads. JSON source documents are limited to 128 nested object or
 array containers so untrusted source files cannot exhaust the hook process stack.
 
-Setup's collision analysis also reads every readable regular file under the
-project root, so it scales with project size rather than with the number of
-candidates.
+Setup's collision analysis silently skips regular files larger than 16 MiB. It
+streams eligible files and searches their textual regions with one multi-pattern
+matcher, but total work still scales with eligible project content.
 
-**Impact:** Very large files or payloads can consume excessive memory or exceed
-the five-second host timeout, causing fail-open behavior in process-hook hosts.
-Setup can take a noticeable moment on a very large repository. A deeper JSON
-source is a malfunction and disables the effective registry for that event.
+**Impact:** Very large source files or payloads can consume excessive memory or
+exceed the five-second host timeout, causing fail-open behavior in process-hook
+hosts. Setup can take a noticeable moment on a very large repository, and an
+occurrence confined to an oversized file is not reported as a collision. A deeper
+JSON source is a malfunction and disables the effective registry for that event.
 
 **Workaround:** Keep credential files small and rely on normal harness output
 limits. Diagnose slow paths with `contextveil doctor` and benchmarks.
 
-**Verification:** Functional large-input tests cover 4 MiB dotenv and npmrc files, 201
-active values over a 512 KiB payload, moderate successful nesting, and rejection
-of a 20,000-level JSON source without a stack overflow. Portable tests make no
-machine-sensitive duration assertion; `mise run bench` owns performance evidence.
+**Verification:** Functional large-input tests cover 4 MiB dotenv and npmrc files,
+201 active values over a 512 KiB payload, collision files at and above the 16 MiB
+boundary, moderate successful nesting, and rejection of a 20,000-level JSON
+source without a stack overflow. Portable tests make no machine-sensitive
+duration assertion; `mise run bench` owns performance evidence.
 
 ## Host Integration Limits
 
