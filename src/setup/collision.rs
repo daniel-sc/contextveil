@@ -1,10 +1,10 @@
 //! Collision analysis for setup candidates.
 //!
-//! `SET-011`: search readable regular-file bytes under the current selected
-//! project root using the discovery exclusions, include ignored files, exclude
-//! every equal-value alias source file, never follow symlinks, and skip
-//! special files. Occurrences are counted as non-overlapping exact byte matches
-//! from left to right, including inside binary or non-UTF-8 files.
+//! `SET-011`: search textual regions in readable regular files no larger than 16
+//! MiB under the current selected project root. Use the discovery exclusions,
+//! include ignored files, exclude every equal-value alias source file, never
+//! follow symlinks, and skip special files. Occurrences are counted as
+//! non-overlapping exact byte matches from left to right.
 //!
 //! `SET-012`: report counts and sanitized relative filenames only, never values,
 //! matched lines, or snippets. Findings are advisory (`DIA-004`), so skipped
@@ -13,8 +13,13 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use aho_corasick::{Anchored, automaton::Automaton, nfa::noncontiguous::NFA};
+
 use crate::sanitize;
 use crate::setup::discovery::EXCLUDED_DIRECTORIES;
+
+const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+const READ_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Where a candidate value also occurs inside the project.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,16 +63,48 @@ pub struct Subject<'a> {
     pub source_files: &'a [PathBuf],
 }
 
+struct PatternSet {
+    matcher: NFA,
+    subject_patterns: Vec<Option<usize>>,
+}
+
 /// Counts occurrences of every subject under `project_root`.
 ///
-/// The tree is walked once and each readable regular file is scanned for all
-/// subjects, so cost stays proportional to project size rather than to the
-/// number of candidates.
+/// The tree is walked once and one multi-pattern matcher scans each eligible
+/// textual region.
 pub fn analyze(project_root: &Path, subjects: &[Subject<'_>]) -> Vec<Collisions> {
     let mut results = vec![Collisions::default(); subjects.len()];
     if subjects.is_empty() {
         return results;
     }
+    let mut patterns = Vec::new();
+    let subject_patterns: Vec<Option<usize>> = subjects
+        .iter()
+        .map(|subject| {
+            if subject.value.is_empty() || subject.value.len() as u64 > MAX_FILE_BYTES {
+                return None;
+            }
+            if let Some(index) = patterns
+                .iter()
+                .position(|value: &&str| *value == subject.value)
+            {
+                Some(index)
+            } else {
+                patterns.push(subject.value);
+                Some(patterns.len() - 1)
+            }
+        })
+        .collect();
+    if patterns.is_empty() {
+        return results;
+    }
+    let Ok(matcher) = NFA::new(&patterns) else {
+        return results;
+    };
+    let pattern_set = PatternSet {
+        matcher,
+        subject_patterns,
+    };
     let canonical_sources: Vec<Vec<PathBuf>> = subjects
         .iter()
         .map(|subject| {
@@ -83,6 +120,7 @@ pub fn analyze(project_root: &Path, subjects: &[Subject<'_>]) -> Vec<Collisions>
         project_root,
         subjects,
         &canonical_sources,
+        &pattern_set,
         &mut results,
     );
     for collisions in &mut results {
@@ -98,6 +136,7 @@ fn scan(
     directory: &Path,
     subjects: &[Subject<'_>],
     canonical_sources: &[Vec<PathBuf>],
+    pattern_set: &PatternSet,
     results: &mut [Collisions],
 ) {
     let Ok(entries) = std::fs::read_dir(directory) else {
@@ -117,7 +156,14 @@ fn scan(
                 .to_str()
                 .is_some_and(|name| EXCLUDED_DIRECTORIES.contains(&name));
             if !excluded {
-                scan(root, &path, subjects, canonical_sources, results);
+                scan(
+                    root,
+                    &path,
+                    subjects,
+                    canonical_sources,
+                    pattern_set,
+                    results,
+                );
             }
             continue;
         }
@@ -128,13 +174,15 @@ fn scan(
             // Unreadable files are skipped; analysis is advisory.
             continue;
         };
-        if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        let Ok(opened_metadata) = file.metadata() else {
+            continue;
+        };
+        if !opened_metadata.is_file() || opened_metadata.len() > MAX_FILE_BYTES {
             continue;
         }
-        let mut bytes = Vec::new();
-        if file.read_to_end(&mut bytes).is_err() {
+        let Some(pattern_counts) = scan_file(&mut file, &pattern_set.matcher) else {
             continue;
-        }
+        };
         let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
         let canonical_path = path.canonicalize().ok();
         for (index, subject) in subjects.iter().enumerate() {
@@ -145,7 +193,10 @@ fn scan(
             {
                 continue;
             }
-            let count = count_occurrences(&bytes, subject.value.as_bytes());
+            let Some(pattern) = pattern_set.subject_patterns[index] else {
+                continue;
+            };
+            let count = pattern_counts[pattern];
             if count > 0 {
                 results[index].total += count;
                 results[index]
@@ -156,7 +207,102 @@ fn scan(
     }
 }
 
+fn scan_file(file: &mut std::fs::File, matcher: &NFA) -> Option<Vec<usize>> {
+    let pattern_count = matcher.patterns_len();
+    let start_state = matcher.start_state(Anchored::No).ok()?;
+    let mut state = start_state;
+    let mut counts = vec![0; pattern_count];
+    let mut next_allowed = vec![0; pattern_count];
+    let mut region_len = 0_usize;
+    {
+        let mut process = |bytes: Option<&[u8]>| {
+            let Some(bytes) = bytes else {
+                state = start_state;
+                region_len = 0;
+                next_allowed.fill(0);
+                return;
+            };
+            for &byte in bytes {
+                if byte == 0 {
+                    state = start_state;
+                    region_len = 0;
+                    next_allowed.fill(0);
+                    continue;
+                }
+                state = matcher.next_state(Anchored::No, state, byte);
+                region_len += 1;
+                if !matcher.is_match(state) {
+                    continue;
+                }
+                for index in 0..matcher.match_len(state) {
+                    let pattern = matcher.match_pattern(state, index);
+                    let pattern_index = pattern.as_usize();
+                    let start = region_len - matcher.pattern_len(pattern);
+                    if start >= next_allowed[pattern_index] {
+                        counts[pattern_index] += 1;
+                        next_allowed[pattern_index] = region_len;
+                    }
+                }
+            }
+        };
+        let mut reader = file.take(MAX_FILE_BYTES + 1);
+        let mut buffer = vec![0; READ_BUFFER_BYTES];
+        let mut pending_utf8 = Vec::with_capacity(READ_BUFFER_BYTES + 3);
+        let mut total = 0_u64;
+
+        loop {
+            let read = match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return None,
+            };
+            total += read as u64;
+            if total > MAX_FILE_BYTES {
+                return None;
+            }
+            pending_utf8.extend_from_slice(&buffer[..read]);
+            consume_utf8(&mut pending_utf8, &mut process);
+        }
+
+        if !pending_utf8.is_empty() {
+            process(None);
+        }
+    }
+    Some(counts)
+}
+
+fn consume_utf8(bytes: &mut Vec<u8>, process: &mut impl FnMut(Option<&[u8]>)) {
+    let mut consumed = 0;
+    loop {
+        match std::str::from_utf8(&bytes[consumed..]) {
+            Ok(_) => {
+                process(Some(&bytes[consumed..]));
+                consumed = bytes.len();
+                break;
+            }
+            Err(error) => {
+                let valid_end = consumed + error.valid_up_to();
+                process(Some(&bytes[consumed..valid_end]));
+                let Some(error_len) = error.error_len() else {
+                    consumed = valid_end;
+                    break;
+                };
+                process(None);
+                consumed = valid_end + error_len;
+            }
+        }
+        if consumed == bytes.len() {
+            break;
+        }
+    }
+    if consumed > 0 {
+        bytes.drain(..consumed);
+    }
+}
+
 /// Counts non-overlapping occurrences from left to right.
+#[cfg(test)]
 fn count_occurrences(haystack: &[u8], needle: &[u8]) -> usize {
     if needle.is_empty() || needle.len() > haystack.len() {
         return 0;
@@ -292,11 +438,47 @@ mod tests {
     }
 
     #[test]
-    fn binary_and_non_utf8_files_are_included() {
+    fn binary_files_scan_only_complete_utf8_regions() {
         let tree = Tree::new();
-        tree.file("blob.bin", &[0x00, 0xff, b'v', b'a', b'l', 0xfe]);
+        tree.file(
+            "blob.bin",
+            &[
+                0x00, 0xff, b'v', b'a', b'l', 0xfe, b'v', b'a', 0x00, b'l', 0xff, b'v', b'a', b'l',
+                0x00,
+            ],
+        );
         let collisions = analyze_one(&tree.root, "val", None);
+        assert_eq!(collisions.total, 2);
+    }
+
+    #[test]
+    fn matches_can_cross_read_buffers() {
+        let tree = Tree::new();
+        let mut pattern = vec![b'a'; READ_BUFFER_BYTES + 17];
+        pattern.push(b'b');
+        let value = std::str::from_utf8(&pattern).expect("ASCII pattern");
+        let mut contents = vec![b'x'; READ_BUFFER_BYTES / 2];
+        contents.extend_from_slice(&pattern);
+        tree.file("large.txt", &contents);
+
+        let collisions = analyze_one(&tree.root, value, None);
+
         assert_eq!(collisions.total, 1);
+    }
+
+    #[test]
+    fn the_file_size_limit_is_inclusive_and_oversized_files_are_skipped() {
+        let exact = Tree::new();
+        let mut contents = vec![b'x'; MAX_FILE_BYTES as usize];
+        contents[(MAX_FILE_BYTES as usize - 5)..].copy_from_slice(b"value");
+        exact.file("exact.txt", &contents);
+        assert_eq!(analyze_one(&exact.root, "value", None).total, 1);
+
+        let oversized = Tree::new();
+        contents.push(b'x');
+        contents[..5].copy_from_slice(b"value");
+        oversized.file("oversized.txt", &contents);
+        assert!(analyze_one(&oversized.root, "value", None).is_empty());
     }
 
     #[test]
@@ -377,5 +559,28 @@ mod tests {
         assert_eq!(results[0].total, 1);
         assert_eq!(results[1].total, 2);
         assert!(results[2].is_empty());
+    }
+
+    #[test]
+    fn overlapping_patterns_are_counted_independently() {
+        let tree = Tree::new();
+        tree.file("a.txt", b"aaaa");
+
+        let results = analyze(
+            &tree.root,
+            &[
+                Subject {
+                    value: "aa",
+                    source_files: &[],
+                },
+                Subject {
+                    value: "aaa",
+                    source_files: &[],
+                },
+            ],
+        );
+
+        assert_eq!(results[0].total, 2);
+        assert_eq!(results[1].total, 1);
     }
 }

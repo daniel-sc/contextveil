@@ -19,8 +19,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "contextveil"
-version = "1.0.0-alpha.4"
+version = "1.0.0-alpha.5"
 dependencies = [
+ "aho-corasick",
  "java-properties",
  "json5",
  "serde",

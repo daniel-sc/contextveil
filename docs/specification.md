@@ -488,13 +488,16 @@ Known Source Rule names, setup MUST NOT derive or display value-shape advisory
 details based on length, character classes, entropy, encoding-like form, or
 format.
 
-**SET-011** Collision analysis MUST search readable regular-file bytes under the
-current selected project root using the discovery exclusions. It MUST include
-ignored files, exclude every whole source file known to contribute an equal-value
-alias, not follow file or directory symlinks, and skip
-FIFOs, devices, sockets, and other special files. For each Candidate Group it
-MUST count non-overlapping exact byte occurrences from left to right, including
-occurrences in binary or non-UTF-8 regular files.
+**SET-011** Collision analysis MUST search readable regular files no larger than
+16 MiB (16,777,216 bytes, inclusive) under the current selected project root
+using the discovery exclusions. It MUST include ignored files, exclude every
+whole source file known to contribute an equal-value alias, not follow file or
+directory symlinks, and skip FIFOs, devices, sockets, and other special files.
+Files above the limit MUST be skipped in full. Analysis MUST search maximal valid
+UTF-8 regions bounded by NUL or malformed UTF-8 bytes, including such regions in
+binary files, without decoding or decompressing file contents. For each Candidate
+Group it MUST count non-overlapping exact byte occurrences from left to right;
+matches MUST NOT cross region boundaries.
 
 Alias-file discovery for these exclusions MUST consider resolvable sources and
 candidates from both enrollment phases even though Candidate Groups
@@ -502,8 +505,8 @@ remain phase-local. Exclusions MUST derive from all aliases known during
 discovery, not only the references currently selected in the setup UI.
 
 **SET-012** Collision output MUST show occurrence counts and affected sanitized
-relative filenames. It MUST NOT show values, matched lines, or snippets. Skipped
-files need not be reported because collision analysis is advisory.
+relative filenames. It MUST NOT show values, matched lines, snippets, or files
+skipped by collision analysis because collision analysis is advisory.
 
 **SET-013** An unreadable or malformed automatically discovered file that is not
 already enrolled MUST be shown as unavailable and excluded from candidates; it
@@ -1048,6 +1051,9 @@ secret-leak coverage, including npmrc project traversal and exact override path
 semantics. Common Literal coverage MUST include the complete vocabulary,
 normalization and exact-match boundaries, every automatic source family, manual
 and existing enrollment, wildcard expansion, and exclusion before alias grouping.
+Collision coverage MUST include textual regions in binary files, region and read
+buffer boundaries, independent overlapping candidates, and the inclusive file
+size limit.
 
 **TST-004** Every shipped adapter path MUST have protocol decision fixtures for
 clean, intervened, unresolved, and explicitly unsupported behavior. Every
