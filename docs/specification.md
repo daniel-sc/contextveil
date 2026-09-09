@@ -454,7 +454,8 @@ this requirement and its fixtures.
 source. Every wholly new automatically admitted enrollment unit MUST initially
 be selected. Collision analysis finding another occurrence is the only reason
 setup MUST automatically unselect an otherwise valid wholly new automatic unit.
-Candidates with collisions MUST remain visible. A unit containing existing
+Candidates with collisions MUST remain visible, and collision-driven automatic
+non-selection MUST be explicit in the presentation. A unit containing existing
 enrollment or an explicitly added manual Candidate MUST remain selected despite
 collisions.
 

@@ -816,8 +816,18 @@ fn a_colliding_candidate_is_visible_but_unselected() {
 
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(
+        transcript.contains("[ ] dotenv .env key APP_SECRET"),
+        "{transcript}"
+    );
     assert!(transcript.contains("collision:"));
     assert!(transcript.contains("src/config.rs"));
+    assert!(
+        transcript.contains(
+            "not selected by default because of this collision; toggle row 1 to enroll anyway"
+        ),
+        "{transcript}"
+    );
 
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     // `SET-007`: shown, but not enrolled without an explicit choice.
@@ -850,8 +860,19 @@ fn a_collision_can_be_overridden_by_the_user() {
     fixture.write(".env", "APP_SECRET=common\n");
     fixture.write("notes.txt", "common\n");
 
-    let (exit, _) = fixture.run("\n1\n\n\n", &fixture.environment(&[]));
-    assert_eq!(exit, Exit::Ok);
+    let (exit, transcript) = fixture.run("\n1\n\n\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        transcript
+            .matches("not selected by default because of this collision")
+            .count(),
+        1,
+        "{transcript}"
+    );
+    assert!(
+        transcript.contains("[x] dotenv .env key APP_SECRET"),
+        "{transcript}"
+    );
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
     assert!(project.contains("APP_SECRET"));
 }

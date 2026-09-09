@@ -45,6 +45,12 @@ pub(super) fn enrollment(items: &[Item]) -> String {
         }
         if let Some(collisions) = &item.collisions {
             lines.push(format!("        collision: {}", collisions.describe()));
+            if !item.selected && !item.selection_touched && !item.enrolled {
+                lines.push(format!(
+                    "        not selected by default because of this collision; toggle row {} to enroll anyway",
+                    row + 1
+                ));
+            }
         }
     }
     lines.join("\n")
