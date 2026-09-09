@@ -130,7 +130,7 @@ Environment variables, dotenv files, JSON (including JSON5) files, exact Java pr
 While ContextVeil is in pre-release, install the published alpha explicitly:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.sh |
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v1.0.0-alpha.5/install.sh |
   bash -s -- --version 1.0.0-alpha.5
 ```
 
@@ -143,6 +143,22 @@ curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.
 
 The binary is installed to `~/.local/bin/contextveil` by default. Make sure that
 directory is on your `PATH`.
+
+#### Install With Your Coding Agent
+
+Your agent may install ContextVeil, but source selection stays with you. Ask it to:
+
+1. Get approval before using the network or writing to `~/.local/bin`.
+2. Run the version-pinned installer above.
+3. Confirm `checksum verified`, then run `~/.local/bin/contextveil --version`.
+4. Stop and ask you to run `~/.local/bin/contextveil setup` from the project in a
+   real terminal; ordinary agent shell tools may not provide the required TTY.
+5. After setup, remind you to restart the coding agent and run
+   `~/.local/bin/contextveil doctor` from the project. For Codex, first trust the
+   hook on the **Hooks need review** screen or through `/hooks`.
+
+Installation alone is not proof of protection. Report every `warn` or `fail` line
+from `doctor`.
 
 ### 2. Set Up A Project
 
