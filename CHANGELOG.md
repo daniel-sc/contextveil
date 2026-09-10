@@ -10,6 +10,26 @@ Release notes are concise, user-facing changes. See
 - Simplified first-run setup and status output, added explicit post-setup
   guidance, and limited new integration choices to detected harnesses.
 
+## [1.0.0] - 2026-09-10
+
+### Added
+
+- Published the first stable V1 release with deterministic local redaction,
+  guided source enrollment, and checksummed installers for Linux and macOS on
+  x86_64 and arm64.
+- Added bounded Known Source Rules for environment and dotenv values, JSON5,
+  Java properties, npmrc credentials, and supported coding-agent credential
+  documents.
+- Added Claude Code production integration plus opt-in experimental adapters for
+  OpenAI Codex CLI, GitHub Copilot CLI, and OpenCode.
+
+### Changed
+
+- Setup now omits common literals from automatic suggestions, reports collisions,
+  and presents masked previews while preserving manual enrollment.
+- Runtime source resolution follows current environment and file-backed values
+  without storing resolved credentials in configuration.
+
 ## [1.0.0-alpha.5] - 2026-09-08
 
 ### Changed

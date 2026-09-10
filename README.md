@@ -16,11 +16,10 @@ Only enrolled exact values are replaced; the rest of the output stays intact.
 
 ## Quick Start
 
-Install the current alpha:
+Install the latest stable release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v1.0.0-alpha.5/install.sh |
-  bash -s -- --version 1.0.0-alpha.5
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v1.0.0/install.sh | bash
 ```
 
 From your project directory, run:
@@ -152,7 +151,7 @@ Environment variables, dotenv files, JSON (including JSON5) files, exact Java pr
 Your agent may install ContextVeil, but source selection stays with you. Ask it to:
 
 1. Get approval before using the network or writing to `~/.local/bin`.
-2. Run the installer in [Quick Start](#quick-start).
+2. Run the stable installer in [Quick Start](#quick-start).
 3. Confirm `checksum verified`, then run `~/.local/bin/contextveil --version`.
 4. Stop and ask you to run `~/.local/bin/contextveil setup` from the project in a
    real terminal; ordinary agent shell tools may not provide the required TTY.
