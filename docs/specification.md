@@ -834,12 +834,15 @@ warn.
 
 ## 11. Integration Installation
 
-**INT-001** Setup MUST detect all four harnesses. Claude MUST be selected by
-default when detected. Experimental integrations MUST remain unselected unless
-already installed by ContextVeil.
+**INT-001** Setup MUST detect all four harnesses. Setup MUST present a harness
+when it is detected or when a ContextVeil integration is already installed for
+it. A harness that is neither detected nor already managed MUST NOT be offered
+for selection. Claude MUST be selected by default when detected. Experimental
+integrations MUST remain unselected unless already installed by ContextVeil.
 
-**INT-002** A user MAY explicitly install an integration whose executable was
-not detected. Setup MUST disclose that verification is limited.
+**INT-002** Setup MUST explain when no supported coding-agent installation is
+detected. It MUST NOT offer an undetected, not-yet-managed harness for
+installation.
 
 **INT-003** Every installed command MUST use the absolute current ContextVeil
 binary path and direct argument arrays where supported. Hook payloads MUST use

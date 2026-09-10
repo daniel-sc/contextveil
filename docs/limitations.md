@@ -471,6 +471,25 @@ containing the concrete value.
 literal, and the leak suite exercises npmrc without substituting environment
 content.
 
+### LIM-027: Setup Requires Harness Detection
+
+**Reality:** Setup offers only coding-agent harnesses whose executable or known
+configuration directory is detected, plus integrations already managed by
+ContextVeil. It does not offer a new integration when the host is installed in
+an environment ContextVeil cannot observe.
+
+**Impact:** A non-standard, remote, containerized, or not-yet-initialized host
+may not appear in setup even when the user intends to use it. Users cannot
+force-install an undetected harness through the V1 setup flow.
+
+**Workaround:** Run setup in the same user environment after the coding agent
+has been installed or initialized, and ensure its executable or documented
+configuration directory is visible there.
+
+**Verification:** Setup filters new integration rows by `Detection::Detected`,
+retains already-managed rows for maintenance, and reports an empty detected
+list without writing an integration.
+
 ## Implementation Deviations
 
 ### DEV-001: The Live Claude Canary Has No Automated Coverage

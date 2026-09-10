@@ -1,11 +1,11 @@
 //! Integration selection and removal: phase three of setup (`SET-001`).
 //!
-//! `INT-001`: every supported harness is detected, Claude is selected by default
-//! when detected, and experimental integrations stay unselected unless
-//! ContextVeil already installed them. `INT-002`: an undetected harness may still
-//! be installed, with disclosure. `SUP-003`: experimental integrations are
-//! labeled and require an affirmative choice. `SET-014`: each integration action
-//! is a separate transaction that restores its prior managed state on failure.
+//! `INT-001`: every supported harness is detected, setup presents detected or
+//! already-managed harnesses only, Claude is selected by default when detected,
+//! and experimental integrations stay unselected unless ContextVeil already
+//! installed them. `SUP-003`: experimental integrations are labeled and require
+//! affirmative installation. `SET-014`: each integration action is its own
+//! transaction that restores its prior managed state on failure.
 //!
 //! Dispatch is a plain match over a small enum, not a plugin framework
 //! (`docs/architecture.md`).
@@ -14,6 +14,7 @@ use std::fs::Permissions;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::IntegrationSummary;
 use crate::cli::Exit;
 use crate::integration::hooks_json::Installed;
 use crate::integration::state::{Managed, State};
@@ -34,18 +35,18 @@ pub(super) struct Row {
 ///
 /// Returns `Err` when a requested action failed or the user cancelled, so setup
 /// returns nonzero (`CLI-004`).
-pub fn phase(
+pub(super) fn phase(
     terminal: &mut Terminal<'_>,
     environment: &Environment,
     home: Option<&Path>,
     global_config_path: &Path,
     executable: Option<&Path>,
-) -> Result<(), Exit> {
+) -> Result<IntegrationSummary, Exit> {
     let Some(home) = home else {
         terminal.line("Integrations");
         terminal.line("  skipped: the home directory is unknown.");
         terminal.blank();
-        return Ok(());
+        return Ok(IntegrationSummary::default());
     };
 
     let state_path = state::path(global_config_path);
@@ -64,6 +65,9 @@ pub fn phase(
                         && inspection.detection == Detection::Detected),
                 inspection,
             }
+        })
+        .filter(|row| {
+            row.inspection.detection == Detection::Detected || row.inspection.is_installed()
         })
         .collect();
 
@@ -84,7 +88,7 @@ pub fn phase(
             "s" => {
                 terminal.line("  Skipped; integrations are unchanged.");
                 terminal.blank();
-                return Ok(());
+                return Ok(summary(&rows));
             }
             "q" => return cancelled(terminal),
             selection => toggle(terminal, &mut rows, selection),
@@ -122,12 +126,26 @@ pub fn phase(
         ));
     }
     terminal.blank();
-    Ok(())
+    Ok(summary(&rows))
+}
+
+fn summary(rows: &[Row]) -> IntegrationSummary {
+    IntegrationSummary {
+        selected: rows
+            .iter()
+            .filter(|row| row.selected)
+            .map(|row| row.inspection.harness)
+            .collect(),
+    }
 }
 
 /// Pure integration presentation used by setup and the broad rendering snapshot.
 pub(super) fn render_rows(rows: &[Row]) -> String {
     let mut lines = vec![String::new()];
+    if rows.is_empty() {
+        lines.push("  No supported coding-agent installation was detected.".to_string());
+        return lines.join("\n");
+    }
     for (index, row) in rows.iter().enumerate() {
         let harness = row.inspection.harness;
         lines.push(format!(
@@ -273,13 +291,6 @@ fn apply(
             }
         },
         (true, _) => {
-            if !installed && row.inspection.detection == Detection::NotDetected {
-                // `INT-002`: disclose that verification is limited.
-                terminal.line(&format!(
-                    "  {label} was not detected. The integration will be installed, but \
-                     ContextVeil cannot confirm the host will load it."
-                ));
-            }
             let Some(executable) = executable else {
                 terminal.line(&format!(
                     "  {label} installation failed: {}.",
@@ -400,7 +411,7 @@ fn approve_conflicts(
     Ok(())
 }
 
-fn cancelled(terminal: &mut Terminal<'_>) -> Result<(), Exit> {
+fn cancelled<T>(terminal: &mut Terminal<'_>) -> Result<T, Exit> {
     terminal.line("Setup cancelled. Nothing further was changed.");
     Err(Exit::Failure)
 }

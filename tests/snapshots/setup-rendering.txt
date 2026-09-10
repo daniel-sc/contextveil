@@ -4,7 +4,7 @@ Global sources (this machine)
         - env PRIMARY_TOKEN (enrolled)
         - dotenv .env.local key SECONDARY_TOKEN
         ab********yz (20 characters)
-        rules: secret-like source name, credential-bearing URL
+        suggested because: secret-like source name, credential-bearing URL
         collision: 1 occurrence(s) elsewhere in this project (README\nHOSTILE.md x1)
    2 [!] json broken\\efile.json pointer /token (enrolled)
         unavailable: malformed JSON source
@@ -14,12 +14,7 @@ Choose an action:
   [1 3]   toggle row(s) by space separated row numbers
   [a]     select all
   [n]     select none
-  [e]     add env
-  [k]     add dotenv key
-  [w]     add wildcard file
-  [j]     add JSON field
-  [p]     add properties key
-  [r]     add npmrc key
+  [m]     add a manual source
   [Enter] save
   [s]     skip
   [q]     quit
@@ -28,12 +23,7 @@ Project sources (this project)
 
   (no candidates found)
 Choose an action:
-  [e]     add env
-  [k]     add dotenv key
-  [w]     add wildcard file
-  [j]     add JSON field
-  [p]     add properties key
-  [r]     add npmrc key
+  [m]     add a manual source
   [Enter] save
   [s]     skip
   [q]     quit
@@ -42,8 +32,6 @@ Integrations
 
    1 [x] Claude Code (production) - detected, ContextVeil integration installed
         file: /home/user/.claude/settings.json
-   2 [ ] Codex CLI (EXPERIMENTAL) - not detected, ContextVeil integration not installed
-        file: /home/user/.codex/hooks.json
   Installation is not proof of protection; run `contextveil doctor` to check it.
 Choose an action:
   [1 3]   toggle row(s) by space separated row numbers
@@ -55,12 +43,7 @@ No-row action state
 
   (no candidates found)
 Choose an action:
-  [e]     add env
-  [k]     add dotenv key
-  [w]     add wildcard file
-  [j]     add JSON field
-  [p]     add properties key
-  [r]     add npmrc key
+  [m]     add a manual source
   [Enter] save
   [s]     skip
   [q]     quit

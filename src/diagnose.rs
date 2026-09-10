@@ -84,6 +84,7 @@ pub fn status(
     };
 
     let _ = writeln!(out, "ContextVeil status");
+    snapshot.render_summary(out);
     snapshot.render_registry(out);
     snapshot.render_integrations(out);
     let _ = writeln!(
@@ -343,6 +344,41 @@ impl Snapshot {
             "  unresolved      {}",
             count(self.unresolved(), "source", "sources")
         );
+    }
+
+    fn render_summary(&self, out: &mut dyn Write) {
+        let active = self.redactor.active_count();
+        let installed: Vec<_> = self
+            .integrations
+            .iter()
+            .filter(|inspection| inspection.is_installed())
+            .map(|inspection| inspection.harness.label())
+            .collect();
+        let malformed = matches!(self.global, Load::Invalid(_))
+            || matches!(self.project, Load::Invalid(_))
+            || self
+                .resolutions
+                .iter()
+                .any(|(_, resolution)| matches!(resolution, Resolution::Malfunction { .. }));
+        let state = if malformed {
+            "needs attention"
+        } else if active > 0 && !installed.is_empty() {
+            "configured"
+        } else {
+            "inactive"
+        };
+
+        let _ = writeln!(out, "\nConfiguration: {state}");
+        if active == 0 {
+            let _ = writeln!(out, "  no active values");
+        } else {
+            let _ = writeln!(out, "  {active} active values");
+        }
+        if installed.is_empty() {
+            let _ = writeln!(out, "  no installed coding-agent integration");
+        } else {
+            let _ = writeln!(out, "  installed integration: {}", installed.join(", "));
+        }
     }
 
     /// The integration facet, kept independent of registry health (`DIA-002`).

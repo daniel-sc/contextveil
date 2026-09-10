@@ -113,6 +113,11 @@ OPTIONS:
 Setup is interactive and requires a terminal. Configuration lives in
 ${XDG_CONFIG_HOME:-~/.config}/contextveil/config.toml and in .contextveil.toml
 at the selected project root.
+
+QUICK START:
+    contextveil setup
+    restart your coding agent
+    contextveil doctor
 ";
 
 /// Runs one CLI invocation.

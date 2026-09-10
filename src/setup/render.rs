@@ -41,7 +41,7 @@ pub(super) fn enrollment(items: &[Item]) -> String {
         let rules = item.rules();
         if !rules.is_empty() {
             let names: Vec<_> = rules.iter().map(|rule| rule.display()).collect();
-            lines.push(format!("        rules: {}", names.join(", ")));
+            lines.push(format!("        suggested because: {}", names.join(", ")));
         }
         if let Some(collisions) = &item.collisions {
             lines.push(format!("        collision: {}", collisions.describe()));
@@ -60,17 +60,16 @@ pub(super) fn enrollment_actions(row_count: usize) -> String {
         ]);
     }
     lines.extend([
-        "  [e]     add env".to_string(),
-        "  [k]     add dotenv key".to_string(),
-        "  [w]     add wildcard file".to_string(),
-        "  [j]     add JSON field".to_string(),
-        "  [p]     add properties key".to_string(),
-        "  [r]     add npmrc key".to_string(),
+        "  [m]     add a manual source".to_string(),
         "  [Enter] save".to_string(),
         "  [s]     skip".to_string(),
         "  [q]     quit".to_string(),
     ]);
     lines.join("\n")
+}
+
+pub(super) fn manual_actions() -> &'static str {
+    "Manual sources:\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [j]     add JSON field\n  [p]     add properties key\n  [r]     add npmrc key\n  [b]     back"
 }
 
 #[cfg(test)]
@@ -178,34 +177,19 @@ mod tests {
             wildcard_values: Vec::new(),
             collisions: None,
         };
-        let integration_rows = [
-            Row {
-                inspection: Inspection {
-                    harness: Harness::Claude,
-                    artifact_path: PathBuf::from("/home/user/.claude/settings.json"),
-                    detection: Detection::Detected,
-                    installed: Installed::Current,
-                    conflicts: Vec::new(),
-                    hook_executable: None,
-                    hook_timeout: Some(5),
-                    disabled_by_policy: false,
-                },
-                selected: true,
+        let integration_rows = [Row {
+            inspection: Inspection {
+                harness: Harness::Claude,
+                artifact_path: PathBuf::from("/home/user/.claude/settings.json"),
+                detection: Detection::Detected,
+                installed: Installed::Current,
+                conflicts: Vec::new(),
+                hook_executable: None,
+                hook_timeout: Some(5),
+                disabled_by_policy: false,
             },
-            Row {
-                inspection: Inspection {
-                    harness: Harness::Codex,
-                    artifact_path: PathBuf::from("/home/user/.codex/hooks.json"),
-                    detection: Detection::NotDetected,
-                    installed: Installed::Absent,
-                    conflicts: Vec::new(),
-                    hook_executable: None,
-                    hook_timeout: None,
-                    disabled_by_policy: false,
-                },
-                selected: false,
-            },
-        ];
+            selected: true,
+        }];
 
         let actual = format!(
             "Global sources (this machine)\n{}\n{}\n\nProject sources (this project)\n{}\n{}\n\nIntegrations\n{}\n{}\n\nNo-row action state\n{}\n{}\n",

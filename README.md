@@ -7,6 +7,30 @@ ContextVeil locally replaces the secret values you’ve chosen before supported 
 GITHUB_TOKEN=ghp_secret_example  ->  GITHUB_TOKEN=<SECRET:GITHUB_TOKEN>
 ```
 
+## One-minute quick start
+
+While ContextVeil is in pre-release, install the published alpha:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v1.0.0-alpha.5/install.sh |
+  bash -s -- --version 1.0.0-alpha.5
+```
+
+Then run this from the project where you use your coding agent:
+
+```bash
+contextveil setup
+```
+
+Review the suggested sources, restart your coding agent, and verify the result:
+
+```bash
+contextveil doctor
+```
+
+If `contextveil` is not on `PATH` yet, use `~/.local/bin/contextveil` for these
+commands. Setup is interactive and safe to rerun.
+
 **The command still runs. The file still gets read.**
 Only enrolled exact values are replaced; the rest of the output stays intact.
 
@@ -123,7 +147,7 @@ See the full [`Known Source Rule inventory`](docs/known-sources.md) for exact lo
 
 Environment variables, dotenv files, JSON (including JSON5) files, exact Java properties keys, and exact npmrc keys can also be added manually without matching these automatic discovery rules.
 
-## Quick Start
+## Setup details
 
 ### 1. Install
 
