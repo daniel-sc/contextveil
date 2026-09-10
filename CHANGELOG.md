@@ -5,11 +5,6 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
-### Changed
-
-- Simplified first-run setup and status output, added explicit post-setup
-  guidance, and limited new integration choices to detected harnesses.
-
 ## [1.0.0] - 2026-09-10
 
 ### Added
@@ -25,6 +20,8 @@ Release notes are concise, user-facing changes. See
 
 ### Changed
 
+- Simplified first-run setup and status output, added explicit post-setup
+  guidance, and limited new integration choices to detected harnesses.
 - Setup now omits common literals from automatic suggestions, reports collisions,
   and presents masked previews while preserving manual enrollment.
 - Runtime source resolution follows current environment and file-backed values
