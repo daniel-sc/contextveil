@@ -10,6 +10,10 @@ GITHUB_TOKEN=ghp_secret_example  ->  GITHUB_TOKEN=<SECRET:GITHUB_TOKEN>
 **The command still runs. The file still gets read.**
 Only enrolled exact values are replaced; the rest of the output stays intact.
 
+1. **A guided setup helps you choose what to protect.**
+2. **Runtime matching is exact and deterministic.**
+3. **Keep working. No magic.**
+
 ## Quick Start
 
 Install the current alpha:
@@ -26,8 +30,8 @@ From your project directory, run:
 ```
 
 Review the suggested sources and select your coding-agent integration. Restart
-the agent, then run `~/.local/bin/contextveil doctor`. For Codex, first trust the
-hook on the **Hooks need review** screen or through `/hooks`.
+the agent; in Codex, trust the hook on the **Hooks need review** screen or through
+`/hooks`. Then run `~/.local/bin/contextveil doctor`.
 
 Setup requires a terminal and is safe to rerun. Add `~/.local/bin` to your `PATH`
 to use the shorter `contextveil` command.
@@ -141,14 +145,14 @@ See the full [`Known Source Rule inventory`](docs/known-sources.md) for exact lo
 
 Environment variables, dotenv files, JSON (including JSON5) files, exact Java properties keys, and exact npmrc keys can also be added manually without matching these automatic discovery rules.
 
-## Setup details
+## Setup Details
 
 ### Install With Your Coding Agent
 
 Your agent may install ContextVeil, but source selection stays with you. Ask it to:
 
 1. Get approval before using the network or writing to `~/.local/bin`.
-2. Run the version-pinned installer above.
+2. Run the installer in [Quick Start](#quick-start).
 3. Confirm `checksum verified`, then run `~/.local/bin/contextveil --version`.
 4. Stop and ask you to run `~/.local/bin/contextveil setup` from the project in a
    real terminal; ordinary agent shell tools may not provide the required TTY.
