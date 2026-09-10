@@ -397,7 +397,8 @@ existing config files, every setup run MUST present these phases in order:
 4. offline verification.
 
 Each config phase MUST present existing entries as selected and provide a
-no-change path.
+no-change path. Successful setup MUST finish with guidance to select an integration if
+needed, restart the coding agent after installation, and run `contextveil doctor`.
 
 **SET-002** Setup MUST automatically inspect the current process environment for
 sources eligible under every applicable Known Source Rule, then apply `SET-023`.
@@ -835,12 +836,14 @@ warn.
 
 ## 11. Integration Installation
 
-**INT-001** Setup MUST detect all four harnesses. Claude MUST be selected by
-default when detected. Experimental integrations MUST remain unselected unless
-already installed by ContextVeil.
+**INT-001** Setup MUST inspect all four harnesses and offer only those with a
+detected executable or known configuration directory, or an existing
+ContextVeil-managed integration. Claude MUST be selected by default when
+detected. Experimental integrations MUST remain unselected unless already
+installed by ContextVeil.
 
-**INT-002** A user MAY explicitly install an integration whose executable was
-not detected. Setup MUST disclose that verification is limited.
+**INT-002** When no harnesses are offered, setup MUST explain how to make a
+supported coding agent detectable before rerunning setup.
 
 **INT-003** Every installed command MUST use the absolute current ContextVeil
 binary path and direct argument arrays where supported. Hook payloads MUST use
@@ -941,7 +944,9 @@ their current working directory.
 
 **DIA-002** Registry and integration health MUST be shown as independent facets.
 Some unresolved sources do not degrade an otherwise functioning adapter. Zero
-active values MUST be shown as `INACTIVE`.
+active values MUST be shown as `INACTIVE`. Status SHOULD lead with a concise
+configuration summary; `configured` means active values and an installed
+integration, not verified protection.
 
 **DIA-003** Doctor MUST additionally inspect config permissions, source errors,
 duplicate aliases, current project collisions, integration ownership, disabled

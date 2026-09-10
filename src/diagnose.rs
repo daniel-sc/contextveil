@@ -84,6 +84,7 @@ pub fn status(
     };
 
     let _ = writeln!(out, "ContextVeil status");
+    snapshot.render_summary(out);
     snapshot.render_registry(out);
     snapshot.render_integrations(out);
     let _ = writeln!(
@@ -343,6 +344,26 @@ impl Snapshot {
             "  unresolved      {}",
             count(self.unresolved(), "source", "sources")
         );
+    }
+
+    fn render_summary(&self, out: &mut dyn Write) {
+        let malformed = matches!(self.global, Load::Invalid(_))
+            || matches!(self.project, Load::Invalid(_))
+            || self
+                .resolutions
+                .iter()
+                .any(|(_, resolution)| matches!(resolution, Resolution::Malfunction { .. }));
+        let state = if malformed {
+            "needs attention"
+        } else if !self.redactor.is_empty()
+            && self.integrations.iter().any(Inspection::is_installed)
+        {
+            "configured"
+        } else {
+            "inactive"
+        };
+
+        let _ = writeln!(out, "\nConfiguration: {state}");
     }
 
     /// The integration facet, kept independent of registry health (`DIA-002`).

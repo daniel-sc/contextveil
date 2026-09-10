@@ -29,6 +29,8 @@ fn help_exits_zero_and_documents_the_public_commands() {
     for command in ["setup", "status", "doctor"] {
         assert!(text.contains(command), "help omits `{command}`");
     }
+    assert!(text.contains("QUICK START:"));
+    assert!(text.contains("restart your coding agent"));
     assert!(stderr(&output).is_empty());
 }
 

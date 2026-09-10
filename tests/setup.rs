@@ -260,7 +260,7 @@ fn rule_count_does_not_change_candidate_order() {
     assert_eq!(transcript.matches("credential-bearing URL").count(), 1);
     assert_eq!(transcript.matches("secret-like source name").count(), 2);
     assert!(
-        transcript.contains("rules: secret-like source name, credential-bearing URL"),
+        transcript.contains("suggested because: secret-like source name, credential-bearing URL",),
         "{transcript}"
     );
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
@@ -344,7 +344,7 @@ fn setup_shows_a_masked_preview_and_rules_without_shape_details() {
     let (_, transcript) = fixture.run(ACCEPT_ALL, &environment);
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
     assert!(transcript.contains("(40 characters)"));
-    assert!(transcript.contains("rules: secret-like source name"));
+    assert!(transcript.contains("suggested because: secret-like source name"));
     for removed in [
         "long value",
         "mixed character classes",
@@ -929,7 +929,7 @@ fn a_manual_collision_warns_without_reversing_selection() {
     fixture.write("notes.txt", "common\n");
     let environment = fixture.environment(&[("MANUAL_VALUE", "common")]);
 
-    let (exit, transcript) = fixture.run("e\nMANUAL_VALUE\n\n\n\n", &environment);
+    let (exit, transcript) = fixture.run("m\nb\nm\ne\nMANUAL_VALUE\n\n\n\n", &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("collision:"), "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
@@ -1531,7 +1531,7 @@ fn existing_unresolved_automatic_sources_keep_their_rule_attribution() {
     let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[("API_TOKEN", "")]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(
-        transcript.contains("rules: secret-like source name"),
+        transcript.contains("suggested because: secret-like source name"),
         "{transcript}"
     );
 }
@@ -1710,6 +1710,8 @@ fn the_claude_hook_is_installed_and_verified_offline() {
     assert!(transcript.contains("detected"));
     assert!(transcript.contains("Installed the Claude Code integration"));
     assert!(transcript.contains("Offline protocol check passed"));
+    assert!(transcript.contains("After installing an integration, restart your coding agent"));
+    assert!(transcript.contains("contextveil doctor"));
 
     let settings: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(fixture.claude_settings()).expect("settings"),
@@ -1733,8 +1735,12 @@ fn the_claude_hook_is_installed_and_verified_offline() {
 #[test]
 fn all_integrations_pass_offline_verification() {
     let fixture = Fixture::new();
+    detect_claude(&fixture);
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    std::fs::create_dir_all(fixture.home().join(".copilot")).expect("copilot directory");
+    std::fs::create_dir_all(fixture.home().join(".config/opencode")).expect("opencode directory");
 
-    let (exit, transcript) = fixture.run("\n\n1 2 3 4\n\n", &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run("\n\n2 3 4\n\n", &fixture.environment(&[]));
 
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert_eq!(
@@ -1761,11 +1767,12 @@ fn all_integrations_pass_offline_verification() {
 #[cfg(unix)]
 fn verification_failure_removes_new_artifacts() {
     let fixture = Fixture::new();
+    detect_claude(&fixture);
     let executable = fixture.executable_failing("claude");
     let state = fixture.global_config().with_file_name("integrations.toml");
 
     let (exit, transcript) = fixture.run_with_executable(
-        "\n\n1\n\n",
+        "\n\n\n\n",
         &fixture.environment(&[]),
         &fixture.project(),
         &executable,
@@ -1847,10 +1854,14 @@ fn verification_failure_restores_previous_state_byte_for_byte() {
 #[cfg(unix)]
 fn later_failure_keeps_completed_earlier_actions() {
     let fixture = Fixture::new();
+    detect_claude(&fixture);
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    std::fs::create_dir_all(fixture.home().join(".copilot")).expect("copilot directory");
+    std::fs::create_dir_all(fixture.home().join(".config/opencode")).expect("opencode directory");
     let executable = fixture.executable_failing("codex");
 
     let (exit, transcript) = fixture.run_with_executable(
-        "\n\n1 2 3 4\n\n",
+        "\n\n2 3 4\n\n",
         &fixture.environment(&[]),
         &fixture.project(),
         &executable,
@@ -1969,15 +1980,16 @@ fn a_competing_mutating_hook_is_offered_for_approval() {
 }
 
 #[test]
-fn an_undetected_harness_discloses_limited_verification() {
+fn an_undetected_harness_is_not_offered() {
     let fixture = Fixture::new();
     // No `~/.claude` directory and no executable on PATH.
     let (exit, transcript) =
         fixture.run("\n\n1\n\n", &fixture.environment(&[("PATH", "/nowhere")]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(transcript.contains("not detected"));
-    assert!(transcript.contains("cannot \nconfirm") || transcript.contains("cannot confirm"));
-    assert!(fixture.claude_settings().exists());
+    assert!(transcript.contains("No supported coding-agent installation was detected"));
+    assert!(transcript.contains("Install or initialize your coding agent in this environment"));
+    assert!(!transcript.contains("cannot confirm"));
+    assert!(!fixture.claude_settings().exists());
 }
 
 #[test]
@@ -2050,9 +2062,9 @@ fn copilot_installs_one_dedicated_file_and_leaves_others_alone() {
         r#"{"version": 1, "hooks": {"postToolUse": [{"type": "command", "bash": "/other/tool"}]}}"#;
     std::fs::write(&other, other_contents).expect("write other hook file");
 
-    // Copilot is row 3 and is never selected by default; the conflict in the
+    // Copilot is row 2 and is never selected by default; the conflict in the
     // other file needs review once it is selected.
-    let (exit, transcript) = fixture.run("\n\n3\n\nn\n", &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run("\n\n2\n\nn\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("GitHub Copilot CLI (EXPERIMENTAL)"));
     assert!(transcript.contains("Installed the GitHub Copilot CLI integration"));
@@ -2075,7 +2087,7 @@ fn copilot_installs_one_dedicated_file_and_leaves_others_alone() {
     );
 
     // Deselecting removes only the managed file.
-    let (exit, transcript) = fixture.run("\n\n3\n\n", &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run("\n\n2\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(!hooks.join("contextveil.json").exists());
     assert!(other.exists());
@@ -2096,8 +2108,8 @@ fn opencode_installs_one_owned_plugin_file() {
     let other = plugins.join("other.ts");
     std::fs::write(&other, "export const Other = async () => ({})\n").expect("write other plugin");
 
-    // OpenCode is row 4; its existing sibling plugin needs review once selected.
-    let (exit, transcript) = fixture.run("\n\n4\n\nn\n", &fixture.environment(&[]));
+    // OpenCode is row 2; its existing sibling plugin needs review once selected.
+    let (exit, transcript) = fixture.run("\n\n2\n\nn\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("OpenCode (EXPERIMENTAL)"));
     assert!(transcript.contains("Installed the OpenCode integration"));
@@ -2109,7 +2121,7 @@ fn opencode_installs_one_owned_plugin_file() {
     assert!(plugin.contains("tool.execute.after"));
     assert!(!plugin.contains("__CONTEXTVEIL_BINARY__"));
 
-    let (exit, transcript) = fixture.run("\n\n4\n\n", &fixture.environment(&[]));
+    let (exit, transcript) = fixture.run("\n\n2\n\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(!plugins.join("contextveil.ts").exists());
     assert!(other.exists(), "unrelated plugins are never removed");
@@ -2122,6 +2134,32 @@ fn skipping_the_integration_phase_changes_nothing() {
     let (exit, transcript) = fixture.run("\n\ns\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(!fixture.claude_settings().exists());
+    let handoff = transcript.split("Next:").nth(1).expect("next steps");
+    assert!(handoff.contains("If you have not installed an integration"));
+
+    assert_eq!(
+        fixture.run(ACCEPT_ALL, &fixture.environment(&[])).0,
+        Exit::Ok
+    );
+    let settings = std::fs::read(fixture.claude_settings()).expect("installed settings");
+    let (exit, transcript) = fixture.run("\n\n1\ns\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        std::fs::read(fixture.claude_settings()).expect("settings"),
+        settings
+    );
+    assert_eq!(transcript.split("Next:").nth(1), Some(handoff));
+}
+
+#[test]
+fn an_unselected_detected_agent_gets_selection_guidance() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!fixture.home().join(".codex/hooks.json").exists());
+    assert!(transcript.contains("rerun setup and select your coding agent"));
+    assert!(!transcript.contains("Install or start"));
 }
 
 #[test]

@@ -107,6 +107,7 @@ fn a_healthy_machine_exits_zero_for_both_commands() {
 
     let status = machine.run("status", &[("GITHUB_TOKEN", canary.value())]);
     assert_eq!(status.status.code(), Some(0));
+    assert!(text(&status).contains("Configuration: configured"));
     assert_canary_absent("status stdout", &status.stdout, &canary);
 
     let doctor = machine.run("doctor", &[("GITHUB_TOKEN", canary.value())]);
@@ -138,6 +139,7 @@ fn a_fully_inactive_registry_is_a_health_failure() {
 
     let status = machine.run("status", &[]);
     assert_eq!(status.status.code(), Some(0));
+    assert!(text(&status).contains("Configuration: inactive"));
     assert!(text(&status).contains("INACTIVE"));
 
     let doctor = machine.run("doctor", &[]);

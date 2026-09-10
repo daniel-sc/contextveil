@@ -5,6 +5,11 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+### Changed
+
+- Simplified first-run setup and status output, added explicit post-setup
+  guidance, and limited new integration choices to detected harnesses.
+
 ## [1.0.0-alpha.5] - 2026-09-08
 
 ### Changed

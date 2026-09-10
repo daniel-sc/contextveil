@@ -51,6 +51,13 @@ impl Scope {
             Scope::Project => "Project sources (this project)",
         }
     }
+
+    fn explanation(self) -> &'static str {
+        match self {
+            Scope::Global => "  Shared across projects on this machine.",
+            Scope::Project => "  Used only when working in this project.",
+        }
+    }
 }
 
 /// Runs the complete setup workflow.
@@ -175,17 +182,15 @@ pub fn run(
         &global_path,
         executable,
     ) {
-        Ok(()) => {}
-        Err(exit) => return exit,
+        Ok(()) => verification_phase(
+            terminal,
+            environment,
+            &project_root,
+            &global_sources,
+            &project_sources,
+        ),
+        Err(exit) => exit,
     }
-
-    verification_phase(
-        terminal,
-        environment,
-        &project_root,
-        &global_sources,
-        &project_sources,
-    )
 }
 
 /// Loads one configuration file before any phase runs.
@@ -242,6 +247,7 @@ fn enrollment_phase(
 
     loop {
         terminal.line(scope.title());
+        terminal.line(scope.explanation());
         terminal.line(&format!("  file: {}", sanitize::path(context.config_path)));
         for notice in &notices {
             terminal.line(&format!(
@@ -321,6 +327,10 @@ fn enrollment_phase(
                     refresh_items_and_collisions(scope, &mut items, &mut context);
                 }
             }
+            "m" => match manual_sources(terminal, scope, &mut items, &mut context) {
+                Ok(()) => {}
+                Err(Cancelled) => return cancelled(terminal),
+            },
             "e" | "k" | "w" | "j" | "p" | "r" => {
                 match add_manual(terminal, answer.trim(), scope, &mut items, &mut context) {
                     Ok(()) => {}
@@ -332,6 +342,33 @@ fn enrollment_phase(
                     refresh_items_and_collisions(scope, &mut items, &mut context);
                 }
             }
+        }
+    }
+}
+
+/// Keeps the main enrollment menu small while preserving every manual source
+/// family behind one discoverable entry.
+fn manual_sources(
+    terminal: &mut Terminal<'_>,
+    scope: Scope,
+    items: &mut Vec<Item>,
+    context: &mut EnrollmentContext<'_>,
+) -> Result<(), Cancelled> {
+    loop {
+        for line in render::manual_actions().lines() {
+            terminal.line(line);
+        }
+        let answer = terminal.ask("manual>")?;
+        match answer.trim() {
+            "b" | "" => return Ok(()),
+            "e" | "k" | "w" | "j" | "p" | "r" => {
+                add_manual(terminal, answer.trim(), scope, items, context)?;
+                return Ok(());
+            }
+            other => terminal.line(&format!(
+                "  Not a manual source choice: {}.",
+                sanitize::text(other)
+            )),
         }
     }
 }
@@ -1088,6 +1125,14 @@ fn verification_phase(
                 terminal.line("  INACTIVE: no source resolves to a value right now.");
             }
             terminal.line("Setup complete.");
+            terminal.blank();
+            terminal.line("Next:");
+            terminal.line(
+                "  If you have not installed an integration, rerun setup and select your coding agent.",
+            );
+            terminal.line(
+                "  After installing an integration, restart your coding agent, then run `contextveil doctor`.",
+            );
             Exit::Ok
         }
         crate::registry::Outcome::Malfunction(malfunction) => {

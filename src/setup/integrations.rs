@@ -1,11 +1,11 @@
 //! Integration selection and removal: phase three of setup (`SET-001`).
 //!
-//! `INT-001`: every supported harness is detected, Claude is selected by default
-//! when detected, and experimental integrations stay unselected unless
-//! ContextVeil already installed them. `INT-002`: an undetected harness may still
-//! be installed, with disclosure. `SUP-003`: experimental integrations are
-//! labeled and require an affirmative choice. `SET-014`: each integration action
-//! is a separate transaction that restores its prior managed state on failure.
+//! `INT-001`: every supported harness is detected, setup presents detected or
+//! already-managed harnesses only, Claude is selected by default when detected,
+//! and experimental integrations stay unselected unless ContextVeil already
+//! installed them. `SUP-003`: experimental integrations are labeled and require
+//! affirmative installation. `SET-014`: each integration action is its own
+//! transaction that restores its prior managed state on failure.
 //!
 //! Dispatch is a plain match over a small enum, not a plugin framework
 //! (`docs/architecture.md`).
@@ -64,6 +64,9 @@ pub fn phase(
                         && inspection.detection == Detection::Detected),
                 inspection,
             }
+        })
+        .filter(|row| {
+            row.inspection.detection == Detection::Detected || row.inspection.is_installed()
         })
         .collect();
 
@@ -128,6 +131,14 @@ pub fn phase(
 /// Pure integration presentation used by setup and the broad rendering snapshot.
 pub(super) fn render_rows(rows: &[Row]) -> String {
     let mut lines = vec![String::new()];
+    if rows.is_empty() {
+        lines.push("  No supported coding-agent installation was detected.".to_string());
+        lines.push(
+            "  Install or initialize your coding agent in this environment, then rerun setup."
+                .to_string(),
+        );
+        return lines.join("\n");
+    }
     for (index, row) in rows.iter().enumerate() {
         let harness = row.inspection.harness;
         lines.push(format!(
@@ -273,13 +284,6 @@ fn apply(
             }
         },
         (true, _) => {
-            if !installed && row.inspection.detection == Detection::NotDetected {
-                // `INT-002`: disclose that verification is limited.
-                terminal.line(&format!(
-                    "  {label} was not detected. The integration will be installed, but \
-                     ContextVeil cannot confirm the host will load it."
-                ));
-            }
             let Some(executable) = executable else {
                 terminal.line(&format!(
                     "  {label} installation failed: {}.",
