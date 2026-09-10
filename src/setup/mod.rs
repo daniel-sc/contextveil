@@ -37,13 +37,6 @@ use enrollment::{Item, Member};
 use known_source::Rule;
 use ui::{Cancelled, Terminal};
 
-/// Integrations selected by the setup run, used for the final onboarding
-/// handoff.
-#[derive(Debug, Default)]
-pub(super) struct IntegrationSummary {
-    pub(super) selected: Vec<crate::integration::Harness>,
-}
-
 /// Which registry a phase edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scope {
@@ -189,13 +182,12 @@ pub fn run(
         &global_path,
         executable,
     ) {
-        Ok(summary) => verification_phase(
+        Ok(()) => verification_phase(
             terminal,
             environment,
             &project_root,
             &global_sources,
             &project_sources,
-            &summary,
         ),
         Err(exit) => exit,
     }
@@ -1110,7 +1102,6 @@ fn verification_phase(
     project_root: &Path,
     global_sources: &[SourceRef],
     project_sources: &[SourceRef],
-    integrations: &IntegrationSummary,
 ) -> Exit {
     terminal.line("Verification");
     match crate::registry::build(environment, Some(project_root)) {
@@ -1135,22 +1126,13 @@ fn verification_phase(
             }
             terminal.line("Setup complete.");
             terminal.blank();
-            if integrations.selected.is_empty() {
-                terminal.line(
-                    "Next: no coding-agent integration is selected. Install or start a supported coding agent, then run setup again.",
-                );
-            } else {
-                terminal.line("Next:");
-                terminal.line("  Restart your coding agent, then run `contextveil doctor`.");
-                if integrations
-                    .selected
-                    .contains(&crate::integration::Harness::Codex)
-                {
-                    terminal.line(
-                        "  If using Codex, trust the hook through `/hooks` before continuing.",
-                    );
-                }
-            }
+            terminal.line("Next:");
+            terminal.line(
+                "  If you have not installed an integration, rerun setup and select your coding agent.",
+            );
+            terminal.line(
+                "  After installing an integration, restart your coding agent, then run `contextveil doctor`.",
+            );
             Exit::Ok
         }
         crate::registry::Outcome::Malfunction(malfunction) => {

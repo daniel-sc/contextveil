@@ -347,13 +347,6 @@ impl Snapshot {
     }
 
     fn render_summary(&self, out: &mut dyn Write) {
-        let active = self.redactor.active_count();
-        let installed: Vec<_> = self
-            .integrations
-            .iter()
-            .filter(|inspection| inspection.is_installed())
-            .map(|inspection| inspection.harness.label())
-            .collect();
         let malformed = matches!(self.global, Load::Invalid(_))
             || matches!(self.project, Load::Invalid(_))
             || self
@@ -362,23 +355,15 @@ impl Snapshot {
                 .any(|(_, resolution)| matches!(resolution, Resolution::Malfunction { .. }));
         let state = if malformed {
             "needs attention"
-        } else if active > 0 && !installed.is_empty() {
+        } else if !self.redactor.is_empty()
+            && self.integrations.iter().any(Inspection::is_installed)
+        {
             "configured"
         } else {
             "inactive"
         };
 
         let _ = writeln!(out, "\nConfiguration: {state}");
-        if active == 0 {
-            let _ = writeln!(out, "  no active values");
-        } else {
-            let _ = writeln!(out, "  {active} active values");
-        }
-        if installed.is_empty() {
-            let _ = writeln!(out, "  no installed coding-agent integration");
-        } else {
-            let _ = writeln!(out, "  installed integration: {}", installed.join(", "));
-        }
     }
 
     /// The integration facet, kept independent of registry health (`DIA-002`).

@@ -14,7 +14,6 @@ use std::fs::Permissions;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::IntegrationSummary;
 use crate::cli::Exit;
 use crate::integration::hooks_json::Installed;
 use crate::integration::state::{Managed, State};
@@ -35,18 +34,18 @@ pub(super) struct Row {
 ///
 /// Returns `Err` when a requested action failed or the user cancelled, so setup
 /// returns nonzero (`CLI-004`).
-pub(super) fn phase(
+pub fn phase(
     terminal: &mut Terminal<'_>,
     environment: &Environment,
     home: Option<&Path>,
     global_config_path: &Path,
     executable: Option<&Path>,
-) -> Result<IntegrationSummary, Exit> {
+) -> Result<(), Exit> {
     let Some(home) = home else {
         terminal.line("Integrations");
         terminal.line("  skipped: the home directory is unknown.");
         terminal.blank();
-        return Ok(IntegrationSummary::default());
+        return Ok(());
     };
 
     let state_path = state::path(global_config_path);
@@ -88,7 +87,7 @@ pub(super) fn phase(
             "s" => {
                 terminal.line("  Skipped; integrations are unchanged.");
                 terminal.blank();
-                return Ok(summary(&rows));
+                return Ok(());
             }
             "q" => return cancelled(terminal),
             selection => toggle(terminal, &mut rows, selection),
@@ -126,17 +125,7 @@ pub(super) fn phase(
         ));
     }
     terminal.blank();
-    Ok(summary(&rows))
-}
-
-fn summary(rows: &[Row]) -> IntegrationSummary {
-    IntegrationSummary {
-        selected: rows
-            .iter()
-            .filter(|row| row.selected)
-            .map(|row| row.inspection.harness)
-            .collect(),
-    }
+    Ok(())
 }
 
 /// Pure integration presentation used by setup and the broad rendering snapshot.
@@ -144,6 +133,10 @@ pub(super) fn render_rows(rows: &[Row]) -> String {
     let mut lines = vec![String::new()];
     if rows.is_empty() {
         lines.push("  No supported coding-agent installation was detected.".to_string());
+        lines.push(
+            "  Install or initialize your coding agent in this environment, then rerun setup."
+                .to_string(),
+        );
         return lines.join("\n");
     }
     for (index, row) in rows.iter().enumerate() {
@@ -411,7 +404,7 @@ fn approve_conflicts(
     Ok(())
 }
 
-fn cancelled<T>(terminal: &mut Terminal<'_>) -> Result<T, Exit> {
+fn cancelled(terminal: &mut Terminal<'_>) -> Result<(), Exit> {
     terminal.line("Setup cancelled. Nothing further was changed.");
     Err(Exit::Failure)
 }

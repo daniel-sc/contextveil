@@ -98,7 +98,7 @@ impl Harness {
 pub enum Detection {
     /// An executable or configuration directory was found.
     Detected,
-    /// Nothing was found. Installation is still allowed, with disclosure.
+    /// No executable or known configuration directory was found.
     NotDetected,
 }
 

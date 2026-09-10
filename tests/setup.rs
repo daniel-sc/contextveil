@@ -908,7 +908,7 @@ fn a_manual_collision_warns_without_reversing_selection() {
     fixture.write("notes.txt", "common\n");
     let environment = fixture.environment(&[("MANUAL_VALUE", "common")]);
 
-    let (exit, transcript) = fixture.run("e\nMANUAL_VALUE\n\n\n\n", &environment);
+    let (exit, transcript) = fixture.run("m\nb\nm\ne\nMANUAL_VALUE\n\n\n\n", &environment);
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("collision:"), "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
@@ -1689,7 +1689,7 @@ fn the_claude_hook_is_installed_and_verified_offline() {
     assert!(transcript.contains("detected"));
     assert!(transcript.contains("Installed the Claude Code integration"));
     assert!(transcript.contains("Offline protocol check passed"));
-    assert!(transcript.contains("Restart your coding agent"));
+    assert!(transcript.contains("After installing an integration, restart your coding agent"));
     assert!(transcript.contains("contextveil doctor"));
 
     let settings: serde_json::Value = serde_json::from_str(
@@ -1966,6 +1966,7 @@ fn an_undetected_harness_is_not_offered() {
         fixture.run("\n\n1\n\n", &fixture.environment(&[("PATH", "/nowhere")]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(transcript.contains("No supported coding-agent installation was detected"));
+    assert!(transcript.contains("Install or initialize your coding agent in this environment"));
     assert!(!transcript.contains("cannot confirm"));
     assert!(!fixture.claude_settings().exists());
 }
@@ -2112,6 +2113,32 @@ fn skipping_the_integration_phase_changes_nothing() {
     let (exit, transcript) = fixture.run("\n\ns\n", &fixture.environment(&[]));
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert!(!fixture.claude_settings().exists());
+    let handoff = transcript.split("Next:").nth(1).expect("next steps");
+    assert!(handoff.contains("If you have not installed an integration"));
+
+    assert_eq!(
+        fixture.run(ACCEPT_ALL, &fixture.environment(&[])).0,
+        Exit::Ok
+    );
+    let settings = std::fs::read(fixture.claude_settings()).expect("installed settings");
+    let (exit, transcript) = fixture.run("\n\n1\ns\n", &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(
+        std::fs::read(fixture.claude_settings()).expect("settings"),
+        settings
+    );
+    assert_eq!(transcript.split("Next:").nth(1), Some(handoff));
+}
+
+#[test]
+fn an_unselected_detected_agent_gets_selection_guidance() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.home().join(".codex")).expect("codex directory");
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert!(!fixture.home().join(".codex/hooks.json").exists());
+    assert!(transcript.contains("rerun setup and select your coding agent"));
+    assert!(!transcript.contains("Install or start"));
 }
 
 #[test]
