@@ -39,7 +39,7 @@ async function redact(
   let process: ReturnType<typeof Bun.spawn>;
   try {
     process = Bun.spawn([CONTEXTVEIL_BINARY, "hook", "opencode"], {
-      stdin: new Blob([request]),
+      stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
       // `SRC-001`: environment sources resolve from the environment this
@@ -61,6 +61,8 @@ async function redact(
   let stdout: string;
   let exitCode: number;
   try {
+    process.stdin.write(request);
+    process.stdin.end();
     [stdout, exitCode] = await Promise.race([
       Promise.all([new Response(process.stdout).text(), process.exited]),
       timeout,

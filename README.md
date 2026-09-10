@@ -7,36 +7,30 @@ ContextVeil locally replaces the secret values you’ve chosen before supported 
 GITHUB_TOKEN=ghp_secret_example  ->  GITHUB_TOKEN=<SECRET:GITHUB_TOKEN>
 ```
 
-## One-minute quick start
+**The command still runs. The file still gets read.**
+Only enrolled exact values are replaced; the rest of the output stays intact.
 
-While ContextVeil is in pre-release, install the published alpha:
+## Quick Start
+
+Install the current alpha:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v1.0.0-alpha.5/install.sh |
   bash -s -- --version 1.0.0-alpha.5
 ```
 
-Then run this from the project where you use your coding agent:
+From your project directory, run:
 
 ```bash
-contextveil setup
+~/.local/bin/contextveil setup
 ```
 
-Review the suggested sources, restart your coding agent, and verify the result:
+Review the suggested sources and select your coding-agent integration. Restart
+the agent, then run `~/.local/bin/contextveil doctor`. For Codex, first trust the
+hook on the **Hooks need review** screen or through `/hooks`.
 
-```bash
-contextveil doctor
-```
-
-If `contextveil` is not on `PATH` yet, use `~/.local/bin/contextveil` for these
-commands. Setup is interactive and safe to rerun.
-
-**The command still runs. The file still gets read.**
-Only enrolled exact values are replaced; the rest of the output stays intact.
-
-1. **A guided setup helps you choose what to protect.**
-2. **Runtime matching is exact and deterministic.**
-3. **Keep working. No magic.**
+Setup requires a terminal and is safe to rerun. Add `~/.local/bin` to your `PATH`
+to use the shorter `contextveil` command.
 
 ## Why Use It?
 
@@ -149,26 +143,7 @@ Environment variables, dotenv files, JSON (including JSON5) files, exact Java pr
 
 ## Setup details
 
-### 1. Install
-
-While ContextVeil is in pre-release, install the published alpha explicitly:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/v1.0.0-alpha.5/install.sh |
-  bash -s -- --version 1.0.0-alpha.5
-```
-
-After stable V1 is published, the shorter command will install the latest stable
-release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/daniel-sc/contextveil/main/install.sh | bash
-```
-
-The binary is installed to `~/.local/bin/contextveil` by default. Make sure that
-directory is on your `PATH`.
-
-#### Install With Your Coding Agent
+### Install With Your Coding Agent
 
 Your agent may install ContextVeil, but source selection stays with you. Ask it to:
 
@@ -184,15 +159,9 @@ Your agent may install ContextVeil, but source selection stays with you. Ask it 
 Installation alone is not proof of protection. Report every `warn` or `fail` line
 from `doctor`.
 
-### 2. Set Up A Project
+### What Setup Does
 
-Run this from the project where you use your coding agent:
-
-```bash
-contextveil setup
-```
-
-Setup is interactive and safe to rerun. It walks through:
+Setup walks through:
 
 1. secrets you use across projects;
 2. secrets from the current project;
@@ -203,13 +172,8 @@ Complete secret values are never displayed. Suggestions are only suggestions;
 you make the final choices. Rerun setup after changing a Known Source path
 override or when known host locations or fields change.
 
-### 3. Check It
-
-```bash
-contextveil status
-```
-
-Then work normally. ContextVeil stays quiet unless it replaces something - then it notifies you via the agent harness.
+Use `contextveil status` to inspect your configuration. During normal use,
+ContextVeil stays quiet unless it replaces something or encounters a problem.
 
 ## What It Is Good At
 
