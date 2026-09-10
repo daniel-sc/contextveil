@@ -28,9 +28,10 @@ human judges the result. The artifacts below are quoted from the host's own
 session transcript so a second reviewer can check the claim instead of taking
 this file's word for it, and the procedure is written to be repeated.
 
-**A human release manager must repeat or confirm this run before the release
-ships.** Until that happens, treat this record as a reproducible test report
-rather than as the signed-off gate.
+**Release sign-off (2026-09-10):** The release manager reviewed this evidence
+and confirmed it as the `REL-008` qualification for v1.0.0. The confirmation
+covers the documented host version and tested scope; it does not expand the
+coverage claims recorded below.
 
 ### Isolation
 
