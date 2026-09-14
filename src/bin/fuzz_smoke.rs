@@ -6,8 +6,9 @@
 //! `fuzz/regressions/<target>/` so it can be committed as a permanent seed.
 //!
 //! Determinism is deliberate: the same command reproduces the same inputs, so a
-//! failure is investigable and CI never depends on luck. Raise `CONTEXTVEIL_FUZZ_
-//! ITERATIONS` or `CONTEXTVEIL_FUZZ_SECONDS` for a longer run.
+//! failure is investigable and CI never depends on luck. Set
+//! `CONTEXTVEIL_FUZZ_SEED` to vary or reproduce a smoke run. Raise
+//! `CONTEXTVEIL_FUZZ_ITERATIONS` or `CONTEXTVEIL_FUZZ_SECONDS` for a longer run.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -126,6 +127,13 @@ fn main() {
     };
     let iterations: usize = read_budget("CONTEXTVEIL_FUZZ_ITERATIONS", 4000);
     let seconds = read_budget("CONTEXTVEIL_FUZZ_SECONDS", 30) as u64;
+    let fuzz_seed = match read_seed() {
+        Ok(seed) => seed,
+        Err(()) => {
+            eprintln!("fuzz-smoke: CONTEXTVEIL_FUZZ_SEED must be an unsigned integer");
+            std::process::exit(2);
+        }
+    };
     let deadline = Instant::now() + Duration::from_secs(seconds);
     let regressions = PathBuf::from("fuzz/regressions");
 
@@ -133,6 +141,7 @@ fn main() {
     println!("  targets     {}", fuzz::TARGETS.len());
     if mode == Mode::Smoke {
         println!("  iterations  {iterations} per target (budget {seconds}s)");
+        println!("  seed        {fuzz_seed}");
     }
     if fuzz::context().is_none() {
         eprintln!("fuzz-smoke: a temporary configuration could not be created");
@@ -159,7 +168,7 @@ fn main() {
             continue;
         }
 
-        let mut rng = Rng::new(seed_for(name));
+        let mut rng = Rng::new(seed_for(name, fuzz_seed));
         for iteration in 0..iterations {
             if Instant::now() >= deadline {
                 println!("  {name}: stopped at iteration {iteration} (time budget)");
@@ -208,6 +217,14 @@ fn read_budget(name: &str, default: usize) -> usize {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(default)
+}
+
+fn read_seed() -> Result<u64, ()> {
+    match std::env::var("CONTEXTVEIL_FUZZ_SEED") {
+        Ok(value) => value.parse().map_err(|_| ()),
+        Err(std::env::VarError::NotPresent) => Ok(0),
+        Err(std::env::VarError::NotUnicode(_)) => Err(()),
+    }
 }
 
 /// Runs one target, catching a panic so the harness can report and continue.
@@ -261,8 +278,10 @@ fn fingerprint(input: &[u8]) -> u64 {
     hash
 }
 
-fn seed_for(target: &str) -> u64 {
-    fingerprint(target.as_bytes()) | 1
+fn seed_for(target: &str, fuzz_seed: u64) -> u64 {
+    (fingerprint(target.as_bytes()) | 1)
+        .wrapping_add(fuzz_seed)
+        .max(1)
 }
 
 /// Builds one input by mutating a seed, or by generating random bytes.
@@ -323,5 +342,32 @@ impl Rng {
             return 0;
         }
         (self.next() % limit as u64) as usize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Rng, SEEDS, fingerprint, mutate, seed_for};
+
+    fn generated_sequence(fuzz_seed: u64) -> Vec<Vec<u8>> {
+        let seeds = SEEDS[0].1;
+        let mut rng = Rng::new(seed_for(SEEDS[0].0, fuzz_seed));
+        (0..4).map(|_| mutate(&mut rng, seeds)).collect()
+    }
+
+    #[test]
+    fn generated_sequence_is_reproducible_and_seeded() {
+        let zero = generated_sequence(0);
+        assert_eq!(zero, generated_sequence(0));
+        assert_ne!(zero, generated_sequence(1));
+        for seed in [0, 1, 42, u64::MAX] {
+            assert_ne!(seed_for("dotenv", seed), 0);
+        }
+        assert_eq!(seed_for("dotenv", 0), fingerprint(b"dotenv") | 1);
+        assert_eq!(
+            seed_for("dotenv", 0u64.wrapping_sub(fingerprint(b"dotenv") | 1)),
+            1
+        );
+        assert!(zero.iter().any(|input| !input.is_empty()));
     }
 }

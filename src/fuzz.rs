@@ -5,13 +5,16 @@
 //! (`mise run fuzz-smoke`) and any external fuzzer can drive the same code.
 //!
 //! The adapter targets run against a temporary configuration that enrolls one
-//! generated non-credential value, so every target also asserts that value never
-//! appears in any output (`TST-005`).
+//! generated non-credential value. Alongside raw protocol inputs they exercise
+//! valid envelopes carrying that value and mutated text, asserting intervention
+//! and no disclosure (`TST-005`).
 //!
 //! This module is compiled only for tests or behind the `testing` feature.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+use serde_json::{Value, json};
 
 use crate::adapter::{claude, codex, copilot, opencode};
 use crate::matcher::Redactor;
@@ -63,6 +66,28 @@ impl Context {
             !text.contains(&self.canary),
             "the enrolled value was disclosed in {channel}"
         );
+    }
+
+    fn covered_text(&self, text: &str) -> String {
+        format!("{text}\n{}\n{text}", self.canary)
+    }
+
+    fn assert_intervention(&self, stdout: Option<&str>, pointer: &str) -> Value {
+        let stdout = stdout.expect("no intervention response");
+        self.assert_no_disclosure("adapter response", stdout);
+        // Copilot emits progress records before its final mutation object.
+        let response: Value = serde_json::from_str(stdout.lines().last().expect("response"))
+            .expect("valid intervention JSON");
+        let replaced = response
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .expect("model-facing replacement");
+        self.assert_no_disclosure("model-facing replacement", replaced);
+        assert!(
+            replaced.contains("<SECRET:CONTEXTVEIL_FUZZ>"),
+            "no placeholder"
+        );
+        response
     }
 }
 
@@ -257,10 +282,17 @@ pub fn claude_hook(data: &[u8]) {
     if let Some(stdout) = &response.stdout {
         context.assert_no_disclosure("claude stdout", stdout);
         assert!(
-            serde_json::from_str::<serde_json::Value>(stdout).is_ok(),
+            serde_json::from_str::<Value>(stdout).is_ok(),
             "the adapter emitted invalid protocol output"
         );
     }
+    let payload =
+        json!({"hook_event_name":"PostToolUse","tool_response":context.covered_text(text)});
+    let response = claude::handle(&payload.to_string(), &context.environment);
+    context.assert_intervention(
+        response.stdout.as_deref(),
+        "/hookSpecificOutput/updatedToolOutput",
+    );
 }
 
 /// Codex `PostToolUse` envelopes (`RUN-006`).
@@ -274,8 +306,16 @@ pub fn codex_hook(data: &[u8]) {
     let response = codex::handle(text, &context.environment);
     if let Some(stdout) = &response.stdout {
         context.assert_no_disclosure("codex stdout", stdout);
-        assert!(serde_json::from_str::<serde_json::Value>(stdout).is_ok());
+        assert!(serde_json::from_str::<Value>(stdout).is_ok());
     }
+    let payload =
+        json!({"hook_event_name":"PostToolUse","tool_response":context.covered_text(text)});
+    let response = codex::handle(&payload.to_string(), &context.environment);
+    let output = context.assert_intervention(response.stdout.as_deref(), "/reason");
+    assert!(
+        output["decision"] == "block",
+        "original result was not blocked"
+    );
 }
 
 /// Copilot payloads for both covered events (`RUN-006`).
@@ -294,12 +334,28 @@ pub fn copilot_hook(data: &[u8]) {
         if let Some(stdout) = &response.stdout {
             context.assert_no_disclosure("copilot stdout", stdout);
             for line in stdout.lines() {
-                assert!(serde_json::from_str::<serde_json::Value>(line).is_ok());
+                assert!(serde_json::from_str::<Value>(line).is_ok());
             }
         }
         if let Some(stderr) = &response.stderr {
             context.assert_no_disclosure("copilot stderr", stderr);
         }
+        let covered = context.covered_text(text);
+        let (payload, pointer) = match event {
+            copilot::Event::TransformedPrompt => (
+                json!({"transformedPrompt":covered}),
+                "/modifiedTransformedPrompt",
+            ),
+            copilot::Event::PostToolUse => (
+                json!({"toolResult":{"resultType":"success","textResultForLlm":covered}}),
+                "/modifiedResult/textResultForLlm",
+            ),
+        };
+        let response = copilot::handle(event, &payload.to_string(), &context.environment);
+        if let Some(stderr) = &response.stderr {
+            context.assert_no_disclosure("copilot stderr", stderr);
+        }
+        context.assert_intervention(response.stdout.as_deref(), pointer);
     }
 }
 
@@ -314,7 +370,13 @@ pub fn opencode_hook(data: &[u8]) {
     let response = opencode::handle(text, &context.environment);
     let json = response.to_json();
     context.assert_no_disclosure("opencode response", &json);
-    assert!(serde_json::from_str::<serde_json::Value>(&json).is_ok());
+    assert!(serde_json::from_str::<Value>(&json).is_ok());
+    for event in ["chat.message", "tool.execute.after"] {
+        let payload = json!({"version":1,"event":event,"texts":[context.covered_text(text)]});
+        let response = opencode::handle(&payload.to_string(), &context.environment).to_json();
+        let output = context.assert_intervention(Some(&response), "/texts/0");
+        assert!(output["changed"] == true, "intervention was not reported");
+    }
 }
 
 #[cfg(test)]

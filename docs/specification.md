@@ -1082,7 +1082,11 @@ than repeat adapter conformance.
 untrusted JSON5 source, strict adapter protocol JSON, TOML, dotenv, and npmrc
 inputs.
 Committed corpora MUST replay routinely with mutation disabled. Bounded mutation
-MUST run separately through mise.
+MUST run separately through mise. Mutation runs MUST report a configurable seed
+that reproduces the generated input sequence; scheduled runs MUST vary that seed.
+Adapter fuzz targets MUST retain malformed-envelope coverage and also exercise
+valid covered payloads containing an enrolled canary and mutated text, asserting
+intervention and canary absence from the replacement and emitted output.
 
 **TST-007** Routine CI MUST run formatting, linting with warnings denied, tests,
 and builds through mise on supported targets. Release checks MUST consume the
