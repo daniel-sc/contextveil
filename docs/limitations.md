@@ -440,9 +440,10 @@ persistence-and-runtime interaction.
 ### LIM-025: Properties Parsing Follows A Permissive Windows-1252 Library
 
 **Reality:** Properties sources use `java-properties` 2.0.0 default Windows-1252
-decoding and its permissive escape behavior. They do not require UTF-8, and the
-library does not combine UTF-16 surrogate escape pairs into supplementary
-Unicode scalars.
+decoding, including UTF-8/UTF-16 BOM detection, and its permissive escape behavior.
+Malformed encoded sequences become replacement characters. They do not require
+UTF-8, and the library does not combine UTF-16 surrogate escape pairs into
+supplementary Unicode scalars.
 
 **Impact:** A properties file may decode differently from a framework configured
 for UTF-8, and some malformed-looking escapes are accepted as the library would
@@ -453,8 +454,10 @@ escapes supported by the parser; expose a credential through another source type
 when application decoding differs.
 
 **Verification:** Parser fixtures pin Windows-1252, continuation, escape,
-duplicate, transactional-error, and hostile-input behavior. Runtime never uses
-entries from a parse that reports an error.
+duplicate, transactional-error, and hostile-input behavior. BOM-only and
+unterminated UTF-16 inputs cover the library's finished-decoder panic; the wrapper
+decodes before adding a final newline to avoid it. Runtime never uses entries
+from a parse that reports an error.
 
 ### LIM-026: npmrc Environment Expressions Stay Literal
 

@@ -253,6 +253,32 @@ fn a_complete_setup_run_writes_no_value_anywhere() {
 }
 
 #[test]
+fn utf16_properties_without_a_final_newline_reach_the_redaction_boundary() {
+    let machine = Machine::new();
+    std::fs::write(machine.project().join(".contextveil.toml"),
+        "version = 1\n\n[[secret]]\nsource = \"properties\"\nfile = \"application.properties\"\nkey = \"service.password\"\n",
+    ).expect("project config");
+    std::fs::write(
+        machine.home().join(".config/contextveil/config.toml"),
+        "version = 1\n",
+    )
+    .expect("global config");
+    let source = format!("\u{feff}service.password={}", machine.canary.value());
+    let bytes: Vec<_> = source.encode_utf16().flat_map(u16::to_be_bytes).collect();
+    std::fs::write(machine.project().join("application.properties"), bytes).expect("properties");
+    let payload = json!({"hook_event_name":"PostToolUse","cwd":machine.project(),"tool_response":machine.canary.value()})
+        .to_string();
+    let output = machine.run_with_payload(&["hook", "claude"], &payload);
+    machine.assert_clean("UTF-16 properties", &output);
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("hook response");
+    assert_eq!(
+        response["hookSpecificOutput"]["updatedToolOutput"],
+        "<SECRET:service.password>"
+    );
+}
+
+#[test]
 fn runtime_writes_no_log_or_telemetry_file() {
     let machine = Machine::new();
     let value = machine.canary.value().to_string();

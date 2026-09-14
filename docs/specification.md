@@ -345,8 +345,11 @@ unless their own requirements separately specify another grammar.
 
 **SRC-017** A properties resolver MUST parse Java-style logical key/value entries
 with the `java-properties` 2.0.0 default Windows-1252 behavior, including its
-separators, continuation lines, escapes, and `\\uXXXX` handling. Decoded keys are
-case-sensitive and the last occurrence wins; setup and doctor SHOULD warn about
+separators, continuation lines, escapes, and `\\uXXXX` handling. Files are
+decoded with BOM detection (UTF-8 or UTF-16 overrides Windows-1252) and malformed
+encoded sequences use the decoder's replacement character. End-of-file MUST NOT
+panic, including BOM-only files. Decoded keys are case-sensitive and the last
+occurrence wins; setup and doctor SHOULD warn about
 duplicates without values. The resolver MUST select one exact decoded key and
 MUST NOT interpolate, merge profiles, execute commands, or extract components
 from values. An absent file, absent key, or value empty after `SRC-016` is

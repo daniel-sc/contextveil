@@ -22,6 +22,7 @@ name = "contextveil"
 version = "1.0.0"
 dependencies = [
  "aho-corasick",
+ "encoding_rs",
  "java-properties",
  "json5",
  "serde",

@@ -61,6 +61,8 @@ strip = "symbols"
 
 [dependencies]
 aho-corasick = "1.1.4"
+# Reuse java-properties' decoder before adding the EOF-panic workaround.
+encoding_rs = "0.8.35"
 java-properties = "2.0.0"
 json5 = "1.3.1"
 serde = { version = "1.0.229", features = ["derive"] }
