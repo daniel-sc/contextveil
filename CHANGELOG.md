@@ -5,6 +5,11 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed crashes when reading certain UTF-16 properties files that could interrupt
+  setup, diagnostics, or runtime redaction. (#36)
+
 ## [1.0.0] - 2026-09-10
 
 ### Added
