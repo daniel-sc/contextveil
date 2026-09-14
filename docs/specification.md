@@ -345,8 +345,11 @@ unless their own requirements separately specify another grammar.
 
 **SRC-017** A properties resolver MUST parse Java-style logical key/value entries
 with the `java-properties` 2.0.0 default Windows-1252 behavior, including its
-separators, continuation lines, escapes, and `\\uXXXX` handling. Decoded keys are
-case-sensitive and the last occurrence wins; setup and doctor SHOULD warn about
+separators, continuation lines, escapes, and `\\uXXXX` handling. Files are
+decoded with BOM detection (UTF-8 or UTF-16 overrides Windows-1252) and malformed
+encoded sequences use the decoder's replacement character. End-of-file MUST NOT
+panic, including BOM-only files. Decoded keys are case-sensitive and the last
+occurrence wins; setup and doctor SHOULD warn about
 duplicates without values. The resolver MUST select one exact decoded key and
 MUST NOT interpolate, merge profiles, execute commands, or extract components
 from values. An absent file, absent key, or value empty after `SRC-016` is
@@ -1079,7 +1082,11 @@ than repeat adapter conformance.
 untrusted JSON5 source, strict adapter protocol JSON, TOML, dotenv, and npmrc
 inputs.
 Committed corpora MUST replay routinely with mutation disabled. Bounded mutation
-MUST run separately through mise.
+MUST run separately through mise. Mutation runs MUST report a configurable seed
+that reproduces the generated input sequence; scheduled runs MUST vary that seed.
+Adapter fuzz targets MUST retain malformed-envelope coverage and also exercise
+valid covered payloads containing an enrolled canary and mutated text, asserting
+intervention and canary absence from the replacement and emitted output.
 
 **TST-007** Routine CI MUST run formatting, linting with warnings denied, tests,
 and builds through mise on supported targets. Release checks MUST consume the

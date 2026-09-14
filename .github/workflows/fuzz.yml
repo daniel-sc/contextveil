@@ -10,6 +10,9 @@ on:
       seconds:
         description: Time budget per run
         default: "300"
+      seed:
+        description: Optional seed for reproducing a smoke run
+        default: ""
 
 permissions:
   contents: read
@@ -26,12 +29,12 @@ jobs:
           version: 2026.8.6
           experimental: true
 
-      # The task itself owns the command line (`AGENTS.md`); only its budget is
-      # passed in.
+      # The task owns the command line (`AGENTS.md`); pass only budget and seed.
       - run: mise run fuzz-smoke
         env:
           CONTEXTVEIL_FUZZ_SECONDS: ${{ inputs.seconds || '300' }}
           CONTEXTVEIL_FUZZ_ITERATIONS: "200000"
+          CONTEXTVEIL_FUZZ_SEED: ${{ inputs.seed || github.run_id }}
 
       - name: Upload promoted regressions
         if: failure()

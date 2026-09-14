@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 
+use encoding_rs::{UTF_8, WINDOWS_1252};
 use java_properties::{LineContent, PropertiesIter};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,13 +38,12 @@ impl Properties {
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Properties, ParseError> {
-    // java-properties 2.0.0 and encoding_rs 0.8.35 can re-enter a finished
-    // decoder when a non-empty file has no physical line ending. A final line
-    // ending is semantically equivalent for Properties and avoids that bug.
-    let mut terminated = Vec::with_capacity(bytes.len() + 1);
-    terminated.extend_from_slice(bytes);
-    terminated.push(b'\n');
-    parse_inner(&terminated).map_err(|_| ParseError)
+    // Decode before adding a final newline: the default decoder honors UTF-16
+    // BOMs, where a byte-level newline would not prevent its EOF panic (LIM-025).
+    // The leading newline prevents a second BOM sniff on the decoded text.
+    let (decoded, _, _) = WINDOWS_1252.decode(bytes);
+    let terminated = format!("\n{decoded}\n");
+    parse_inner(terminated.as_bytes()).map_err(|_| ParseError)
 }
 
 fn parse_inner(bytes: &[u8]) -> Result<Properties, java_properties::PropertiesError> {
@@ -51,7 +51,7 @@ fn parse_inner(bytes: &[u8]) -> Result<Properties, java_properties::PropertiesEr
     let mut index: HashMap<String, usize> = HashMap::new();
     let mut duplicates = Vec::new();
 
-    for line in PropertiesIter::new(Cursor::new(bytes)) {
+    for line in PropertiesIter::new_with_encoding(Cursor::new(bytes), UTF_8) {
         let line = line?;
         let LineContent::KVPair(key, value) = line.consume_content() else {
             continue;
@@ -86,6 +86,21 @@ mod tests {
     }
 
     #[test]
+    fn bom_decoding_preserves_values_without_a_final_newline() {
+        for input in [
+            b"\xef\xbb\xbfk=\xc3\xa9".as_slice(),
+            b"\xfe\xff\0k\0=\0\xe9",
+            b"\xff\xfek\0=\0\xe9\0",
+        ] {
+            assert_eq!(parse(input).expect("properties").get("k"), Some("é"));
+        }
+        let parsed = parse(b"\xfe\xff\0k\0=\xd8\0").expect("properties");
+        assert_eq!(parsed.get("k"), Some("\u{fffd}"));
+        let parsed = parse(b"\xef\xbb\xbf\xef\xbb\xbfk=v").expect("properties");
+        assert_eq!(parsed.get("\u{feff}k"), Some("v"));
+    }
+
+    #[test]
     fn separators_continuations_and_escapes_follow_java_properties() {
         let parsed = parse(
             b"colon:one\nspace two\nequals=three\ncontinued=first\\\n  second\nescaped\\ key=tab\\tunicode\\u0021\n",
@@ -112,7 +127,12 @@ mod tests {
 
     #[test]
     fn empty_and_hostile_inputs_do_not_panic() {
-        for input in [b"".as_slice(), b"\0\0\0", &[0xff, 0xfe, 0xfd]] {
+        for input in [
+            b"".as_slice(),
+            b"\0\0\0",
+            &[0xff, 0xfe, 0xfd],
+            &[0xfe, 0xff],
+        ] {
             let _ = parse(input);
         }
     }
