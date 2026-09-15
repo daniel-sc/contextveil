@@ -755,11 +755,6 @@ mod tests {
             b'c', b'o', b'n', b'f', b'i', b'g', b'-', 0xff, b'.', b'I', b'N', b'I',
         ]);
         let ini_path = tree.root.join(&ini_name);
-        std::fs::write(&ini_path, b"[section]\nTOKEN=value\n").expect("non-UTF-8 INI name");
-        let found_ini = project_files(&tree.root).ini;
-        assert_eq!(found_ini.len(), 1);
-        assert_eq!(found_ini[0].path, ini_path);
-        assert_eq!(found_ini[0].entered, None);
         let inspected_ini = inspect_ini(&ini_path, None);
         assert_eq!(
             inspected_ini.state,
@@ -792,11 +787,18 @@ mod tests {
         assert!(npmrc.display.contains("\\xfe"));
         assert!(!npmrc.display.contains('\u{fffd}'));
 
-        // `LIM-022`: APFS rejects file names that are not valid UTF-8, so the
-        // discovery half only runs on a filesystem that accepts one.
+        // `LIM-022`: APFS rejects file names that are not valid UTF-8. Probe
+        // the filesystem before creating the invalid-path fixtures that the
+        // project walk must enumerate. The display-only assertions above
+        // remain useful on filesystems that cannot create such names.
         if std::fs::write(&path, "A=1\n").is_err() {
             return;
         }
+        std::fs::write(&ini_path, b"[section]\nTOKEN=value\n").expect("non-UTF-8 INI name");
+        let found_ini = project_files(&tree.root).ini;
+        assert_eq!(found_ini.len(), 1);
+        assert_eq!(found_ini[0].path, ini_path);
+        assert_eq!(found_ini[0].entered, None);
 
         let found = project_files(&tree.root).dotenv;
         assert_eq!(found.len(), 1);
