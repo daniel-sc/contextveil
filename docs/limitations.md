@@ -144,7 +144,7 @@ review project policy before starting the harness.
 
 ### LIM-010: Input Size Limits
 
-**Reality:** V1 imposes no ContextVeil-specific size cap on dotenv or npmrc files or
+**Reality:** V1 imposes no ContextVeil-specific size cap on dotenv, INI, or npmrc files or
 intercepted payloads. JSON source documents are limited to 128 nested object or
 array containers so untrusted source files cannot exhaust the hook process stack.
 
@@ -161,7 +161,7 @@ JSON source is a malfunction and disables the effective registry for that event.
 **Workaround:** Keep credential files small and rely on normal harness output
 limits. Diagnose slow paths with `contextveil doctor` and benchmarks.
 
-**Verification:** Functional large-input tests cover 4 MiB dotenv and npmrc files,
+**Verification:** Functional large-input tests cover 4 MiB dotenv, INI, and npmrc files,
 201 active values over a 512 KiB payload, collision files at and above the 16 MiB
 boundary, moderate successful nesting, and rejection of a 20,000-level JSON
 source without a stack overflow. Portable tests make no machine-sensitive
@@ -376,16 +376,16 @@ external automation, then run human-readable diagnostics.
 ### LIM-022: Non-UTF-8 Source Paths
 
 **Reality:** TOML can represent only UTF-8 strings. Automatic discovery skips
-dotenv, properties, and npmrc files whose project-relative path contains non-UTF-8
+dotenv, properties, INI, and npmrc files whose project-relative path contains non-UTF-8
 bytes, although it renders the unavailable path safely in setup.
 
-**Impact:** A dotenv, properties, or npmrc source at such a path cannot be enrolled
+**Impact:** A dotenv, properties, INI, or npmrc source at such a path cannot be enrolled
 directly in V1.
 
 **Workaround:** Rename the file or an ancestor directory to a UTF-8 name, or
 expose the credential through an enrolled environment variable.
 
-**Verification:** Unix tests assert dotenv, properties, and npmrc paths are safely
+**Verification:** Unix tests assert dotenv, properties, INI, and npmrc paths are safely
 reported, not parsed or persisted. Discovery additionally creates a non-UTF-8
 dotenv path where the filesystem permits it; APFS rejects one, so macOS covers
 the reporting half alone.
@@ -411,7 +411,7 @@ suggested automatically. No complete vendor schema is validated.
 
 **Workaround:** Review masked candidates before saving, heed collision warnings,
 and rerun setup after host path or field inventory updates. Manually enroll a
-representable environment, dotenv, exact JSON, properties, or npmrc reference,
+representable environment, dotenv, exact JSON, properties, INI, or npmrc reference,
 including an intentionally protected Common Literal, when needed. Use separate
 keychain or helper controls for sources outside the inventory.
 
@@ -473,6 +473,28 @@ containing the concrete value.
 **Verification:** npmrc parser and resolver tests assert expressions remain
 literal, and the leak suite exercises npmrc without substituting environment
 content.
+
+### LIM-027: INI Uses One Explicit Dialect
+
+**Reality:** INI sources use `rust-ini` 0.21.3 with quote handling enabled,
+escape decoding disabled, and optional features off. Library multiline and
+backslash-newline behavior still applies. Sections and keys are case-sensitive;
+there is no interpolation or default-section inheritance. Duplicate section/key
+assignments use the last value. Project discovery covers `.ini` in any letter
+case, but no named machine credential stores are automatically probed.
+
+**Impact:** Applications using a different INI dialect can consume a value that
+ContextVeil resolves differently. Moving a key to a new section breaks an exact
+reference. Explicit section wildcards follow those moves but also enroll future
+values, including Common Literals, without individual review.
+
+**Workaround:** Use manual INI enrollment for other filenames or a section
+wildcard when sections may change. Enroll a concrete value through another source
+when application decoding or interpolation differs.
+
+**Verification:** INI parser fixtures pin the library options, duplicates,
+section identity, continuation, and malformed-input behavior. Source, setup,
+process-boundary, and fuzz tests cover exact and section-wildcard enrollment.
 
 ## Implementation Deviations
 

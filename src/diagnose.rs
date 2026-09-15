@@ -460,10 +460,16 @@ impl Snapshot {
         }
 
         for (path, keys) in &self.duplicate_keys {
+            let key_list = keys
+                .iter()
+                .map(|key| sanitize::text(key))
+                .collect::<Vec<_>>()
+                .join(", ");
             findings.push(Finding::warning(format!(
-                "{} assigns {} more than once; the last assignment wins",
+                "{} assigns {} more than once ({}); the last assignment wins",
                 sanitize::path(path),
-                count(keys.len(), "key", "keys")
+                count(keys.len(), "key", "keys"),
+                key_list
             )));
         }
 
@@ -790,6 +796,22 @@ fn describe_source(id: &SourceId) -> String {
         ),
         SourceId::Npmrc { path, key } => {
             format!("npmrc {} key {}", sanitize::path(path), sanitize::text(key))
+        }
+        SourceId::Ini { path, section, key } => format!(
+            "ini {} {} key {}",
+            sanitize::path(path),
+            section
+                .as_deref()
+                .map(|section| format!("section [{}]", sanitize::text(section)))
+                .unwrap_or_else(|| "no section".to_string()),
+            sanitize::text(key)
+        ),
+        SourceId::IniAllSections { path, key } => {
+            format!(
+                "ini {} key {} (all sections)",
+                sanitize::path(path),
+                sanitize::text(key)
+            )
         }
     }
 }

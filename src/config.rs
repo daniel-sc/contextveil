@@ -174,6 +174,8 @@ struct RawSecret {
     file: Option<String>,
     key: Option<String>,
     all: Option<bool>,
+    section: Option<String>,
+    all_sections: Option<bool>,
     pointer: Option<String>,
 }
 
@@ -219,6 +221,8 @@ fn parse_entry(
             if entry.file.is_some()
                 || entry.key.is_some()
                 || entry.all.is_some()
+                || entry.section.is_some()
+                || entry.all_sections.is_some()
                 || entry.pointer.is_some()
             {
                 return Err(EntryProblem::UnexpectedField);
@@ -237,7 +241,11 @@ fn parse_entry(
         // `CFG-008`: one non-empty `file` plus exactly one of `key` or
         // `all = true`.
         "dotenv" => {
-            if entry.name.is_some() || entry.pointer.is_some() {
+            if entry.name.is_some()
+                || entry.section.is_some()
+                || entry.all_sections.is_some()
+                || entry.pointer.is_some()
+            {
                 return Err(EntryProblem::UnexpectedField);
             }
             let file = entry
@@ -270,7 +278,12 @@ fn parse_entry(
         }
         // `CFG-016`: an explicit file and one exact plain RFC 6901 pointer.
         "json" => {
-            if entry.name.is_some() || entry.key.is_some() || entry.all.is_some() {
+            if entry.name.is_some()
+                || entry.key.is_some()
+                || entry.all.is_some()
+                || entry.section.is_some()
+                || entry.all_sections.is_some()
+            {
                 return Err(EntryProblem::UnexpectedField);
             }
             let file = entry
@@ -293,7 +306,12 @@ fn parse_entry(
             })
         }
         "properties" => {
-            if entry.name.is_some() || entry.all.is_some() || entry.pointer.is_some() {
+            if entry.name.is_some()
+                || entry.all.is_some()
+                || entry.section.is_some()
+                || entry.all_sections.is_some()
+                || entry.pointer.is_some()
+            {
                 return Err(EntryProblem::UnexpectedField);
             }
             let file = entry
@@ -315,7 +333,12 @@ fn parse_entry(
             })
         }
         "npmrc" => {
-            if entry.name.is_some() || entry.all.is_some() || entry.pointer.is_some() {
+            if entry.name.is_some()
+                || entry.all.is_some()
+                || entry.section.is_some()
+                || entry.all_sections.is_some()
+                || entry.pointer.is_some()
+            {
                 return Err(EntryProblem::UnexpectedField);
             }
             let file = entry
@@ -335,6 +358,40 @@ fn parse_entry(
                 path,
                 key: key.to_string(),
             })
+        }
+        "ini" => {
+            if entry.name.is_some() || entry.all.is_some() || entry.pointer.is_some() {
+                return Err(EntryProblem::UnexpectedField);
+            }
+            let file = entry
+                .file
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            let key = entry
+                .key
+                .as_deref()
+                .ok_or(EntryProblem::MissingRequiredField)?;
+            if file.is_empty() || key.is_empty() {
+                return Err(EntryProblem::EmptyField);
+            }
+            if entry.section.is_some() && entry.all_sections.is_some() {
+                return Err(EntryProblem::UnexpectedField);
+            }
+            let path = paths::expand(file, base, home).map_err(EntryProblem::InvalidPath)?;
+            match entry.all_sections {
+                Some(true) => Ok(SourceRef::IniAllSections {
+                    entered: file.to_string(),
+                    path,
+                    key: key.to_string(),
+                }),
+                Some(false) => Err(EntryProblem::UnexpectedField),
+                None => Ok(SourceRef::Ini {
+                    entered: file.to_string(),
+                    path,
+                    section: entry.section.clone(),
+                    key: key.to_string(),
+                }),
+            }
         }
         _ => Err(EntryProblem::UnknownSourceType),
     }
@@ -404,6 +461,18 @@ pointer = "/tokens/access_token"
 source = "npmrc"
 file = "~/.npmrc"
 key = "//registry.npmjs.org/:_authToken"
+
+[[secret]]
+source = "ini"
+file = "credentials.ini"
+section = "production"
+key = "token"
+
+[[secret]]
+source = "ini"
+file = "credentials.ini"
+all_sections = true
+key = "password"
 "#,
         )
         .expect("valid config");
@@ -433,8 +502,74 @@ key = "//registry.npmjs.org/:_authToken"
                     path: PathBuf::from("/home/user/.npmrc"),
                     key: "//registry.npmjs.org/:_authToken".to_string(),
                 },
+                SourceRef::Ini {
+                    entered: "credentials.ini".to_string(),
+                    path: PathBuf::from("/project/credentials.ini"),
+                    section: Some("production".to_string()),
+                    key: "token".to_string(),
+                },
+                SourceRef::IniAllSections {
+                    entered: "credentials.ini".to_string(),
+                    path: PathBuf::from("/project/credentials.ini"),
+                    key: "password".to_string(),
+                },
             ]
         );
+    }
+
+    #[test]
+    fn ini_entries_distinguish_sections_and_wildcards() {
+        let config = parse_text(
+            "version = 1\n[[secret]]\nsource = \"ini\"\nfile = \"x.ini\"\nkey = \"token\"\n\n[[secret]]\nsource = \"ini\"\nfile = \"x.ini\"\nsection = \"\"\nkey = \"token\"\n\n[[secret]]\nsource = \"ini\"\nfile = \"x.ini\"\nall_sections = true\nkey = \"password\"\n",
+        )
+        .expect("valid INI config");
+        assert!(matches!(
+            config.sources[0],
+            SourceRef::Ini { section: None, .. }
+        ));
+        assert!(
+            matches!(config.sources[1], SourceRef::Ini { section: Some(ref section), .. } if section.is_empty())
+        );
+        assert!(matches!(
+            config.sources[2],
+            SourceRef::IniAllSections { .. }
+        ));
+    }
+
+    #[test]
+    fn ini_wildcard_flags_are_strict_and_mutually_exclusive() {
+        for fields in [
+            "section = \"prod\"\nall_sections = true\n",
+            "all_sections = false\n",
+        ] {
+            assert_eq!(
+                entry_problem(&format!(
+                    "version = 1\n[[secret]]\nsource = \"ini\"\nfile = \"x.ini\"\nkey = \"token\"\n{fields}"
+                )),
+                EntryProblem::UnexpectedField
+            );
+        }
+    }
+
+    #[test]
+    fn ini_identities_use_normalized_paths_and_reject_other_source_fields() {
+        for scope in ["", "section = '*'\n", "all_sections = true\n"] {
+            let entry = format!("source = 'ini'\nkey = 'token'\n{scope}");
+            assert_eq!(
+                entry_problem(&format!(
+                    "version = 1\n[[secret]]\n{entry}file = 'config.any'\n\n[[secret]]\n{entry}file = './config.any'\n"
+                )),
+                EntryProblem::DuplicateIdentity
+            );
+            for other in ["name = 'TOKEN'", "pointer = '/token'", "all = true"] {
+                assert_eq!(
+                    entry_problem(&format!(
+                        "version = 1\n[[secret]]\n{entry}file = 'config.any'\n{other}\n"
+                    )),
+                    EntryProblem::UnexpectedField
+                );
+            }
+        }
     }
 
     #[test]

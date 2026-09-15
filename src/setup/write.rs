@@ -59,6 +59,10 @@ struct SecretOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     all: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    section: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    all_sections: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pointer: Option<String>,
 }
 
@@ -75,6 +79,8 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     file: None,
                     key: None,
                     all: None,
+                    section: None,
+                    all_sections: None,
                     pointer: None,
                 },
                 SourceRef::DotenvKey { entered, key, .. } => SecretOut {
@@ -83,6 +89,8 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     file: Some(entered.clone()),
                     key: Some(key.clone()),
                     all: None,
+                    section: None,
+                    all_sections: None,
                     pointer: None,
                 },
                 SourceRef::DotenvAll { entered, .. } => SecretOut {
@@ -91,6 +99,8 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     file: Some(entered.clone()),
                     key: None,
                     all: Some(true),
+                    section: None,
+                    all_sections: None,
                     pointer: None,
                 },
                 SourceRef::Json {
@@ -101,6 +111,8 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     file: Some(entered.clone()),
                     key: None,
                     all: None,
+                    section: None,
+                    all_sections: None,
                     pointer: Some(pointer.clone()),
                 },
                 SourceRef::Properties { entered, key, .. } => SecretOut {
@@ -109,6 +121,8 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     file: Some(entered.clone()),
                     key: Some(key.clone()),
                     all: None,
+                    section: None,
+                    all_sections: None,
                     pointer: None,
                 },
                 SourceRef::Npmrc { entered, key, .. } => SecretOut {
@@ -117,6 +131,33 @@ pub fn render(sources: &[SourceRef]) -> Result<String, WriteError> {
                     file: Some(entered.clone()),
                     key: Some(key.clone()),
                     all: None,
+                    section: None,
+                    all_sections: None,
+                    pointer: None,
+                },
+                SourceRef::Ini {
+                    entered,
+                    section,
+                    key,
+                    ..
+                } => SecretOut {
+                    source: "ini",
+                    name: None,
+                    file: Some(entered.clone()),
+                    key: Some(key.clone()),
+                    all: None,
+                    section: section.clone(),
+                    all_sections: None,
+                    pointer: None,
+                },
+                SourceRef::IniAllSections { entered, key, .. } => SecretOut {
+                    source: "ini",
+                    name: None,
+                    file: Some(entered.clone()),
+                    key: Some(key.clone()),
+                    all: None,
+                    section: None,
+                    all_sections: Some(true),
                     pointer: None,
                 },
             })
@@ -272,6 +313,29 @@ mod tests {
                 entered: "~/.npmrc".to_string(),
                 path: PathBuf::from("/home/user/.npmrc"),
                 key: "//registry.npmjs.org/:_authToken".to_string(),
+            },
+            SourceRef::Ini {
+                entered: "config.INI".to_string(),
+                path: PathBuf::from("/project/config.INI"),
+                section: Some("*".to_string()),
+                key: "API_TOKEN".to_string(),
+            },
+            SourceRef::Ini {
+                entered: "config.INI".to_string(),
+                path: PathBuf::from("/project/config.INI"),
+                section: Some(String::new()),
+                key: "PASSWORD".to_string(),
+            },
+            SourceRef::Ini {
+                entered: "config.INI".to_string(),
+                path: PathBuf::from("/project/config.INI"),
+                section: None,
+                key: "TOKEN".to_string(),
+            },
+            SourceRef::IniAllSections {
+                entered: "config.INI".to_string(),
+                path: PathBuf::from("/project/config.INI"),
+                key: "SECRET".to_string(),
             },
         ]
     }

@@ -120,6 +120,50 @@ fn a_large_wildcard_dotenv_file_is_resolved_without_a_cap() {
 }
 
 #[test]
+fn a_large_ini_file_is_resolved_without_a_cap() {
+    // `SRC-019` and `LIM-010`: INI sources have no ContextVeil-specific size
+    // limit, so a credential near the end of a 4 MiB document remains active.
+    let canary = Canary::generate("BIG_INI_TOKEN");
+    let machine = Machine::new();
+    machine.write_global("version = 1\n");
+
+    let mut ini = String::with_capacity(4 * 1024 * 1024 + 128);
+    let mut key = 0;
+    while ini.len() < 4 * 1024 * 1024 {
+        ini.push_str(&format!("KEY_{key}=value-{key}-padding-padding-padding\n"));
+        key += 1;
+    }
+    ini.push_str(&format!(
+        "[credentials]\nBIG_INI_TOKEN={}\n",
+        canary.value()
+    ));
+    std::fs::write(machine.project().join("credentials.ini"), ini).expect("write INI");
+    std::fs::write(
+        machine.project().join(".contextveil.toml"),
+        "version = 1\n\n[[secret]]\nsource = \"ini\"\nfile = \"credentials.ini\"\nsection = \"credentials\"\nkey = \"BIG_INI_TOKEN\"\n",
+    )
+    .expect("write project config");
+
+    let payload = json!({
+        "hook_event_name": "PostToolUse",
+        "cwd": machine.project().to_string_lossy(),
+        "tool_name": "Bash",
+        "tool_response": {"stdout": format!("token={}", canary.value())},
+    })
+    .to_string();
+    let output = machine.run_hook(&payload, &[]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_canary_absent("hook stdout", &output.stdout, &canary);
+    assert_canary_absent("hook stderr", &output.stderr, &canary);
+    let response: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert_eq!(
+        response["hookSpecificOutput"]["updatedToolOutput"]["stdout"],
+        json!("token=<SECRET:BIG_INI_TOKEN>")
+    );
+}
+
+#[test]
 fn a_large_npmrc_file_is_resolved_without_a_cap() {
     let canary = Canary::generate("BIG_NPMRC_TOKEN");
     let machine = Machine::new();

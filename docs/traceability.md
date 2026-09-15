@@ -66,7 +66,7 @@ the end of the audit.
 | CFG-003 | Setup project root: nearest `.contextveil.toml`, else Git worktree root, else cwd | src/paths.rs (`setup_project_root`) | paths.rs::project_root_selection_prefers_the_nearest_config, ::project_root_falls_back_to_the_git_worktree_then_the_directory, ::a_git_file_marks_a_worktree_root; tests/setup.rs::the_project_root_is_selected_from_the_working_directory | covered |
 | CFG-004 | Runtime uses at most one, nearest-ancestor project registry; no merging | src/paths.rs (`runtime_project_config`); src/registry.rs (`build`) | registry.rs fixture asserting exactly one project registry is used | covered |
 | CFG-005 | Per-adapter project root selection (Claude/OpenCode stable root; Codex/Copilot may use cwd) | src/adapter/{claude,codex,copilot,opencode}.rs | Per-adapter project-root unit fixtures, including Codex and Copilot event-cwd tests | covered |
-| CFG-006 | `version = 1` required; unknown fields/types/malformed entries/duplicate identities invalidate the file, including JSON and npmrc identities | src/config.rs (`parse`, `parse_entry`); src/source.rs (`SourceRef::id`) | config.rs strict-field and normalized-identity tests for env, dotenv, JSON, properties, and npmrc | covered |
+| CFG-006 | `version = 1` required; unknown fields/types/malformed entries/duplicate identities invalidate the file, including JSON, INI, and npmrc identities | src/config.rs (`parse`, `parse_entry`); src/source.rs (`SourceRef::id`) | config.rs strict-field and normalized-identity tests for env, dotenv, JSON, properties, INI, and npmrc | covered |
 | CFG-007 | An env entry needs `source = "env"` plus non-empty `name`, no dotenv fields | src/config.rs (`parse_entry`, "env" arm) | config.rs::environment_entries_reject_dotenv_fields | covered |
 | CFG-008 | A dotenv entry needs `file` plus exactly one of `key`/`all` | src/config.rs (`parse_entry`, "dotenv" arm) | config.rs::dotenv_entries_require_exactly_one_of_key_or_all | covered |
 | CFG-009 | Global/project may share identity; project may reference external files/env names | src/config.rs (no cross-file identity check); src/registry.rs (`build`) | config.rs::project_config_may_reference_external_paths_and_environment_names; registry.rs::cross_scope_duplicate_identities_are_allowed | covered |
@@ -79,6 +79,7 @@ the end of the audit.
 | CFG-016 | JSON entries require an explicit file and non-empty plain RFC 6901 pointer, with no wildcards or cross-source fields | src/config.rs (`parse_entry`, JSON arm); src/json.rs (`final_token`) | config.rs::json_entries_are_strict_and_require_a_supported_pointer; json.rs pointer-validation tests | covered |
 | CFG-017 | Properties entries require an explicit file and exact decoded key, with no wildcard or inferred resolver | src/config.rs (`parse_entry`, properties arm) | config.rs::properties_entries_require_only_an_exact_file_and_decoded_key | covered |
 | CFG-018 | npmrc entries require an explicit file and exact case-sensitive key, with no wildcard or inferred resolver | src/config.rs (`parse_entry`, npmrc arm) | config.rs::npmrc_entries_are_strict_exact_and_path_normalized | covered |
+| CFG-019 | INI exact and all-sections references preserve section identity and reject conflicting fields | src/config.rs; src/source.rs; src/secret.rs | INI config/identity unit tests and tests/ini.rs | covered |
 
 ## 5. Configuration Schema
 
@@ -108,6 +109,7 @@ for section 5.
 | SRC-016 | Every decoded source value is trimmed before resolution and all downstream semantics use it | src/source.rs (`resolve_text` and wildcard resolution) | source.rs::every_source_family_trims_values_before_resolution; registry.rs::properties_values_are_active_and_malformed_files_disable_the_whole_registry; tests/process_boundaries.rs::enrolled_values_are_absent_at_every_process_boundary_after_intervention | covered |
 | SRC-017 | Exact-key properties resolution follows transactional java-properties 2.0.0 behavior with last-key-wins duplicates | src/properties.rs; src/source.rs (`PropertiesFileState`) | properties.rs parser fixtures; source.rs::properties_resolve_exact_decoded_keys_and_report_duplicates, ::unreadable_file_sources_are_malfunctions; registry.rs::properties_values_are_active_and_malformed_files_disable_the_whole_registry | covered |
 | SRC-018 | Exact-key npmrc resolution uses the narrow scalar grammar, key-local issues, literal environment expressions, last-valid duplicates, and fresh one-event parsing | src/npmrc.rs; src/source.rs (`NpmrcFileState`) | npmrc.rs grammar fixtures; source.rs::npmrc_resolution_is_exact_key_local_and_fresh_per_event, ::selected_npmrc_issues_malfunction_while_absent_and_empty_are_unresolved | covered |
+| SRC-019 | INI follows the configured rust-ini dialect, last section/key assignment, fresh exact/wildcard resolution, and transactional errors | src/ini.rs; src/source.rs | INI parser/source unit tests; tests/ini.rs; INI process-boundary and fuzz fixtures | covered |
 
 ## 7. Setup Discovery And Enrollment (`SET-*`)
 
@@ -115,9 +117,9 @@ for section 5.
 | --- | --- | --- | --- | --- |
 | SET-001 | Setup presents four phases in order after preflight parse of both config files | src/setup/mod.rs (`run`, preflight) | tests/setup.rs::an_invalid_project_config_stops_setup_before_the_global_phase, ::a_project_phase_failure_keeps_the_committed_global_phase | covered |
 | SET-002 | Setup applies every applicable Known Source Rule independently of adapter selection, then applies the Common Literal exclusion | Candidate discovery and centralized exclusion run before integration selection in src/setup/mod.rs | Existing name, URL, additive-location, bounded-probe, and Common Literal setup fixtures | covered |
-| SET-003 | One recursive project walk supplies dotenv, anchored JSON, eligible properties, and exact `.npmrc` inputs with documented exclusions; no symlinks/special files | src/setup/discovery.rs (`project_files`, `walk`) | discovery.rs project-walk, exclusion, symlink, FIFO, non-UTF-8, properties, and npmrc fixtures | covered |
+| SET-003 | One recursive project walk supplies dotenv, anchored JSON, eligible properties, INI, and exact `.npmrc` inputs with documented exclusions; no symlinks/special files | src/setup/discovery.rs (`project_files`, `walk`) | discovery.rs project-walk, exclusion, symlink, FIFO, non-UTF-8, properties, and npmrc fixtures | covered |
 | SET-004 | Global dotenv probing bounded to home + harness config directories, non-recursive | src/setup/discovery.rs (`global_dotenv_files`) | discovery.rs::global_probing_is_bounded_to_the_documented_locations; tests/setup.rs::global_dotenv_probing_covers_the_documented_locations | covered |
-| SET-005 | Manual paths/keys/wildcard/env names, JSON pointers, properties decoded keys, and npmrc exact keys allowed; absent manual sources savable after confirmation; manual additions bypass automatic exclusions | src/setup/mod.rs (`add_manual`) | tests/setup.rs::an_unresolved_manual_source_requires_confirmation, ::manual_and_wildcard_enrollment_can_protect_common_literals, and manual source-family fixtures | covered |
+| SET-005 | Manual paths/keys/wildcard/env names, JSON pointers, properties/npmrc keys, and exact/wildcard INI references allowed; absent manual sources savable after confirmation; manual additions bypass automatic exclusions | src/setup/mod.rs (`add_manual`) | tests/setup.rs::an_unresolved_manual_source_requires_confirmation, ::manual_and_wildcard_enrollment_can_protect_common_literals, and manual source-family fixtures | covered |
 | SET-006 | Secret-like name Known Source Rule uses the exact maintained vocabulary without ranking or confidence; final admission applies SET-023 | src/setup/vocabulary.rs; src/setup/mod.rs (`build_items`, `item_for`) | vocabulary.rs gating tests; setup ordering, preview, and Common Literal fixtures | covered |
 | SET-007 | Selection defaults apply to each Candidate Group or standalone source; existing or manual membership wins over collision defaults | src/setup/enrollment.rs; src/setup/mod.rs (`automatic_item_for`, `annotate_collisions`) | tests/setup.rs::an_enrolled_alias_keeps_its_colliding_group_selected, ::a_known_source_group_with_an_external_collision_defaults_unselected | covered |
 | SET-008 | User is authoritative: enrollment allowed after collision warning and Common Literals may be manually enrolled; no runtime minimum length | src/setup/mod.rs (`add_manual`); no runtime length gate | tests/setup.rs::a_collision_can_be_overridden_by_the_user, ::manual_and_wildcard_enrollment_can_protect_common_literals | covered |
@@ -136,6 +138,7 @@ for section 5.
 | SET-021 | Properties Known Source discovery covers eligible project files and additive Gradle roots with localization exclusions, subject to SET-023 | src/setup/discovery.rs; src/setup/known_source.rs; src/setup/mod.rs | Properties, Gradle, and cross-family Common Literal setup fixtures | covered |
 | SET-022 | npmrc discovery covers additive exact machine paths and every project `.npmrc`, with exact credential-key and generic-rule composition, subject to SET-023 | src/setup/discovery.rs; src/setup/known_source.rs; src/setup/mod.rs | npmrc path/key/rule fixtures; cross-family Common Literal setup fixture | covered |
 | SET-023 | Wholly new automatic sources resolving to an exact ASCII-case-insensitive Common Literal are silently excluded before grouping; existing, manual, wildcard, and runtime behavior bypass the exclusion | src/setup/vocabulary.rs (`is_common_literal`); src/setup/mod.rs (`merge_automatic_item`) | vocabulary.rs::common_literals_are_exact_and_ascii_case_insensitive; tests/setup.rs::common_literals_are_excluded_from_every_automatic_source_family, ::a_common_literal_alias_does_not_join_an_existing_enrollment, ::manual_and_wildcard_enrollment_can_protect_common_literals | covered |
+| SET-024 | Bounded case-insensitive INI discovery uses key/URL rules; manual scope choices and contextual hint expose section wildcards | src/setup/discovery.rs; src/setup/known_source.rs; src/setup/mod.rs | INI discovery and rule fixtures; tests/setup.rs INI enrollment/suppression fixtures | covered |
 
 ## 8. Effective Registry (`REG-*`)
 
@@ -143,7 +146,7 @@ for section 5.
 | --- | --- | --- | --- | --- |
 | REG-001 | Every non-empty normalized value from an enrolled source, including Common Literals and wildcard values, is an exact runtime pattern | src/source.rs; src/matcher.rs (`Redactor::new`) | Source and matcher exactness fixtures; tests/setup.rs::manual_and_wildcard_enrollment_can_protect_common_literals | covered |
 | REG-002 | Duplicate resolved values collapse to one canonical pattern (first project entry, else first global entry, in file order) | src/matcher.rs (value dedup); src/registry.rs (canonical ordering) | src/matcher.rs::duplicate_values_collapse_to_the_canonical_source; src/registry.rs::equal_values_canonicalize_to_the_first_project_entry; src/diagnose.rs alias-warning test | covered |
-| REG-003 | Source/key names are case-sensitive; labels derive from env name, dotenv/properties key, final JSON pointer token, or final npmrc key field, never a file path | src/secret.rs (`SourceId::label`, `npmrc_label`); src/json.rs (`final_token`) | secret.rs label tests; source properties/JSON/npmrc label tests | covered |
+| REG-003 | Source/key names are case-sensitive; labels derive from env name, dotenv/properties/INI key, final JSON pointer token, or final npmrc key field, never a file path | src/secret.rs (`SourceId::label`, `npmrc_label`); src/json.rs (`final_token`) | secret.rs label tests; source properties/JSON/npmrc label tests | covered |
 | REG-004 | Labels keep ASCII word characters, collapse other runs to `_` | src/secret.rs (`safe_label`) | src/secret.rs::labels_keep_only_the_allowed_character_set, ::labels_collapse_control_and_escape_sequences | covered |
 
 ## 9. Redaction Semantics (`RED-*`)
@@ -251,7 +254,7 @@ for section 5.
 | ID | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | TST-001 | Matcher tests cover empty/UTF-8/case/substrings/adjacent/overlap/duplicates/canonical labels/multiline/placeholder-fallback/no-recursion | src/matcher.rs unit tests (the named vectors); tests/matcher_property.rs (the same rules over generated input) | src/matcher.rs test module; tests/matcher_property.rs::the_matcher_agrees_with_the_reference_model | covered |
-| TST-002 | Config/source tests cover strict schemas and the complete contracted JSON5, properties, and npmrc source semantics | src/config.rs, src/json.rs, src/npmrc.rs, src/properties.rs, and src/source.rs test modules | Strict-field and identity cases; JSON5, pointer, duplicate-member, properties, npmrc grammar/keyed-issue, malformed, non-UTF-8, and freshness fixtures | covered |
+| TST-002 | Config/source tests cover strict schemas and the complete contracted JSON5, properties, INI, and npmrc source semantics | src/config.rs, src/json.rs, src/ini.rs, src/npmrc.rs, src/properties.rs, and src/source.rs test modules | Strict-field and identity cases; JSON5, pointer, duplicate-member, properties, INI section/wildcard, npmrc grammar/keyed-issue, malformed, non-UTF-8, and freshness fixtures | covered |
 | TST-003 | Filesystem tests cover additive locations, bounded permissive probes without sibling gating, exact/anchored paths, malformed and symlink boundaries, pointers, grouping, collisions, and leaks | src/setup/discovery.rs and src/setup/known_source.rs shared filesystem/probe tests; tests/setup.rs end-to-end setup fixtures | known_source.rs probe and exact-path safety tests; tests/setup.rs Known Source override/idempotency/grouping/collision fixtures plus npmrc traversal, key-local malfunction, and collision coverage | covered |
 | TST-004 | Adapter decisions are tested at unit level and each covered path retains one real boundary fixture | src/adapter; tests/process_boundaries.rs; tests/opencode/plugin.test.ts | Four Rust process cases and two real-binary OpenCode cases | covered |
 | TST-005 | Intervention fixtures prove input presence, intervention, and absence from every observable channel | src/testing.rs | tests/process_boundaries.rs and tests/opencode/plugin.test.ts | covered |
@@ -273,11 +276,11 @@ for section 5.
 | --- | --- | --- |
 | Setup save may change the canonical placeholder alias | LIM-024 and `save_order_can_change_the_canonical_alias` | accepted-limitation |
 | npmrc environment expressions stay literal | LIM-026 and npmrc parser/source fixtures | accepted-limitation |
+| INI uses one explicit dialect; section wildcards enroll future values | LIM-027 and INI parser/source/setup fixtures | accepted-limitation |
 
 No implementation or evidence gap remains in the confirmed Known Source Rule,
-JSON5 source-document, or npmrc requirements. Strict harness protocols and
-integration files remain separate from JSON sources. Generic INI remains
-non-contract.
+JSON5 source-document, INI, or npmrc requirements. Strict harness protocols and
+integration files remain separate from source-document grammars.
 
 **Manual (verifiable only by a human or a paid/networked run):**
 

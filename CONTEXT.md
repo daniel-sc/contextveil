@@ -52,7 +52,7 @@ Source Rule and bypasses automatic-candidate exclusions.
 A decoded, trimmed textual value excluded from wholly new automatic Candidates
 when its complete value exactly matches a small maintained vocabulary under
 ASCII case folding. This setup-only exclusion does not affect existing
-enrollment, explicit manual additions, dotenv wildcard enrollment, source
+enrollment, explicit manual additions, dotenv wildcard and INI Section Wildcard enrollment, source
 resolution, or runtime matching.
 _Avoid_: Non-secret value, runtime ignore list, secret denylist
 
@@ -90,6 +90,15 @@ An enrolled or discovered npm configuration file persisted with
 `source = "npmrc"` and resolved through one exact case-sensitive key using
 ContextVeil's narrow scalar grammar.
 _Avoid_: Generic INI source, npm configuration snapshot
+
+**INI Source**:
+A Source Reference identifying one INI entry by its file, section, and key.
+_Avoid_: Whole-file enrollment, credential-store snapshot
+
+**INI Section Wildcard**:
+An enrollment policy protecting one exact INI key across all current and future
+sections of a file, including sectionless entries.
+_Avoid_: All-key wildcard, flattened INI source
 
 **Global Registry**:
 The user's machine-scoped collection of enrolled sources.

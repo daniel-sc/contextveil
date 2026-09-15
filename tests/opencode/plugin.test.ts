@@ -98,6 +98,26 @@ function enroll(name: string, value: string) {
   return root;
 }
 
+/** Enrolls an exact INI entry or an all-sections INI policy. */
+function enrollIni(value: string, allSections: boolean) {
+  const root = mkdtempSync(join(tmpdir(), "contextveil-plugin-ini-"));
+  mkdirSync(join(root, "contextveil"), { recursive: true });
+  const file = join(root, "credentials.ini");
+  writeFileSync(
+    file,
+    `TOKEN=${value}\n[Production]\nTOKEN=${value}\n`,
+  );
+  const scope = allSections
+    ? `all_sections = true\nkey = "TOKEN"`
+    : `section = "Production"\nkey = "TOKEN"`;
+  writeFileSync(
+    join(root, "contextveil", "config.toml"),
+    `version = 1\n\n[[secret]]\nsource = "ini"\nfile = ${JSON.stringify(file)}\n${scope}\n`,
+  );
+  process.env.XDG_CONFIG_HOME = root;
+  return { root, file };
+}
+
 /** Points ContextVeil at an invalid configuration. */
 function enrollInvalid() {
   const root = mkdtempSync(join(tmpdir(), "contextveil-plugin-broken-"));
@@ -173,6 +193,36 @@ test("successful standard tool output is redacted in place", async () => {
   expect(output.metadata).toEqual({ exit: 0 });
   expect(client.toasts).toHaveLength(1);
   expect(JSON.stringify({ output, toasts: client.toasts })).not.toContain(canary);
+});
+
+test("INI exact and all-sections entries are redacted before model context", async () => {
+  for (const allSections of [false, true]) {
+    const canary = `SSCANARY-PLUGIN-INI-${crypto.randomUUID()}`;
+    const fixture = enrollIni(canary, allSections);
+    const client = recordingClient();
+    const hooks = await loadPlugin(BINARY, client);
+
+    const parts = [{ type: "text", text: `use ${canary}` }];
+    await hooks["chat.message"]({ sessionID: "s1" }, { message: {}, parts });
+    expect(parts[0].text).toBe("use <SECRET:TOKEN>");
+    expect(JSON.stringify({ parts, toasts: client.toasts })).not.toContain(canary);
+
+    if (allSections) {
+      // A section added after enrollment is covered by the wildcard on the
+      // next event, exercising file-backed rotation through the plugin.
+      const futureCanary = `SSCANARY-PLUGIN-INI-FUTURE-${crypto.randomUUID()}`;
+      writeFileSync(
+        fixture.file,
+        `TOKEN=${canary}\n[Production]\nTOKEN=${canary}\n[Future]\nTOKEN=${futureCanary}\n`,
+      );
+      const output = { title: "shell", output: `token=${futureCanary}`, metadata: {} };
+      await hooks["tool.execute.after"]({ tool: "bash" }, output);
+      expect(output.output).toBe("token=<SECRET:TOKEN>");
+      expect(JSON.stringify({ output, toasts: client.toasts })).not.toContain(futureCanary);
+    }
+
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test("clean events change nothing and stay silent", async () => {
