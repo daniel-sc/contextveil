@@ -157,16 +157,18 @@ pub fn ini(data: &[u8]) {
 
     // `entries` exposes one final assignment per exact section/key identity.
     // Verify that the map-style getter agrees with that normalized view.
+    let mut keys = std::collections::HashSet::new();
     for (section, key, value) in parsed.entries() {
+        keys.insert(key);
         assert_eq!(
             parsed.get(section, key),
             Some(value),
             "INI getter disagrees with entries"
         );
     }
-    for (section, key) in parsed.duplicates() {
+    for key in parsed.duplicate_keys() {
         assert!(
-            parsed.get(section.as_deref(), key).is_some(),
+            keys.contains(key.as_str()),
             "duplicate has no final assignment"
         );
     }

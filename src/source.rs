@@ -536,9 +536,6 @@ impl Resolver {
                 .map(std::slice::from_ref)
                 .unwrap_or(&[]),
             SourceRef::Ini { path, .. } | SourceRef::IniAllSections { path, .. } => {
-                // Keep the existing value-free diagnostics shape used by the
-                // other resolver families. Section detail remains available
-                // through `ini::Ini::duplicates` for callers that need it.
                 match self.ini_files.get(path) {
                     Some(IniFileState::Parsed(ini)) => ini.duplicate_keys(),
                     _ => &[],
