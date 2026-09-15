@@ -513,6 +513,20 @@ pub fn project(project_root: &Path, files: &ProjectFiles) -> Found {
             }
         }
     }
+    for file in &files.ini {
+        let Some(entered) = file.entered.as_deref() else {
+            unavailable(&mut found, &file.path, "its path is not valid UTF-8");
+            continue;
+        };
+        match &file.state {
+            super::discovery::IniState::Unavailable(why) => {
+                unavailable(&mut found, &file.path, why.reason());
+            }
+            super::discovery::IniState::Available(ini) => {
+                add_ini_candidates(&mut found, &file.path, entered, ini);
+            }
+        }
+    }
     deduplicate(&mut found.sources);
     found
 }
@@ -638,6 +652,36 @@ fn add_properties_candidates(
             .entry(id)
             .or_default()
             .push(Rule::PropertiesConfiguration);
+    }
+}
+
+fn add_ini_candidates(found: &mut Found, path: &Path, entered: &str, ini: &crate::ini::Ini) {
+    for (section, key, value) in ini.entries() {
+        let value = value.trim();
+        if key.is_empty()
+            || value.is_empty()
+            || (super::vocabulary::gating_term(key).is_none()
+                && !super::credential_url::is_credential_bearing(value))
+        {
+            continue;
+        }
+        let source = SourceRef::Ini {
+            entered: entered.to_string(),
+            path: path.to_path_buf(),
+            section: section.map(str::to_string),
+            key: key.to_string(),
+        };
+        let id = source.id();
+        found.sources.push(source);
+        let rules = found.rules.entry(id).or_default();
+        if super::vocabulary::gating_term(key).is_some() {
+            rules.push(Rule::SecretLikeName);
+        }
+        if super::credential_url::is_credential_bearing(value) {
+            rules.push(Rule::CredentialBearingUrl);
+        }
+        rules.sort_unstable();
+        rules.dedup();
     }
 }
 
@@ -1371,6 +1415,7 @@ mod tests {
             dotenv: vec![],
             properties: vec![],
             npmrc: vec![],
+            ini: vec![],
             claude_settings: vec![settings],
             claude_mcp: vec![mcp],
         };

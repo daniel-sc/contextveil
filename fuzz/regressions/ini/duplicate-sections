@@ -1,0 +1,6 @@
+[Production]
+token=first
+
+[Production]
+token=last
+other=untouched

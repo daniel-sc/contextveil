@@ -112,8 +112,8 @@ variable,” “the `STRIPE_KEY` entry in `.env.local`,” “the exact
 `/tokens/access_token` field in `auth.json`,” or “the decoded
 `spring.datasource.password` key in `application.properties`,” or “the exact
 `//registry.npmjs.org/:_authToken` entry in `.npmrc`.” It does not copy
-the value into its configuration. Changes to dotenv, JSON, properties, and npmrc files apply on the next supported
-event. Environment changes apply after you restart the coding agent.
+the value into its configuration. INI sources identify a file, section, and key.
+Changes to enrolled files apply on the next supported event. Environment changes apply after you restart the coding agent.
 
 ### Known Source Rules
 
@@ -134,7 +134,9 @@ Automatic suggestions currently cover:
 - **Java properties files** from eligible project and Gradle locations. Decoded keys use the table above, complete credential-bearing URLs qualify regardless of key, and localization bundles are excluded.
 - **Bounded agent credential documents** for Claude Code, Codex, GitHub Copilot, and OpenCode, using maintained credential fields rather than scanning arbitrary keys. Keychain-based credentials and sidecars are excluded.
 - **npmrc files** from documented machine locations and every project `.npmrc`, using exact credential keys plus the same general name and URL checks.
-- **More to come:** additional formats such as INI, YAML, and TOML.
+- **INI files** from the bounded project walk (`.ini` in any letter case), using
+  the same key-name and URL checks. Section names do not affect eligibility.
+- **More to come:** additional formats such as YAML and TOML.
 
 Across these rules, setup skips automatic suggestions whose
 value are common literals, such as `true`, `yes`, `on`, `0`,
@@ -142,7 +144,25 @@ value are common literals, such as `true`, `yes`, `on`, `0`,
 
 See the full [`Known Source Rule inventory`](docs/known-sources.md) for exact locations, fields, and exclusions.
 
-Environment variables, dotenv files, JSON (including JSON5) files, exact Java properties keys, and exact npmrc keys can also be added manually without matching these automatic discovery rules.
+Environment variables, dotenv files, JSON (including JSON5) files, exact Java properties keys, exact npmrc keys, and INI entries can also be added
+manually without matching these automatic discovery rules.
+
+For INI, use **Manual sources → INI key** to select a named section, no section,
+or all current and future sections for one key. The last option requires an
+explicit confirmation and persists `all_sections = true` instead of `section`:
+
+```toml
+[[secret]]
+source = "ini"
+file = "config.ini"
+all_sections = true
+key = "token"
+```
+
+Use `section = "production"` for an exact named section, or omit both fields for
+sectionless entries. INI section and key names are case-sensitive. Values follow
+`rust-ini` grammar with escape decoding disabled; interpolation and inheritance
+are not performed. See [INI dialect limits](docs/limitations.md#lim-027-ini-uses-one-explicit-dialect).
 
 ## Setup Details
 
@@ -188,7 +208,7 @@ ContextVeil stays quiet unless it replaces something or encounters a problem.
 - **Handling private token formats.** A value does not need to match a known API
   key pattern. If you enroll its source, its current exact value can be matched.
 - **Following rotation.** ContextVeil reads the selected environment variables,
-  `.env` entries, exact JSON fields, exact properties keys, and exact npmrc entries for each supported event instead of
+  `.env` entries, exact JSON fields, exact properties keys, npmrc entries, and INI entries for each supported event instead of
   keeping copied values.
 - **Guiding source enrollment.** Setup applies maintained rules for likely names,
   credential-bearing URLs, and recognized coding-agent credential stores without

@@ -120,8 +120,8 @@ change.
   deterministic candidate-eligibility rules for secret-like names,
   credential-bearing URLs, and bounded host credential documents. Their field
   probes are explicit and maintained; complete host schemas are not modeled.
-  Setup does not recursively classify arbitrary structured files by secret-like
-  field names.
+  The bounded project walk includes supported dotenv, properties, npmrc, and INI
+  files; other structured formats require explicit maintained probes.
 - **One security core.** Harness adapters translate protocols but do not
   reimplement source resolution or matching.
 - **Silent success.** Runtime produces UI only for intervention or malfunction.

@@ -18,7 +18,7 @@ use contextveil::fuzz;
 
 /// Seed inputs per target, chosen to be valid or nearly valid so mutation
 /// explores interesting states rather than mostly rejecting garbage.
-const SEEDS: [(&str, &[&str]); 11] = [
+const SEEDS: [(&str, &[&str]); 12] = [
     (
         "dotenv",
         &[
@@ -44,6 +44,16 @@ const SEEDS: [(&str, &[&str]); 11] = [
             "escaped\\ key=first\\nsecond\n",
             "continued=one\\\n  two\n",
             "broken=\\u12xz\n",
+        ],
+    ),
+    (
+        "ini",
+        &[
+            "token=value\n[production]\npassword=first\npassword=last\n",
+            "before=sectionless\n[default]\nkey=value\n",
+            "[quoted]\nvalue=\"line one\\\nline two\"\n",
+            "[backslashes]\npath=C:\\\\Users\\name\n",
+            "malformed line\n",
         ],
     ),
     (

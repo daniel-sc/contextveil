@@ -107,10 +107,11 @@ pub fn context() -> Option<&'static Context> {
 pub type Target = fn(&[u8]);
 
 /// Every target, by name, for the smoke harness.
-pub const TARGETS: [(&str, Target); 11] = [
+pub const TARGETS: [(&str, Target); 12] = [
     ("dotenv", dotenv),
     ("npmrc", npmrc),
     ("properties", properties),
+    ("ini", ini),
     ("json-source", json_source),
     ("config", config),
     ("matcher", matcher),
@@ -142,6 +143,32 @@ pub fn properties(data: &[u8]) {
         for duplicate in parsed.duplicates() {
             assert!(parsed.get(duplicate).is_some());
         }
+    }
+}
+
+/// INI grammar and duplicate-section resolution (`SRC-019`, `TST-006`).
+pub fn ini(data: &[u8]) {
+    let Ok(text) = std::str::from_utf8(data) else {
+        return;
+    };
+    let Ok(parsed) = crate::ini::parse(text) else {
+        return;
+    };
+
+    // `entries` exposes one final assignment per exact section/key identity.
+    // Verify that the map-style getter agrees with that normalized view.
+    for (section, key, value) in parsed.entries() {
+        assert_eq!(
+            parsed.get(section, key),
+            Some(value),
+            "INI getter disagrees with entries"
+        );
+    }
+    for (section, key) in parsed.duplicates() {
+        assert!(
+            parsed.get(section.as_deref(), key).is_some(),
+            "duplicate has no final assignment"
+        );
     }
 }
 

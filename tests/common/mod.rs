@@ -39,6 +39,7 @@ impl ProcessFixture {
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", self.root.join("home"))
             .env("XDG_CONFIG_HOME", &self.root)
+            .env("CLAUDE_PROJECT_DIR", self.root.join("home").join("project"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -54,6 +55,20 @@ impl ProcessFixture {
             .write_all(stdin)
             .expect("write hook stdin");
         child.wait_with_output().expect("the hook finishes")
+    }
+
+    pub fn write_project_file(&self, relative: &str, contents: &str) -> PathBuf {
+        let path = self.root.join("home").join("project").join(relative);
+        std::fs::write(&path, contents).expect("write project file");
+        path
+    }
+
+    pub fn project_dir(&self) -> PathBuf {
+        self.root.join("home").join("project")
+    }
+
+    pub fn write_project_config(&self, contents: &str) {
+        self.write_project_file(".contextveil.toml", contents);
     }
 }
 

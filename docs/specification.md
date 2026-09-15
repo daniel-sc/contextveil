@@ -165,6 +165,18 @@ key = "spring.datasource.password"
 source = "npmrc"
 file = "~/.npmrc"
 key = "//registry.npmjs.org/:_authToken"
+
+[[secret]]
+source = "ini"
+file = "config.ini"
+section = "production"
+key = "token"
+
+[[secret]]
+source = "ini"
+file = "profiles.ini"
+all_sections = true
+key = "password"
 ```
 
 Equivalent field naming changes before the first persisted implementation MAY be
@@ -186,6 +198,8 @@ dotenv wildcard:   (dotenv-all, normalized absolute path)
 JSON field:        (json, normalized absolute path, exact JSON Pointer)
 properties key:    (properties, normalized absolute path, exact decoded key)
 npmrc entry:       (npmrc, normalized absolute path, exact key)
+INI entry:         (ini, normalized absolute path, optional exact section, exact key)
+INI wildcard:      (ini-all-sections, normalized absolute path, exact key)
 ```
 
 Repeated identical tuples within one file are duplicates. A keyed entry and a
@@ -250,6 +264,17 @@ filename, and properties wildcard enrollment is not supported.
 `file`, and one non-empty case-sensitive exact `key`. It MUST NOT contain fields
 for another source type. Resolver type MUST NOT be inferred from a filename, and
 npmrc wildcard enrollment is not supported.
+
+**CFG-019** An INI entry MUST contain `source = "ini"`, one non-empty `file`,
+and one non-empty case-sensitive exact `key`. Optional `section` selects one
+case-sensitive exact section; omission selects sectionless entries, while `""`
+selects the empty-named `[]` section. Alternatively, `all_sections = true`
+selects that exact key across every current and future section, including
+sectionless entries. `section` and `all_sections` MUST NOT coexist, and a
+present `all_sections` MUST be true. Fields for other source types are invalid.
+`section = "*"` is literal, not a wildcard. Resolver type MUST NOT be inferred
+from a filename. Exact and wildcard references MAY coexist; neither form allows
+filename globs or all-key enrollment.
 
 ## 6. Source Resolution
 
@@ -389,6 +414,27 @@ syntax issue is a malfunction. One npmrc file referenced by multiple entries
 MUST be read and parsed once per event where practical, read afresh on the next
 event, and have no ContextVeil-specific size cap.
 
+**SRC-019** INI sources MUST use `rust-ini` 0.21.3 grammar with default features
+disabled and default parse options except `enabled_escape = false`. Input MUST
+be UTF-8 with an optional leading BOM. Library quoting, separators, whitespace,
+quoted multiline values, and backslash-newline continuation apply; ordinary
+backslashes remain literal. Indented multiline parsing is disabled. No
+interpolation or section inheritance occurs, including for `[DEFAULT]`.
+
+Repeated sections share one exact section identity; the last assignment to a
+section/key wins. Setup and doctor SHOULD warn about duplicate keys without
+values. An INI Section Wildcard MUST resolve each section's current selected-key
+value independently, applying `SRC-016`, without runtime eligibility filters.
+Wildcard results MUST use exact entry identities in section order (sectionless
+first, then case-sensitive section bytes) for deterministic canonicalization.
+
+An absent file, section, or key, or a trimmed-empty value is unresolved. Invalid
+UTF-8, any library parse error, permission denial, or non-`NotFound` I/O failure
+is a malfunction; no partial parse may be used. Diagnostics MUST NOT expose raw
+library error text or source contents. A file referenced multiple times MUST be
+read and parsed once per event where practical, reread on subsequent events,
+and have no ContextVeil-specific size cap. See `LIM-027` for dialect differences.
+
 ## 7. Setup Discovery And Enrollment
 
 **SET-001** After TTY validation and successful preflight parsing of both
@@ -419,7 +465,8 @@ still be entered manually.
 
 The same single bounded project traversal MUST supply eligible lowercase
 `*.properties` files to `SET-021` and every regular file named exactly `.npmrc`
-to `SET-022`; the project tree MUST NOT be walked again.
+to `SET-022`, and files with an ASCII-case-insensitive `.ini` extension to
+`SET-024`; the project tree MUST NOT be walked again.
 
 **SET-004** Global dotenv probing MUST inspect matching files directly under the
 home directory and directly under the supported harness config directories,
@@ -429,7 +476,8 @@ general config directory.
 
 **SET-005** Both enrollment phases MUST allow manual dotenv paths, individual
 keys, wildcard file enrollment, environment names, JSON file/pointer pairs,
-properties file/decoded-key pairs, and npmrc file/exact-key pairs.
+properties file/decoded-key pairs, npmrc file/exact-key pairs, and INI exact
+section/key or section-wildcard references.
 A currently absent manual file, key, or pointer MAY be saved after explicit
 unresolved-source confirmation. Explicit manual addition MUST bypass `SET-023`.
 
@@ -554,10 +602,10 @@ explicitly added source. `Skip` remains the exact no-change path and MUST NOT
 persist newly discovered aliases or any selection changes.
 
 Groups MUST NOT combine global and project references. Manual resolvable sources
-MUST join an equal-value group immediately. Unresolved sources and dotenv
-wildcard policies remain standalone. A selected wildcard suppresses redundant
-keyed candidates from its own file, and its current values contribute alias-file
-exclusions for equal-value groups elsewhere without placing the wildcard itself
+MUST join an equal-value group immediately. Unresolved sources, dotenv
+wildcards, and INI Section Wildcards remain standalone. A selected wildcard suppresses new redundant exact candidates from
+its own file and source format (and only its own key for INI), preserving
+existing enrollment. Its current values contribute alias-file exclusions for equal-value groups elsewhere without placing the wildcard itself
 in a group.
 
 Every Candidate Group has one Group Representative: the represented Source
@@ -569,22 +617,25 @@ Source Identity order MUST compare source kind first in this V1 sequence:
 1. environment;
 2. dotenv key;
 3. dotenv wildcard;
-4. JSON.
-5. properties.
-6. npmrc.
+4. JSON;
+5. properties;
+6. npmrc;
+7. INI exact entry;
+8. INI Section Wildcard.
 
 A source kind added later in V1 MUST append after every source kind already in
 the contractual sequence when that change lands. Within one source kind, the
 identity fields in `CFG-006` MUST compare in tuple order by exact,
 case-sensitive bytes, with no locale or filesystem case folding. Path fields use
 their normalized absolute identity paths. A derived label or final JSON Pointer
-token is not an identity ordering field.
+token is not an identity ordering field. INI optional sections compare absent
+before present; empty-named sections remain distinct from absent sections.
 
 After automatic discovery and grouping, each enrollment phase MUST show rows in
 two tiers. A row is existing when it represented enrollment at the start of that
 phase; toggling it MUST NOT change its tier during the phase. Existing rows come
 first and wholly new rows second. Rows within each tier MUST be ordered by Group
-Representative. An unresolved Source Reference or dotenv wildcard policy is a
+Representative. An unresolved Source Reference or wildcard policy is a
 standalone row and acts as its own representative under the same ordering.
 Discovery iteration order MUST NOT affect grouping, representatives, or this
 initial row order.
@@ -732,14 +783,35 @@ The exclusion MUST apply once after all applicable rules compose, regardless of
 which or how many rules matched.
 
 The Common Literal exclusion MUST NOT remove or deselect an existing Enrolled
-Source, apply to an explicitly added manual Candidate, prevent dotenv wildcard
-enrollment or expansion, or affect registry construction or runtime matching. A
+Source, apply to an explicitly added manual Candidate, prevent dotenv or INI
+section-wildcard enrollment or expansion, or affect registry construction or
+runtime matching. A
 newly discovered automatic alias MUST NOT bypass the exclusion because an
 equal-value existing or manual Candidate is present. Unresolved and empty
 name-eligible sources retain their existing behavior. Exclusion is silent and
 carries no rule attribution, score, selection preference, or ordering weight.
 Vocabulary changes are observable setup behavior and MUST update this requirement
 and its fixtures.
+
+**SET-024** Project INI discovery MUST use the shared bounded walk in `SET-003`,
+including ignored and untracked regular files with an ASCII-case-insensitive
+`.ini` extension. Existing traversal exclusions, non-UTF-8 path reporting, and
+symlink/special-file safeguards apply. No machine INI crawl or named machine
+credential-store rules are introduced. Manual references MAY use any filename
+or supported path, including outside the project.
+
+For every usable entry, setup MUST apply `SET-006` to its key alone and
+`SET-017` independently to its complete value, followed by `SET-023`. Section
+names MUST NOT confer eligibility. Automatic discovery MUST emit exact
+references, never wildcard policies; malformed documents follow `SET-013`.
+
+The manual-source submenu MUST offer one INI entry with named-section,
+sectionless, and all-sections choices. All-sections enrollment MUST require
+explicit confirmation that current and future values, including short/common
+values, bypass individual review. A contextual hint when INI suggestions are
+present SHOULD direct users to this manual flow. V1 MUST NOT add per-row
+conversion actions for grouped suggestions. INI Section Wildcards follow the
+standalone, suppression, and alias-file exclusion behavior in `SET-016`.
 
 ## 8. Effective Registry
 
@@ -754,7 +826,7 @@ otherwise the first global entry in file order. Doctor SHOULD report the aliases
 without values.
 
 **REG-003** Source and key names are case-sensitive. Safe placeholder labels MUST
-derive from the environment name, dotenv or properties key, final JSON Pointer
+derive from the environment name, dotenv, properties, or INI key, final JSON Pointer
 reference token, or final colon-delimited npmrc key field only, never a file
 path. An npmrc key without a colon uses the complete key.
 
@@ -1046,7 +1118,8 @@ no recursive replacement.
 **TST-002** Config and source tests MUST cover strict unknown fields, duplicate
 identities, cross-scope duplicates, missing sources, empty values, non-UTF-8
 environment values, malformed/invalid-UTF-8 dotenv and JSON sources, the full
-JSON5 grammar, npmrc scalar grammar and keyed issues, duplicate dotenv and npmrc
+JSON5 grammar, INI grammar and section wildcards, npmrc scalar grammar and keyed
+issues, duplicate dotenv and npmrc
 keys and JSON members, JSON Pointer escaping and wrong-type targets, path
 expansion, wildcard future keys, and all-or-nothing malfunction behavior.
 
@@ -1056,7 +1129,7 @@ permissive field probes without sibling-schema gating, exact and anchored paths,
 exclusions, symlink traversal, grouped collision source-file exclusion,
 permissions, atomic writes, invalid-config preservation, repeat setup, and
 partial multi-phase failure. They MUST retain malformed-file, JSON Pointer, and
-secret-leak coverage, including npmrc project traversal and exact override path
+secret-leak coverage, including INI project traversal and npmrc exact override path
 semantics. Common Literal coverage MUST include the complete vocabulary,
 normalization and exact-match boundaries, every automatic source family, manual
 and existing enrollment, wildcard expansion, and exclusion before alias grouping.
@@ -1079,7 +1152,7 @@ tests MAY focus on setup persistence, diagnostics, logging, and telemetry rather
 than repeat adapter conformance.
 
 **TST-006** Fuzz targets MUST cover robustness of the matcher, sanitizer,
-untrusted JSON5 source, strict adapter protocol JSON, TOML, dotenv, and npmrc
+untrusted JSON5 source, strict adapter protocol JSON, TOML, dotenv, INI, and npmrc
 inputs.
 Committed corpora MUST replay routinely with mutation disabled. Bounded mutation
 MUST run separately through mise. Mutation runs MUST report a configurable seed

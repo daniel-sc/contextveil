@@ -5,7 +5,8 @@ identifies automatic candidate eligibility. Credential document rules are
 bounded location and field probes: a listed non-empty string is eligible without
 validating unrelated surrounding schema. Rules are advisory, run independently
 of adapters, and persist only ordinary explicit source references. They do not
-recursively classify arbitrary structured files.
+recursively classify arbitrary structured formats; project discovery enumerates
+the documented dotenv, properties, npmrc, and INI filenames.
 
 All machine default and valid override roots are inspected additively. Unset or
 empty overrides add nothing; relative overrides resolve from setup's invocation
@@ -28,20 +29,23 @@ admission, grouping, collision analysis, and runtime matching.
 Npmrc documents use ContextVeil's narrow UTF-8 scalar grammar and persist exact
 case-sensitive keys. They support common comments and quoting, isolate keyed
 syntax issues, and do not interpolate `${NAME}` expressions.
+INI documents use `rust-ini` 0.21.3 with escape decoding disabled and explicit
+case-sensitive section/key references. Repeated section/key assignments use the
+last value. Parsing is transactional; see `SRC-019` and `LIM-027`.
 
 Before grouping or presentation, every wholly new automatic source is silently
 excluded when its complete trimmed value equals, under ASCII case-insensitive
 comparison, `true`, `false`, `yes`, `no`, `on`, `off`, `0`, `1`, `enabled`,
 `disabled`, `null`, `nil`, `none`, `undefined`, `n/a`, `default`, or `auto`.
 This Common Literal exclusion applies across every rule below. It does not apply
-to existing enrollment, manual additions, dotenv wildcards, source resolution,
+to existing enrollment, manual additions, dotenv and INI section wildcards, source resolution,
 or runtime matching; see [`SET-023`](specification.md).
 
 ## Rule Inventory
 
 | Rule | Locations | Bounded container | Credential leaves | Notes |
 | --- | --- | --- | --- | --- |
-| Secret-like source names | Environment and discovered dotenv sources | N/A | Maintained vocabulary in [`SET-006`](specification.md) | Name gating does not inspect format or value shape; final admission remains subject to the shared Common Literal exclusion. |
+| Secret-like source names | Environment and discovered dotenv, properties, npmrc, and INI entries | INI uses key only, not section | Maintained vocabulary in [`SET-006`](specification.md) | Name gating does not inspect format or value shape; final admission remains subject to the shared Common Literal exclusion. |
 | Credential-bearing URLs | Values already surfaced by bounded discovery | N/A | The complete URL | Absolute hierarchical URLs with authority and non-empty userinfo password, per [`SET-017`](specification.md); this rule introduces no recursive structured-file scan. |
 | Codex primary credentials | `~/.codex`; `${CODEX_HOME}` | `auth.json` | `/OPENAI_API_KEY`, `/tokens/id_token`, `/tokens/access_token`, `/tokens/refresh_token`, `/personal_access_token`, `/bedrock_api_key/api_key`, `/agent_identity`, `/agent_identity/agent_private_key` | Both agent identity pointers are independent. Historical support: [`openai/codex@ff0e950`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3). |
 | Codex MCP credentials | `~/.codex`; `${CODEX_HOME}` | `.credentials.json`, then each immediate root member | `access_token`, `refresh_token` | No server metadata or sibling is required. |
@@ -57,11 +61,21 @@ or runtime matching; see [`SET-023`](specification.md).
 | Properties configuration | Eligible lowercase `*.properties` files from the one bounded project walk; `~/.gradle/gradle.properties`; `${GRADLE_USER_HOME}/gradle.properties` | Decoded logical entries | Exact keys passing the secret-name vocabulary, plus values admitted by the credential-bearing URL rule | Localization directory, bundle-basename, and two-letter locale-suffix exclusions apply to project discovery. Recognized application, bootstrap, MicroProfile, Gradle, and Sonar names are eligibility exceptions only. |
 | npmrc credentials | `~/.npmrc`; `${NPM_CONFIG_USERCONFIG}`; `${NPM_CONFIG_GLOBALCONFIG}`; every exact project `.npmrc` from the one bounded walk | Top-level scalar assignments | Exact keys beginning `//`, with a non-empty scope and ending `:_authToken`, `:_auth`, or `:_password` | Generic name gating uses only the final colon-delimited field; the complete value is independently offered to the credential-bearing URL rule. Values and registry fragments are not decoded or canonicalized. |
 
+## INI Discovery
+
+The existing name and URL rules inspect regular project files with a
+case-insensitive `.ini` extension through the shared bounded walk. Ignored and
+untracked files qualify; traversal exclusions and symlink/special-file safeguards
+still apply. No machine INI directories or credential stores are probed.
+Suggestions persist exact file/section/key references. Manual INI enrollment can
+protect one key across all current and future sections with `all_sections = true`;
+this policy is never suggested automatically.
+
 ## Boundaries
 
 These rules do not query OS keychains, execute credential helpers, read raw
-sidecars, decode values, or add runtime wildcard traversal. Copilot `.secret`,
-`.verifier`, and `mcp-secrets` files remain unsupported. Generic INI, YAML, and
-TOML sources are not scanned. Rerun setup after host locations or field
+sidecars, or decode credential representations. Rules never introduce runtime
+wildcards; those require explicit user enrollment. Copilot `.secret`,
+`.verifier`, and `mcp-secrets` files remain unsupported. YAML and TOML sources are not scanned. Rerun setup after host locations or field
 inventories change. A Common Literal may still be enrolled manually or through a
 wildcard. See [`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).
