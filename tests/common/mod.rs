@@ -9,7 +9,7 @@ pub struct ProcessFixture {
 }
 
 impl ProcessFixture {
-    pub fn new(enrolled_name: &str) -> Self {
+    pub fn new(enrolled_name: Option<&str>) -> Self {
         let root = std::env::temp_dir().join(format!(
             "contextveil-process-{}-{}",
             std::process::id(),
@@ -18,16 +18,17 @@ impl ProcessFixture {
         std::fs::create_dir_all(root.join("home").join("project")).expect("project directory");
         std::fs::create_dir_all(root.join("contextveil")).expect("config directory");
         std::fs::write(
-            root.join("contextveil").join("config.toml"),
-            format!("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"{enrolled_name}\"\n"),
-        )
-        .expect("global config");
-        std::fs::write(
             root.join("home").join("project").join(".contextveil.toml"),
             "version = 1\n",
         )
         .expect("project config");
-        Self { root }
+        let fixture = Self { root };
+        let global = enrolled_name.map_or_else(
+            || "version = 1\n".to_string(),
+            |name| format!("version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"{name}\"\n"),
+        );
+        fixture.write_global_config(&global);
+        fixture
     }
 
     pub fn run(&self, arguments: &[&str], stdin: &[u8], variables: &[(&str, &str)]) -> Output {
@@ -69,6 +70,11 @@ impl ProcessFixture {
 
     pub fn write_project_config(&self, contents: &str) {
         self.write_project_file(".contextveil.toml", contents);
+    }
+
+    pub fn write_global_config(&self, contents: &str) {
+        std::fs::write(self.root.join("contextveil").join("config.toml"), contents)
+            .expect("global config");
     }
 }
 

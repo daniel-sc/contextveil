@@ -129,7 +129,7 @@ fn copilot_tool_model_visible(stdout: &[u8]) -> Vec<u8> {
 fn enrolled_values_are_absent_at_every_process_boundary_after_intervention() {
     for case in boundaries() {
         let canary = Canary::generate("BOUNDARY_TOKEN");
-        let fixture = ProcessFixture::new(canary.label());
+        let fixture = ProcessFixture::new(Some(canary.label()));
         let project_dir = fixture.project_dir();
         let payload = (case.payload)(canary.value(), &project_dir.to_string_lossy());
         let resolved = format!("  {}  ", canary.value());
@@ -167,7 +167,7 @@ fn exact_ini_entries_are_absent_at_every_process_boundary() {
     for case in boundaries() {
         let canary = Canary::generate("TOKEN");
         let other = Canary::generate("UNSELECTED");
-        let fixture = ProcessFixture::new(canary.label());
+        let fixture = ProcessFixture::new(Some(canary.label()));
         fixture.write_project_file(
             "credentials.ini",
             &format!(
@@ -211,7 +211,7 @@ fn ini_section_wildcards_are_absent_at_every_process_boundary_and_follow_new_sec
     for case in boundaries() {
         let canary = Canary::generate("TOKEN");
         let future = Canary::generate("FUTURE_TOKEN");
-        let fixture = ProcessFixture::new("UNUSED_ENV");
+        let fixture = ProcessFixture::new(Some("UNUSED_ENV"));
         let path = fixture.write_project_file(
             "credentials.ini",
             &format!(
@@ -291,7 +291,7 @@ fn ini_section_wildcards_are_absent_at_every_process_boundary_and_follow_new_sec
 
 #[test]
 fn non_utf8_stdin_is_diagnosed_without_raw_input_reaching_output() {
-    let fixture = ProcessFixture::new("BOUNDARY_TOKEN");
+    let fixture = ProcessFixture::new(Some("BOUNDARY_TOKEN"));
     let input = [0xff, 0xfe, 0x00, 0x01];
     let output = fixture.run(&["hook", "claude"], &input, &[]);
 
