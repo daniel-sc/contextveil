@@ -31,7 +31,7 @@ run = "cargo clippy --all-targets --all-features --locked -- -D warnings"
 
 [tasks.test]
 description = "Run the unit, integration, and protocol-fixture tests"
-run = "cargo test --all-features --locked"
+run = "bash scripts/with-test-tmp.sh cargo test --all-features --locked"
 
 [tasks.build]
 description = "Build the release binary"
@@ -41,7 +41,7 @@ run = "cargo build --release --locked"
 description = "Run the OpenCode plugin protocol fixtures"
 run = [
   "cargo build --locked",
-  "bun test tests/opencode",
+  "bash scripts/with-test-tmp.sh bun test tests/opencode",
 ]
 
 [tasks.check]
@@ -50,11 +50,11 @@ depends = ["format-check", "lint", "test", "test-plugin", "fuzz-regressions"]
 
 [tasks.fuzz-regressions]
 description = "Replay the committed fuzz regression corpus"
-run = "bash scripts/fuzz-regressions.sh"
+run = "bash scripts/with-test-tmp.sh bash scripts/fuzz-regressions.sh"
 
 [tasks.fuzz-smoke]
 description = "Bounded fuzz smoke run over untrusted input surfaces"
-run = "bash scripts/fuzz-smoke.sh"
+run = "bash scripts/with-test-tmp.sh bash scripts/fuzz-smoke.sh"
 
 [tasks.package]
 description = "Build and package one release artifact for a target"

@@ -321,6 +321,10 @@ mise run package     # build and package a release artifact
 mise run release-check
 ```
 
+Test and fuzz tasks choose a private temporary directory with no ancestor project
+config or Git marker, then remove it on exit. They try `TMPDIR`, `/tmp`, and
+`/var/tmp` in order; set `TMPDIR` to a clean location if none is usable.
+
 ## More Detail
 
 - [Specification](docs/specification.md): authoritative V1 behavior
