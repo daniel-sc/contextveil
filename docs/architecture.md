@@ -410,7 +410,9 @@ for reproducibility.
   UI framework or adapter trait is required.
 - Unit and property tests cover registry and matcher invariants.
 - Filesystem tests use isolated homes/projects for config, discovery, setup, and
-  permissions.
+  permissions. Mise test and fuzz tasks also isolate `TMPDIR` from ancestor
+  `.git` and `.contextveil.toml` markers, preventing project discovery from
+  escaping fixtures; the temporary directory is removed when the task exits.
 - Protocol fixtures cover every supported path and failure mapping for every
   shipped adapter.
 - Integration tests invoke the binary over stdin/stdout rather than bypassing
