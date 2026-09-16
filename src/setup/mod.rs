@@ -1095,7 +1095,6 @@ fn add_manual(
         }
         "i" => {
             let entered = terminal.ask("INI file path:")?;
-            let entered = entered.trim().to_string();
             if entered.is_empty() {
                 terminal.line("  No path entered.");
                 return Ok(());
@@ -1108,7 +1107,7 @@ fn add_manual(
                 }
             };
             let key = terminal.ask("Exact INI key:")?;
-            if key.trim().is_empty() {
+            if key.is_empty() {
                 terminal.line("  No key entered.");
                 return Ok(());
             }
@@ -1121,14 +1120,14 @@ fn add_manual(
                         entered,
                         path,
                         section: Some(section),
-                        key: key.trim().to_string(),
+                        key,
                     }
                 }
                 "u" => SourceRef::Ini {
                     entered,
                     path,
                     section: None,
-                    key: key.trim().to_string(),
+                    key,
                 },
                 "a" => {
                     terminal.line(
@@ -1141,11 +1140,7 @@ fn add_manual(
                         terminal.line("  Not added.");
                         return Ok(());
                     }
-                    SourceRef::IniAllSections {
-                        entered,
-                        path,
-                        key: key.trim().to_string(),
-                    }
+                    SourceRef::IniAllSections { entered, path, key }
                 }
                 _ => {
                     terminal.line("  Choose n, u, or a for the INI section scope.");

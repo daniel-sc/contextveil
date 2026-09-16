@@ -634,6 +634,20 @@ fn manual_ini_all_sections_persists_a_standalone_policy_and_is_idempotent() {
 }
 
 #[test]
+fn manual_ini_preserves_the_entered_path_and_exact_key() {
+    let fixture = Fixture::new();
+    fixture.write(" spaced.ini ", "[section]\nTOKEN=value\n");
+    fixture.write(".contextveil.toml", "version = 1\n");
+    let script = "m\ni\n~/project/ spaced.ini \n TOKEN \nn\nsection\ny\n\n\n\n";
+
+    let (exit, transcript) = fixture.run(script, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let config = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(config.contains("file = \"~/project/ spaced.ini \""));
+    assert!(config.contains("key = \" TOKEN \""));
+}
+
+#[test]
 fn an_ini_wildcard_suppresses_only_its_selected_key() {
     let token = Canary::generate("INI_SELECTED_KEY");
     let other = Canary::generate("INI_OTHER_KEY");
