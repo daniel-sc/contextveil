@@ -17,7 +17,10 @@ use crate::config::{self, ConfigError, Load};
 use crate::matcher::Redactor;
 use crate::paths;
 use crate::secret::SourceId;
-use crate::source::{Environment, Resolution, Resolver, SourceMalfunction, SourceRef, Unresolved};
+use crate::source::{
+    Environment, Resolution, Resolver, SourceMalfunction, SourceRef, Unresolved,
+    enrolled_duplicate_keys,
+};
 
 /// A registry that may be used for the current event.
 #[derive(Debug, Clone, Default)]
@@ -149,21 +152,7 @@ pub fn build(environment: &Environment, project_root: Option<&Path>) -> Outcome 
         }
     }
 
-    let mut duplicate_keys = Vec::new();
-    for reference in &ordered {
-        if let Some(path) = reference.file() {
-            let duplicates = resolver.duplicate_keys_for(reference);
-            if !duplicates.is_empty()
-                && !duplicate_keys
-                    .iter()
-                    .any(|(known, keys): &(PathBuf, Vec<String>)| {
-                        known == path && keys == duplicates
-                    })
-            {
-                duplicate_keys.push((path.to_path_buf(), duplicates.to_vec()));
-            }
-        }
-    }
+    let duplicate_keys = enrolled_duplicate_keys(&resolver, ordered.iter().copied());
 
     Outcome::Ready(EffectiveRegistry {
         redactor: Redactor::new(resolved),

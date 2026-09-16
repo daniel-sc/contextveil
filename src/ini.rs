@@ -13,7 +13,7 @@ pub struct Ini {
     /// Entries in first-assignment order after last-assignment-wins.
     entries: Vec<(Option<String>, String, String)>,
     index: HashMap<(Option<String>, String), usize>,
-    duplicate_keys: Vec<String>,
+    duplicate_entries: HashSet<(Option<String>, String)>,
 }
 
 /// The value-free location of a library parse error.
@@ -40,9 +40,24 @@ impl Ini {
             .map(|(section, key, value)| (section.as_deref(), key.as_str(), value.as_str()))
     }
 
-    /// Keys assigned more than once, retained for the shared diagnostic shape.
-    pub fn duplicate_keys(&self) -> &[String] {
-        &self.duplicate_keys
+    /// Whether one exact section/key identity was assigned more than once.
+    pub fn is_duplicate(&self, section: Option<&str>, key: &str) -> bool {
+        self.duplicate_entries
+            .contains(&(section.map(str::to_owned), key.to_owned()))
+    }
+
+    /// Whether a key was assigned more than once in any section.
+    pub fn is_duplicate_in_any_section(&self, key: &str) -> bool {
+        self.duplicate_entries
+            .iter()
+            .any(|(_, duplicate_key)| duplicate_key == key)
+    }
+
+    /// Exact duplicate identities, used only by invariant checks.
+    pub fn duplicates(&self) -> impl Iterator<Item = (Option<&str>, &str)> {
+        self.duplicate_entries
+            .iter()
+            .map(|(section, key)| (section.as_deref(), key.as_str()))
     }
 }
 
@@ -64,16 +79,13 @@ pub fn parse(input: &str) -> Result<Ini, ParseError> {
     })?;
 
     let mut result = Ini::default();
-    let mut duplicate_keys = HashSet::new();
     for (section, properties) in parsed.iter() {
         let section = section.map(str::to_owned);
         for (key, value) in properties.iter() {
             let identity = (section.clone(), key.to_owned());
             if let Some(position) = result.index.get(&identity) {
                 result.entries[*position].2 = value.to_owned();
-                if duplicate_keys.insert(key) {
-                    result.duplicate_keys.push(key.to_owned());
-                }
+                result.duplicate_entries.insert(identity);
             } else {
                 result.index.insert(identity, result.entries.len());
                 result
@@ -95,7 +107,8 @@ mod tests {
             parse("token=first\n[prod]\ntoken=second\n[prod]\ntoken=third\n").expect("valid INI");
         assert_eq!(parsed.get(None, "token"), Some("first"));
         assert_eq!(parsed.get(Some("prod"), "token"), Some("third"));
-        assert_eq!(parsed.duplicate_keys(), &["token"]);
+        assert!(!parsed.is_duplicate(None, "token"));
+        assert!(parsed.is_duplicate(Some("prod"), "token"));
     }
 
     #[test]
@@ -106,7 +119,10 @@ mod tests {
         .expect("valid INI");
         assert_eq!(parsed.get(None, "token"), Some("three"));
         assert_eq!(parsed.get(Some("prod"), "token"), Some("five"));
-        assert_eq!(parsed.duplicate_keys(), &["token", "password"]);
+        assert!(parsed.is_duplicate(None, "token"));
+        assert!(parsed.is_duplicate(None, "password"));
+        assert!(parsed.is_duplicate(Some("prod"), "token"));
+        assert!(parsed.is_duplicate(Some("prod"), "password"));
     }
 
     #[test]
@@ -116,7 +132,7 @@ mod tests {
         assert_eq!(parsed.get(None, "token"), Some("plain"));
         assert_eq!(parsed.get(Some(""), "token"), Some("empty"));
         assert_eq!(parsed.get(Some("default"), "token"), Some("named"));
-        assert!(parsed.duplicate_keys().is_empty());
+        assert!(parsed.duplicates().next().is_none());
     }
 
     #[test]

@@ -318,6 +318,8 @@ code execution.
 
 **SRC-004** When a dotenv key occurs more than once, the last assignment wins.
 Setup and doctor SHOULD warn about the duplicate without showing either value.
+Duplicate warnings MUST be limited to keys covered by current enrollment; a
+dotenv wildcard covers every key in its file.
 
 **SRC-005** An absent dotenv file, absent key, or empty resolved value is
 unresolved and MUST NOT be treated as a malfunction.
@@ -374,9 +376,10 @@ separators, continuation lines, escapes, and `\\uXXXX` handling. Files are
 decoded with BOM detection (UTF-8 or UTF-16 overrides Windows-1252) and malformed
 encoded sequences use the decoder's replacement character. End-of-file MUST NOT
 panic, including BOM-only files. Decoded keys are case-sensitive and the last
-occurrence wins; setup and doctor SHOULD warn about
-duplicates without values. The resolver MUST select one exact decoded key and
-MUST NOT interpolate, merge profiles, execute commands, or extract components
+occurrence wins; setup and doctor SHOULD warn about duplicates without values.
+Duplicate warnings MUST be limited to the enrolled key. The resolver MUST select
+one exact decoded key and MUST NOT interpolate, merge profiles, execute commands,
+or extract components
 from values. An absent file, absent key, or value empty after `SRC-016` is
 unresolved. Permission denial, non-`NotFound` I/O failure, or parser error is a
 malfunction. A file referenced by multiple entries MUST be read and parsed once
@@ -423,7 +426,9 @@ interpolation or section inheritance occurs, including for `[DEFAULT]`.
 
 Repeated sections share one exact section identity; the last assignment to a
 section/key wins. Setup and doctor SHOULD warn about duplicate keys without
-values. An INI Section Wildcard MUST resolve each section's current selected-key
+values. Warnings for an exact reference MUST be limited to its enrolled
+section/key identity; an INI Section Wildcard covers its selected key in every
+section. An INI Section Wildcard MUST resolve each section's current selected-key
 value independently, applying `SRC-016`, without runtime eligibility filters.
 Wildcard results MUST use exact entry identities in section order (sectionless
 first, then case-sensitive section bytes) for deterministic canonicalization.

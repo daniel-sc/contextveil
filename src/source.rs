@@ -511,18 +511,38 @@ impl Resolver {
         }
     }
 
-    pub fn duplicate_keys_for(&self, reference: &SourceRef) -> &[String] {
+    fn duplicate_keys_for(&self, reference: &SourceRef) -> Vec<String> {
         match reference {
-            SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => {
-                match self.files.get(path) {
-                    Some(FileState::Parsed(dotenv)) => dotenv.duplicates(),
-                    _ => &[],
-                }
-            }
-            SourceRef::Properties { path, .. } => match self.properties_files.get(path) {
-                Some(PropertiesFileState::Parsed(properties)) => properties.duplicates(),
-                _ => &[],
+            SourceRef::DotenvKey { path, key, .. } => self
+                .files
+                .get(path)
+                .and_then(|state| match state {
+                    FileState::Parsed(dotenv) => dotenv
+                        .duplicates()
+                        .iter()
+                        .find(|duplicate| *duplicate == key),
+                    _ => None,
+                })
+                .cloned()
+                .into_iter()
+                .collect(),
+            SourceRef::DotenvAll { path, .. } => match self.files.get(path) {
+                Some(FileState::Parsed(dotenv)) => dotenv.duplicates().to_vec(),
+                _ => Vec::new(),
             },
+            SourceRef::Properties { path, key, .. } => self
+                .properties_files
+                .get(path)
+                .and_then(|state| match state {
+                    PropertiesFileState::Parsed(properties) => properties
+                        .duplicates()
+                        .iter()
+                        .find(|duplicate| *duplicate == key),
+                    _ => None,
+                })
+                .cloned()
+                .into_iter()
+                .collect(),
             SourceRef::Npmrc { path, key, .. } => self
                 .npmrc_files
                 .get(path)
@@ -533,15 +553,24 @@ impl Resolver {
                         .find(|duplicate| *duplicate == key),
                     _ => None,
                 })
-                .map(std::slice::from_ref)
-                .unwrap_or(&[]),
-            SourceRef::Ini { path, .. } | SourceRef::IniAllSections { path, .. } => {
-                match self.ini_files.get(path) {
-                    Some(IniFileState::Parsed(ini)) => ini.duplicate_keys(),
-                    _ => &[],
+                .cloned()
+                .into_iter()
+                .collect(),
+            SourceRef::Ini {
+                path, section, key, ..
+            } => match self.ini_files.get(path) {
+                Some(IniFileState::Parsed(ini)) if ini.is_duplicate(section.as_deref(), key) => {
+                    vec![key.clone()]
                 }
-            }
-            SourceRef::Env { .. } | SourceRef::Json { .. } => &[],
+                _ => Vec::new(),
+            },
+            SourceRef::IniAllSections { path, key, .. } => match self.ini_files.get(path) {
+                Some(IniFileState::Parsed(ini)) if ini.is_duplicate_in_any_section(key) => {
+                    vec![key.clone()]
+                }
+                _ => Vec::new(),
+            },
+            SourceRef::Env { .. } | SourceRef::Json { .. } => Vec::new(),
         }
     }
 
@@ -591,6 +620,29 @@ impl Resolver {
             .get(path)
             .expect("the INI file was just inserted")
     }
+}
+
+/// Duplicate keys covered by the enrolled references, grouped by source file.
+pub fn enrolled_duplicate_keys<'a>(
+    resolver: &Resolver,
+    references: impl IntoIterator<Item = &'a SourceRef>,
+) -> Vec<(PathBuf, Vec<String>)> {
+    let mut found: Vec<(PathBuf, Vec<String>)> = Vec::new();
+    for reference in references {
+        let Some(path) = reference.file() else {
+            continue;
+        };
+        for key in resolver.duplicate_keys_for(reference) {
+            if let Some((_, keys)) = found.iter_mut().find(|(known, _)| known == path) {
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            } else {
+                found.push((path.to_path_buf(), vec![key]));
+            }
+        }
+    }
+    found
 }
 
 fn read_dotenv(path: &Path) -> FileState {
@@ -1038,6 +1090,40 @@ mod tests {
             Resolution::Resolved(secrets) => assert_eq!(secrets[0].value, "second"),
             other => panic!("expected the cached parse, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn duplicate_reporting_is_limited_to_enrolled_keys() {
+        let fixture = Fixture::new();
+        let dotenv_path = fixture.write(
+            ".env",
+            "ENROLLED_A=first\nENROLLED_A=last\nENROLLED_B=first\nENROLLED_B=last\nUNRELATED=first\nUNRELATED=last\n",
+        );
+        let ini_path = fixture.write(
+            "credentials.ini",
+            "[enrolled]\ntoken=one\n[other]\ntoken=first\ntoken=last\n",
+        );
+        let enrolled = [
+            key_ref(&dotenv_path, "ENROLLED_A"),
+            key_ref(&dotenv_path, "ENROLLED_B"),
+            ini_ref(&ini_path, Some("enrolled"), "token"),
+        ];
+        let mut resolver = Resolver::new();
+        for reference in &enrolled {
+            let _ = resolver.resolve(reference, &Environment::default());
+        }
+
+        assert_eq!(
+            enrolled_duplicate_keys(&resolver, &enrolled),
+            [(
+                dotenv_path,
+                vec!["ENROLLED_A".to_string(), "ENROLLED_B".to_string()]
+            )]
+        );
+        assert_eq!(
+            resolver.duplicate_keys_for(&ini_all_ref(&ini_path, "token")),
+            ["token"]
+        );
     }
 
     #[test]
