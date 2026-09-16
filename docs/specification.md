@@ -784,19 +784,23 @@ case-insensitive comparison, one of `true`, `false`, `yes`, `no`, `on`, `off`,
 `0`, `1`, `enabled`, `disabled`, `null`, `nil`, `none`, `undefined`, `n/a`,
 `default`, or `auto`. Comparison MUST be exact over the complete value and MUST
 NOT use substring, token, locale-sensitive, or Unicode case-insensitive matching.
-The exclusion MUST apply once after all applicable rules compose, regardless of
-which or how many rules matched.
 
-The Common Literal exclusion MUST NOT remove or deselect an existing Enrolled
-Source, apply to an explicitly added manual Candidate, prevent dotenv or INI
-section-wildcard enrollment or expansion, or affect registry construction or
-runtime matching. A
+The same exclusion MUST cover complete simple variable references: `{{ NAME }}`,
+`${NAME}`, and `%(NAME)s`, where `NAME` is one or more dot-separated ASCII
+identifiers matching `[A-Za-z_][A-Za-z0-9_]*`. Only `{{...}}` permits inner
+whitespace, trimmed with Rust `str::trim()`. Defaults, filters, calls, and mixed
+strings do not qualify. The exclusion MUST apply once after all applicable rules
+compose, uniformly across source types including environment variables.
+
+This exclusion MUST NOT remove or deselect an existing Enrolled Source, apply to
+an explicitly added manual Candidate, prevent dotenv or INI section-wildcard
+enrollment or expansion, or affect registry construction or runtime matching. A
 newly discovered automatic alias MUST NOT bypass the exclusion because an
 equal-value existing or manual Candidate is present. Unresolved and empty
 name-eligible sources retain their existing behavior. Exclusion is silent and
 carries no rule attribution, score, selection preference, or ordering weight.
-Vocabulary changes are observable setup behavior and MUST update this requirement
-and its fixtures.
+Changes to the Common Literal vocabulary or simple-reference grammar are
+observable setup behavior and MUST update this requirement and its fixtures.
 
 **SET-024** Project INI discovery MUST use the shared bounded walk in `SET-003`,
 including ignored and untracked regular files with an ASCII-case-insensitive
@@ -821,9 +825,9 @@ standalone, suppression, and alias-file exclusion behavior in `SET-016`.
 ## 8. Effective Registry
 
 **REG-001** Every non-empty value normalized by `SRC-016` from an Enrolled Source,
-including a Common Literal and every wildcard-resolved value, becomes an active
-match pattern. Runtime MUST NOT apply `SET-023` or name, entropy, provider-format,
-length, or collision heuristics.
+including a Common Literal, a simple variable reference, and every
+wildcard-resolved value, becomes an active match pattern. Runtime MUST NOT apply
+`SET-023` or name, entropy, provider-format, length, or collision heuristics.
 
 **REG-002** If multiple references resolve to the same value, the matcher MUST
 store one pattern. Its canonical source is the first project entry in file order,
@@ -1135,9 +1139,11 @@ exclusions, symlink traversal, grouped collision source-file exclusion,
 permissions, atomic writes, invalid-config preservation, repeat setup, and
 partial multi-phase failure. They MUST retain malformed-file, JSON Pointer, and
 secret-leak coverage, including INI project traversal and npmrc exact override path
-semantics. Common Literal coverage MUST include the complete vocabulary,
-normalization and exact-match boundaries, every automatic source family, manual
-and existing enrollment, wildcard expansion, and exclusion before alias grouping.
+semantics. Common Literal and simple-reference coverage MUST include the complete
+vocabulary and grammar, normalization and exact-match boundaries, every
+automatic source family including environment sources, manual and existing
+enrollment, wildcard expansion, complex-expression suggestions, later concrete
+values requiring setup rerun, and exclusion before alias grouping.
 Collision coverage MUST include textual regions in binary files, region and read
 buffer boundaries, independent overlapping candidates, and the inclusive file
 size limit.

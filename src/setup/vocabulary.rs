@@ -1,6 +1,6 @@
 //! Admission vocabularies for setup candidates.
 //!
-//! `SET-006` and `SET-023` fix the V1 vocabularies exactly. Vocabulary changes
+//! `SET-006` and `SET-023` fix the V1 admission rules exactly. Rule changes
 //! are observable setup behavior and must update the specification and its
 //! fixtures in the same change.
 
@@ -92,11 +92,31 @@ pub fn gating_term(name: &str) -> Option<&'static str> {
         .find(|suffix| compact.ends_with(suffix))
 }
 
-/// Whether a complete, already normalized source value is a Common Literal.
-pub fn is_common_literal(value: &str) -> bool {
+/// Whether a normalized value is excluded from wholly new automatic candidates.
+pub fn excluded_automatic_value(value: &str) -> bool {
     COMMON_LITERALS
         .iter()
         .any(|literal| value.eq_ignore_ascii_case(literal))
+        || is_simple_reference(value)
+}
+
+fn is_simple_reference(value: &str) -> bool {
+    let name = if let Some(name) = value.strip_prefix("{{").and_then(|v| v.strip_suffix("}}")) {
+        name.trim()
+    } else if let Some(name) = value.strip_prefix("${").and_then(|v| v.strip_suffix('}')) {
+        name
+    } else if let Some(name) = value.strip_prefix("%(").and_then(|v| v.strip_suffix(")s")) {
+        name
+    } else {
+        return false;
+    };
+    name.split('.').all(|part| {
+        let mut bytes = part.bytes();
+        bytes
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+            && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    })
 }
 
 #[cfg(test)]
@@ -167,15 +187,76 @@ mod tests {
     #[test]
     fn common_literals_are_exact_and_ascii_case_insensitive() {
         for value in COMMON_LITERALS {
-            assert!(is_common_literal(value), "`{value}` should be excluded");
             assert!(
-                is_common_literal(&value.to_ascii_uppercase()),
+                excluded_automatic_value(value),
+                "`{value}` should be excluded"
+            );
+            assert!(
+                excluded_automatic_value(&value.to_ascii_uppercase()),
                 "`{value}` should be excluded regardless of ASCII case"
             );
         }
         for value in ["", " true ", "truex", "xtrue", "n\\a", "áuto"] {
             assert!(
-                !is_common_literal(value),
+                !excluded_automatic_value(value),
+                "`{value}` should remain eligible"
+            );
+        }
+    }
+
+    #[test]
+    fn simple_references_exclude_only_complete_names() {
+        for value in [
+            "{{ someansibleexpr }}",
+            "{{vault.database_password}}",
+            "{{\t_name.VALUE_2\n}}",
+            "${NPM_TOKEN}",
+            "${database.password}",
+            "%(password)s",
+            "%(_name.VALUE_2)s",
+        ] {
+            assert!(
+                excluded_automatic_value(value),
+                "`{value}` should be excluded"
+            );
+        }
+        for value in [
+            "{{}}",
+            "{{ }}",
+            "${}",
+            "%()s",
+            "{{ 123 }}",
+            "${9NAME}",
+            "${a.}",
+            "${.a}",
+            "${a..b}",
+            "${naïve}",
+            "${ NAME }",
+            "%( name )s",
+            "%(name)S",
+            "{{ a b }}",
+            "{{ a-b }}",
+            "{{ a['b'] }}",
+            "{{ a() }}",
+            "{{ a | default('CANARY_DEFAULT') }}",
+            "${NAME:CANARY_DEFAULT}",
+            "${NAME:-CANARY_DEFAULT}",
+            "${section:option}",
+            "${NAME?}",
+            "{{ 'CANARY_LITERAL' }}",
+            "{{a}}{{b}}",
+            "${A}${B}",
+            "prefix{{ name }}",
+            "{{ name }}suffix",
+            "Bearer ${NAME}",
+            "\\${NAME}",
+            "{{ name }",
+            "${NAME",
+            "%NAME%",
+            "$NAME",
+        ] {
+            assert!(
+                !excluded_automatic_value(value),
                 "`{value}` should remain eligible"
             );
         }

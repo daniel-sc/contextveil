@@ -37,15 +37,19 @@ Before grouping or presentation, every wholly new automatic source is silently
 excluded when its complete trimmed value equals, under ASCII case-insensitive
 comparison, `true`, `false`, `yes`, `no`, `on`, `off`, `0`, `1`, `enabled`,
 `disabled`, `null`, `nil`, `none`, `undefined`, `n/a`, `default`, or `auto`.
-This Common Literal exclusion applies across every rule below. It does not apply
-to existing enrollment, manual additions, dotenv and INI section wildcards, source resolution,
-or runtime matching; see [`SET-023`](specification.md).
+The same exclusion covers complete simple variable references in the forms
+`{{ NAME }}`, `${NAME}`, and `%(NAME)s`; complex expressions and mixed strings
+remain ordinary suggestions. It applies across every rule and source type,
+including environment sources. It does not apply to existing enrollment, manual
+additions, dotenv and INI section wildcards, source resolution, or runtime
+matching; see [`SET-023`](specification.md). Rerun setup when an excluded
+reference later becomes concrete, or enroll the underlying concrete source.
 
 ## Rule Inventory
 
 | Rule | Locations | Bounded container | Credential leaves | Notes |
 | --- | --- | --- | --- | --- |
-| Secret-like source names | Environment and discovered dotenv, properties, npmrc, and INI entries | INI uses key only, not section | Maintained vocabulary in [`SET-006`](specification.md) | Name gating does not inspect format or value shape; final admission remains subject to the shared Common Literal exclusion. |
+| Secret-like source names | Environment and discovered dotenv, properties, npmrc, and INI entries | INI uses key only, not section | Maintained vocabulary in [`SET-006`](specification.md) | Name gating does not inspect format or value shape; final admission remains subject to the shared automatic-value exclusion. |
 | Credential-bearing URLs | Values already surfaced by bounded discovery | N/A | The complete URL | Absolute hierarchical URLs with authority and non-empty userinfo password, per [`SET-017`](specification.md); this rule introduces no recursive structured-file scan. |
 | Codex primary credentials | `~/.codex`; `${CODEX_HOME}` | `auth.json` | `/OPENAI_API_KEY`, `/tokens/id_token`, `/tokens/access_token`, `/tokens/refresh_token`, `/personal_access_token`, `/bedrock_api_key/api_key`, `/agent_identity`, `/agent_identity/agent_private_key` | Both agent identity pointers are independent. Historical support: [`openai/codex@ff0e950`](https://github.com/openai/codex/commit/ff0e95007cca1edfc0877bbbbfaeb9eb77ed92b3). |
 | Codex MCP credentials | `~/.codex`; `${CODEX_HOME}` | `.credentials.json`, then each immediate root member | `access_token`, `refresh_token` | No server metadata or sibling is required. |
@@ -77,5 +81,5 @@ These rules do not query OS keychains, execute credential helpers, read raw
 sidecars, or decode credential representations. Rules never introduce runtime
 wildcards; those require explicit user enrollment. Copilot `.secret`,
 `.verifier`, and `mcp-secrets` files remain unsupported. YAML and TOML sources are not scanned. Rerun setup after host locations or field
-inventories change. A Common Literal may still be enrolled manually or through a
+inventories change. An excluded value may still be enrolled manually or through a
 wildcard. See [`LIM-023`](limitations.md#lim-023-known-source-rules-are-advisory).

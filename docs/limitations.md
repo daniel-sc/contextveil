@@ -56,10 +56,10 @@ these paths unsupported.
 ### LIM-004: Common Values Can Be Destructive
 
 **Reality:** The user may enroll any non-empty UTF-8 value. Setup suppresses a
-fixed Common Literal vocabulary only for wholly new automatic Candidates.
-Existing, manual, and wildcard enrollment can still activate common values, and
-runtime has no minimum length or collision heuristic. Wildcard files
-automatically enroll future keys.
+fixed Common Literal vocabulary and complete simple variable references only
+for wholly new automatic Candidates. Existing, manual, and wildcard enrollment
+can still activate those values, and runtime has no minimum length or collision
+heuristic. Wildcard files automatically enroll future keys.
 
 **Impact:** A value such as `foo` can replace unrelated text extensively and
 degrade tool semantics. Future wildcard values receive no enrollment-time review.
@@ -67,10 +67,11 @@ degrade tool semantics. Future wildcard values receive no enrollment-time review
 **Workaround:** Heed setup and doctor collision warnings; avoid wildcard policies
 for files containing non-secret settings.
 
-**Verification:** Setup excludes Common Literals from automatic Candidates,
-allows manual and existing enrollment, requires explicit wildcard confirmation,
-and unselects currently colliding candidates by default. Registry coverage proves
-that manually enrolled and wildcard-resolved Common Literals remain active.
+**Verification:** Setup excludes Common Literals and complete simple variable
+references from automatic Candidates across every source family, allows manual
+and existing enrollment, requires explicit wildcard confirmation, and unselects
+currently colliding candidates by default. Registry coverage proves that
+manually enrolled and wildcard-resolved values remain active.
 
 ### LIM-005: No Automatic Rehydration
 
@@ -396,8 +397,9 @@ the reporting half alone.
 Bounded recognized credential document rules probe maintained locations and fields
 without validating a complete vendor schema. A relevant bounded field can suggest
 an inactive, stale, or non-secret string unless its complete value is in the fixed
-Common Literal vocabulary. Every applicable rule runs independently of adapters,
-and new eligible suggestions are selected by default unless a collision is found.
+Common Literal vocabulary or is a complete simple variable reference. Every
+applicable rule runs independently of adapters, and new eligible suggestions are
+selected by default unless a collision is found.
 Defaults and valid override locations are both inspected; exact references are
 persisted only after user review. Claude primary plaintext credentials are not
 inspected on macOS because they are keychain-backed.
@@ -406,18 +408,23 @@ inspected on macOS because they are keychain-backed.
 new field names. Unknown fields, raw sidecars, OS keychains, and credential
 helpers remain undiscovered. JSON documents still use full JSON5 with duplicate
 members rejected, and dynamic names that cannot become exact RFC 6901 pointers
-are skipped. A real credential equal to a Common Literal is intentionally not
-suggested automatically. No complete vendor schema is validated.
+are skipped. Even a real credential is not suggested if its literal value matches
+an exclusion. Complex expressions remain eligible and are treated literally if
+enrolled. Excluded sources are not automatically enrolled when their values later
+become concrete. No complete vendor schema is validated.
 
 **Workaround:** Review masked candidates before saving, heed collision warnings,
 and rerun setup after host path or field inventory updates. Manually enroll a
 representable environment, dotenv, exact JSON, properties, INI, or npmrc reference,
-including an intentionally protected Common Literal, when needed. Use separate
-keychain or helper controls for sources outside the inventory.
+including intentionally excluded values, when needed. Enroll the underlying
+concrete source for a variable reference, or rerun setup after replacing the
+reference with a concrete value. Use separate keychain or helper controls for
+sources outside the inventory.
 
 **Verification:** Probe fixtures cover independent eligible-string discovery,
-uniform Common Literal exclusion, manual, existing, and wildcard bypass, bounded
-traversal, dynamic pointer escaping, additive defaults and overrides,
+uniform Common Literal and simple-reference exclusion, manual, existing, and
+wildcard bypass, rediscovery of concrete values, bounded traversal, dynamic
+pointer escaping, additive defaults and overrides,
 malformed-file isolation, exact-reference persistence, automatic selection and
 collision behavior, filesystem boundaries, and canary-free output. The
 maintained inventory is [`docs/known-sources.md`](docs/known-sources.md).

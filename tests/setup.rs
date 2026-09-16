@@ -701,6 +701,93 @@ fn common_literals_are_excluded_from_every_automatic_source_family() {
 }
 
 #[test]
+fn simple_reference_values_are_excluded_from_every_automatic_source_family() {
+    let canary = Canary::generate("INI_REAL_TEMPLATE_TOKEN");
+    let fixture = Fixture::new();
+    fixture.write(".env.template", "DOTENV_TEMPLATE_TOKEN=${dotenv.token}\n");
+    fixture.write(
+        ".claude/settings.json",
+        r#"{"env":{"ANTHROPIC_API_KEY":"${claude.token}"}}"#,
+    );
+    fixture.write(
+        "application.properties",
+        "PROPERTIES_TEMPLATE_TOKEN=%(properties.token)s\n",
+    );
+    fixture.write(
+        ".npmrc",
+        "//registry.example.test/:_authToken={{ npm.token }}\n",
+    );
+    fixture.write(
+        "ansible.template.ini",
+        &format!(
+            "[service]\nINI_TEMPLATE_TOKEN={{{{ ini.token }}}}\nINI_REAL_TOKEN={}\n",
+            canary.value()
+        ),
+    );
+    let fallback = format!("{{{{ value | default('{}') }}}}", canary.value());
+    let environment = fixture.environment(&[
+        ("ENV_TEMPLATE_TOKEN", "  {{ env.token }}  "),
+        ("COMPLEX_TEMPLATE_TOKEN", &fallback),
+    ]);
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+
+    for excluded in [
+        "ENV_TEMPLATE_TOKEN",
+        "DOTENV_TEMPLATE_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "PROPERTIES_TEMPLATE_TOKEN",
+        "_authToken",
+        "INI_TEMPLATE_TOKEN",
+    ] {
+        assert!(!transcript.contains(excluded), "{excluded}: {transcript}");
+        assert!(!global.contains(excluded), "{excluded}: {global}");
+        assert!(!project.contains(excluded), "{excluded}: {project}");
+    }
+    assert!(project.contains("INI_REAL_TOKEN"), "{project}");
+    assert!(project.contains("ansible.template.ini"), "{project}");
+    assert!(global.contains("COMPLEX_TEMPLATE_TOKEN"), "{global}");
+    assert_canary_absent(
+        "simple reference setup transcript",
+        transcript.as_bytes(),
+        &canary,
+    );
+    assert_canary_absent("simple reference setup config", global.as_bytes(), &canary);
+    assert_canary_absent("simple reference setup config", project.as_bytes(), &canary);
+    for reference in [
+        "{{ env.token }}",
+        "${dotenv.token}",
+        "${claude.token}",
+        "%(properties.token)s",
+        "{{ npm.token }}",
+        "{{ ini.token }}",
+    ] {
+        assert!(!transcript.contains(reference), "{reference}: {transcript}");
+    }
+
+    let replacement = Canary::generate("INI_RENDERED_TOKEN");
+    fixture.write(
+        "ansible.template.ini",
+        &format!(
+            "[service]\nINI_TEMPLATE_TOKEN={}\nINI_REAL_TOKEN={}\n",
+            replacement.value(),
+            canary.value()
+        ),
+    );
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    assert!(project.contains("INI_TEMPLATE_TOKEN"), "{project}");
+    for canary in [&canary, &replacement] {
+        assert_canary_absent("rerun setup transcript", transcript.as_bytes(), canary);
+        assert_canary_absent("rerun setup config", project.as_bytes(), canary);
+    }
+}
+
+#[test]
 fn registry_and_proxy_urls_are_discovered_in_dotenv_files() {
     let registry = Canary::generate("REGISTRY_URL_PASSWORD");
     let proxy = Canary::generate("PROXY_URL_PASSWORD");
@@ -855,34 +942,35 @@ fn an_enrolled_alias_keeps_its_colliding_group_selected() {
 }
 
 #[test]
-fn a_common_literal_alias_does_not_join_an_existing_enrollment() {
-    let fixture = Fixture::new();
-    std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
-        .expect("config directory");
-    std::fs::write(
-        fixture.global_config(),
-        "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"FIRST_TOKEN\"\n",
-    )
-    .expect("global config");
-    let environment =
-        fixture.environment(&[("FIRST_TOKEN", "disabled"), ("SECOND_TOKEN", "disabled")]);
+fn excluded_automatic_aliases_do_not_join_an_existing_enrollment() {
+    for value in ["disabled", "{{ shared.token }}", "${TOKEN}", "%(token)s"] {
+        let fixture = Fixture::new();
+        std::fs::create_dir_all(fixture.global_config().parent().expect("parent"))
+            .expect("config directory");
+        std::fs::write(
+            fixture.global_config(),
+            "version = 1\n\n[[secret]]\nsource = \"env\"\nname = \"FIRST_TOKEN\"\n",
+        )
+        .expect("global config");
+        let environment = fixture.environment(&[("FIRST_TOKEN", value), ("SECOND_TOKEN", value)]);
 
-    let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
-    assert_eq!(exit, Exit::Ok, "{transcript}");
-    assert!(
-        transcript.contains("env FIRST_TOKEN (enrolled)"),
-        "{transcript}"
-    );
-    assert!(
-        transcript.contains("secret-like source name"),
-        "{transcript}"
-    );
-    assert!(!transcript.contains("SECOND_TOKEN"), "{transcript}");
-    assert!(!transcript.contains("Same current value"), "{transcript}");
+        let (exit, transcript) = fixture.run(ACCEPT_ALL, &environment);
+        assert_eq!(exit, Exit::Ok, "{transcript}");
+        assert!(
+            transcript.contains("env FIRST_TOKEN (enrolled)"),
+            "{transcript}"
+        );
+        assert!(
+            transcript.contains("secret-like source name"),
+            "{transcript}"
+        );
+        assert!(!transcript.contains("SECOND_TOKEN"), "{transcript}");
+        assert!(!transcript.contains("Same current value"), "{transcript}");
 
-    let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
-    assert!(global.contains("FIRST_TOKEN"), "{global}");
-    assert!(!global.contains("SECOND_TOKEN"), "{global}");
+        let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
+        assert!(global.contains("FIRST_TOKEN"), "{global}");
+        assert!(!global.contains("SECOND_TOKEN"), "{global}");
+    }
 }
 
 #[test]
@@ -1067,12 +1155,25 @@ fn wildcard_enrollment_requires_an_extra_confirmation() {
 }
 
 #[test]
-fn manual_and_wildcard_enrollment_can_protect_common_literals() {
+fn manual_and_wildcard_enrollment_can_protect_excluded_values() {
     let fixture = Fixture::new();
-    fixture.write(".env.flags", "ORDINARY=default\n");
-    let environment = fixture.environment(&[("API_TOKEN", "true")]);
+    fixture.write(
+        ".env.flags",
+        "ORDINARY=default\nWILDCARD_TEMPLATE_TOKEN={{ wildcard.token }}\n",
+    );
+    fixture.write(
+        "template.ini",
+        "[service]\nINI_WILDCARD_TEMPLATE_TOKEN={{ ini.wildcard }}\n",
+    );
+    let environment = fixture.environment(&[
+        ("API_TOKEN", "true"),
+        ("MANUAL_TEMPLATE_TOKEN", "{{ manual.token }}"),
+    ]);
 
-    let (exit, transcript) = fixture.run("e\nAPI_TOKEN\n\nw\n.env.flags\ny\n\n\n", &environment);
+    let (exit, transcript) = fixture.run(
+        "e\nAPI_TOKEN\ne\nMANUAL_TEMPLATE_TOKEN\n\nw\n.env.flags\ny\nm\ni\ntemplate.ini\nINI_WILDCARD_TEMPLATE_TOKEN\na\ny\n\n\n",
+        &environment,
+    );
     assert_eq!(exit, Exit::Ok, "{transcript}");
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
     let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
@@ -1083,14 +1184,20 @@ fn manual_and_wildcard_enrollment_can_protect_common_literals() {
         registry::Outcome::Ready(registry) => registry,
         registry::Outcome::Malfunction(problem) => panic!("registry malfunction: {problem:?}"),
     };
-    assert_eq!(registry.redactor.active_count(), 2);
+    assert_eq!(registry.redactor.active_count(), 5);
     let mut tally = registry.redactor.tally();
     let redacted = registry
         .redactor
-        .redact("true default", &mut tally)
-        .expect("both common literals should be redacted");
+        .redact(
+            "true default {{ manual.token }} {{ wildcard.token }} {{ ini.wildcard }}",
+            &mut tally,
+        )
+        .expect("manually enrolled values should be redacted");
     assert!(!redacted.contains("true"), "{redacted}");
     assert!(!redacted.contains("default"), "{redacted}");
+    assert!(!redacted.contains("{{ manual.token }}"), "{redacted}");
+    assert!(!redacted.contains("{{ wildcard.token }}"), "{redacted}");
+    assert!(!redacted.contains("{{ ini.wildcard }}"), "{redacted}");
 }
 
 #[test]

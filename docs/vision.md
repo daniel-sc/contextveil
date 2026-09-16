@@ -95,8 +95,8 @@ The normal journey is:
 1. Install the standalone binary.
 2. Run `contextveil setup` from a project directory.
 3. Review global and project candidates identified by supported Known Source
-   Rules and admitted after the Common Literal exclusion, without exposing
-   complete plaintext values.
+   Rules and admitted after the Common Literal and simple variable-reference
+   exclusions, without exposing complete plaintext values.
 4. Select supported coding-agent integrations.
 5. Work normally; clean events are silent.
 6. See a concise notification only when ContextVeil redacts a value.
@@ -109,9 +109,10 @@ change.
 
 - **Local by default.** Runtime resolution and redaction make no network calls.
 - **User-authorized enrollment.** Known Source Rules identify setup candidates;
-  one small, transparent Common Literal exclusion removes destructive automatic
-  suggestions, and the user decides what to enroll. Manual enrollment remains
-  authoritative.
+  one small, transparent setup-only exclusion removes destructive common
+  literals and complete simple variable references across all source types,
+  including environment sources, and the user decides what to enroll. Manual
+  enrollment remains authoritative.
 - **Boring runtime.** Source values receive one documented whitespace trim;
   matching is otherwise literal, case-sensitive, and deterministic.
 - **Source references over snapshots.** Values are resolved from explicit local

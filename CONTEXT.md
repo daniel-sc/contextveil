@@ -25,8 +25,8 @@ _Avoid_: Detector, source adapter, adapter-specific discovery
 
 Recognized credential document rules are bounded location and field probes that
 identify eligible non-empty string values without validating unrelated
-surrounding schema. Automatic eligibility remains subject to the Common Literal
-exclusion.
+surrounding schema. Automatic eligibility remains subject to the shared
+automatic-candidate exclusions.
 
 **Known Source**:
 A local source recognized by a Known Source Rule. Use this shorter phrase only
@@ -55,6 +55,11 @@ ASCII case folding. This setup-only exclusion does not affect existing
 enrollment, explicit manual additions, dotenv wildcard and INI Section Wildcard enrollment, source
 resolution, or runtime matching.
 _Avoid_: Non-secret value, runtime ignore list, secret denylist
+
+The centralized setup-only exclusion also covers complete simple variable
+references as defined by [`SET-023`](docs/specification.md), including from
+environment sources. Complex expressions and mixed strings remain ordinary
+suggestions.
 
 **JSON Source**:
 An enrolled or discovered UTF-8 JSON5 document persisted with `source = "json"`
