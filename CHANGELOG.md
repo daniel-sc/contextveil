@@ -5,6 +5,11 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+### Added
+
+- Add project INI discovery, exact section/key enrollment, and opt-in protection
+  of one key across all current and future sections.
+
 ### Fixed
 
 - Fixed crashes when reading certain UTF-16 properties files that could interrupt

@@ -52,7 +52,7 @@ The core owns:
 - config validation and project selection;
 - global and project registry composition;
 - environment, dotenv, exact-pointer JSON, exact-key properties, and exact-key
-  npmrc source resolution;
+  npmrc and INI source resolution, including explicit INI Section Wildcards;
 - group-level equal-value enrollment state,
   deterministic Source Identity ordering, and collision analysis;
 - canonicalization of duplicate resolved values;
@@ -146,8 +146,8 @@ writer-locking mechanism is tactical.
 The minimum conceptual types are:
 
 - `SourceReference`: environment, one dotenv key, all keys in a dotenv file, one
-  exact JSON file pointer, one exact decoded properties key, or one exact npmrc
-  key;
+  exact JSON file pointer, one exact decoded properties key, one exact npmrc
+  key, one exact INI section/key, or one INI key across all sections;
 - `SourceIdentity`: the value-free equality and deterministic ordering key for a
   source reference;
 - `KnownSourceRule`: a maintained deterministic setup-time automatic candidate
@@ -189,7 +189,7 @@ must not depend on setup having performed a migration.
 
 ## Source Resolvers
 
-The current source expansion has five concrete resolver families:
+The current source expansion has six concrete resolver families:
 
 - environment variables inherited by the hook process;
 - dotenv files parsed without interpolation or execution;
@@ -200,6 +200,10 @@ The current source expansion has five concrete resolver families:
   Windows-1252 behavior and selected by exact decoded key.
 - npmrc files parsed with ContextVeil's narrow UTF-8 scalar grammar and selected
   by exact case-sensitive key, without environment interpolation.
+- INI files parsed through a thin `rust-ini` 0.21.3 wrapper, with escape decoding
+  disabled, selected by exact section/key or an explicit section wildcard.
+  The wrapper owns last-assignment resolution and value-free errors; library
+  grammar remains the parsing contract. No interpolation or inheritance occurs.
 
 Every resolver trims decoded values with Rust `str::trim()` before resolution;
 all later setup and runtime behavior uses that value. Setup may apply `SET-023`
@@ -212,8 +216,8 @@ be read and parsed once per event where practical, but caching must not survive
 the process.
 
 Additional file formats should be implemented as explicit source variants behind
-the same registry operation. Generic INI fields remain a non-contract plan. Do
-not expose a public plugin API or dynamic resolver loading in anticipation.
+the same registry operation. Do not expose a public plugin API or dynamic
+resolver loading in anticipation.
 
 ## Known Source Rules
 
@@ -241,7 +245,7 @@ The closed location and field definitions live as data in
 `src/setup/known_source.rs`; one bounded probe engine evaluates them. The engine
 supports exact pointers, immediate dynamic members, bounded maps, and bounded
 filename predicates. `src/setup/discovery.rs` performs one shared bounded
-project traversal for dotenv and npmrc files and the anchored Claude
+project traversal for dotenv, properties, npmrc, and INI files and the anchored Claude
 `.claude/settings.json` and `.mcp.json` patterns. There is no runtime
 Known Source Rule runtime variant: discovery emits existing `SourceReference`
 variants only.
@@ -263,6 +267,13 @@ paths, and every exact `.npmrc` found by that shared project walk. It emits exac
 npmrc references for credential keys and offers every valid scalar independently
 to the shared name and credential-bearing URL rules. The parser remains a
 source-specific primitive, not an INI framework.
+
+The same walk supplies case-insensitive `.ini` files to the existing key-name
+and credential-bearing URL rules. INI discovery emits exact references, while
+manual enrollment may add a section wildcard. Setup extends existing standalone
+wildcard handling to cover one INI file/key, retaining exact enrolled aliases.
+No machine INI inventory or recursive home scan is introduced. See
+[ADR-0004](adr/0004-ini-discovery-and-explicit-section-wildcards.md).
 
 Codex, OpenCode, Copilot, and Claude representable primary and MCP plaintext
 stores form the first recognized credential-document release. Claude primary
@@ -405,7 +416,7 @@ for reproducibility.
 - Leak-regression tests assert canaries are absent from stdout, stderr,
   diagnostics, and returned model content.
 - Fuzz targets distinguish untrusted JSON5 source documents from strict harness
-  protocol JSON, and also cover TOML, dotenv, npmrc, and matcher inputs.
+  protocol JSON, and also cover TOML, dotenv, INI, npmrc, and matcher inputs.
 - Live networked tests are optional; Claude resume behavior is a manual release
   qualification.
 

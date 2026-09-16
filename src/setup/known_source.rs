@@ -513,6 +513,20 @@ pub fn project(project_root: &Path, files: &ProjectFiles) -> Found {
             }
         }
     }
+    for file in &files.ini {
+        let Some(entered) = file.entered.as_deref() else {
+            unavailable(&mut found, &file.path, "its path is not valid UTF-8");
+            continue;
+        };
+        match &file.state {
+            super::discovery::IniState::Unavailable(why) => {
+                unavailable(&mut found, &file.path, why.reason());
+            }
+            super::discovery::IniState::Available(ini) => {
+                add_ini_candidates(&mut found, &file.path, entered, ini);
+            }
+        }
+    }
     deduplicate(&mut found.sources);
     found
 }
@@ -638,6 +652,33 @@ fn add_properties_candidates(
             .entry(id)
             .or_default()
             .push(Rule::PropertiesConfiguration);
+    }
+}
+
+fn add_ini_candidates(found: &mut Found, path: &Path, entered: &str, ini: &crate::ini::Ini) {
+    for (section, key, value) in ini.entries() {
+        let value = value.trim();
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        let mut rules = Vec::new();
+        if super::vocabulary::gating_term(key).is_some() {
+            rules.push(Rule::SecretLikeName);
+        }
+        if super::credential_url::is_credential_bearing(value) {
+            rules.push(Rule::CredentialBearingUrl);
+        }
+        if rules.is_empty() {
+            continue;
+        }
+        let source = SourceRef::Ini {
+            entered: entered.to_string(),
+            path: path.to_path_buf(),
+            section: section.map(str::to_string),
+            key: key.to_string(),
+        };
+        found.rules.insert(source.id(), rules);
+        found.sources.push(source);
     }
 }
 
@@ -1082,6 +1123,32 @@ mod tests {
     }
 
     #[test]
+    fn ini_rules_compose_independently_for_each_exact_entry() {
+        let canary = Canary::generate("INI_RULE");
+        let ini = crate::ini::parse(&format!(
+            "[auth]\ntoken={}\nendpoint=https://user:{}@example.test/\npassword=https://user:{}@example.test/\ncolor=blue\nempty_token=\n",
+            canary.value(), canary.value(), canary.value()
+        ))
+        .expect("valid INI");
+        let path = Path::new("/project/config.ini");
+        let mut found = Found::default();
+        add_ini_candidates(&mut found, path, "config.ini", &ini);
+        assert_eq!(found.sources.len(), 3);
+        for (key, rules) in [
+            ("token", vec![Rule::SecretLikeName]),
+            ("endpoint", vec![Rule::CredentialBearingUrl]),
+            (
+                "password",
+                vec![Rule::SecretLikeName, Rule::CredentialBearingUrl],
+            ),
+        ] {
+            let id = SourceId::ini(path.to_path_buf(), Some("auth".into()), key);
+            assert_eq!(found.rules[&id], rules);
+        }
+        assert_found_is_canary_free(&found, &canary);
+    }
+
+    #[test]
     fn npmrc_machine_paths_are_additive_and_rules_compose_by_exact_entry() {
         let tree = Tree::new();
         let canary = Canary::generate("NPMRC_RULE");
@@ -1371,6 +1438,7 @@ mod tests {
             dotenv: vec![],
             properties: vec![],
             npmrc: vec![],
+            ini: vec![],
             claude_settings: vec![settings],
             claude_mcp: vec![mcp],
         };

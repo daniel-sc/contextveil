@@ -28,7 +28,10 @@ use crate::paths;
 use crate::sanitize;
 use crate::secret::SourceId;
 use crate::setup::collision;
-use crate::source::{Environment, Resolution, Resolver, SourceMalfunction, SourceRef, Unresolved};
+use crate::source::{
+    Environment, Resolution, Resolver, SourceMalfunction, SourceRef, Unresolved,
+    enrolled_duplicate_keys,
+};
 
 /// Every installed runtime hook uses this timeout (`RUN-004`).
 const EXPECTED_TIMEOUT_SECONDS: u64 = 5;
@@ -231,19 +234,8 @@ impl Snapshot {
             resolutions.push((source.clone(), resolution));
         }
 
-        let mut duplicate_keys: Vec<(PathBuf, Vec<String>)> = Vec::new();
-        for (source, _) in &resolutions {
-            if let Some(path) = source.file() {
-                let duplicates = resolver.duplicate_keys_for(source);
-                if !duplicates.is_empty()
-                    && !duplicate_keys
-                        .iter()
-                        .any(|(known, keys)| known == path && keys == duplicates)
-                {
-                    duplicate_keys.push((path.to_path_buf(), duplicates.to_vec()));
-                }
-            }
-        }
+        let duplicate_keys =
+            enrolled_duplicate_keys(&resolver, resolutions.iter().map(|(source, _)| source));
 
         // A malfunction disables the whole registry for a runtime event
         // (`CFG-012`, `SRC-006`), so the reported active count must reflect that.
@@ -460,10 +452,16 @@ impl Snapshot {
         }
 
         for (path, keys) in &self.duplicate_keys {
+            let key_list = keys
+                .iter()
+                .map(|key| sanitize::text(key))
+                .collect::<Vec<_>>()
+                .join(", ");
             findings.push(Finding::warning(format!(
-                "{} assigns {} more than once; the last assignment wins",
+                "{} assigns {} more than once ({}); the last assignment wins",
                 sanitize::path(path),
-                count(keys.len(), "key", "keys")
+                count(keys.len(), "key", "keys"),
+                key_list
             )));
         }
 
@@ -790,6 +788,22 @@ fn describe_source(id: &SourceId) -> String {
         ),
         SourceId::Npmrc { path, key } => {
             format!("npmrc {} key {}", sanitize::path(path), sanitize::text(key))
+        }
+        SourceId::Ini { path, section, key } => format!(
+            "ini {} {} key {}",
+            sanitize::path(path),
+            section
+                .as_deref()
+                .map(|section| format!("section [{}]", sanitize::text(section)))
+                .unwrap_or_else(|| "no section".to_string()),
+            sanitize::text(key)
+        ),
+        SourceId::IniAllSections { path, key } => {
+            format!(
+                "ini {} key {} (all sections)",
+                sanitize::path(path),
+                sanitize::text(key)
+            )
         }
     }
 }

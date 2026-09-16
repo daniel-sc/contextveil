@@ -50,6 +50,10 @@ name = "limits"
 required-features = ["testing"]
 
 [[test]]
+name = "ini"
+required-features = ["testing"]
+
+[[test]]
 name = "documentation"
 
 [[bench]]
@@ -64,6 +68,7 @@ aho-corasick = "1.1.4"
 # Reuse java-properties' decoder before adding the EOF-panic workaround.
 encoding_rs = "0.8.35"
 java-properties = "2.0.0"
+rust-ini = { version = "0.21.3", default-features = false }
 json5 = "1.3.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }

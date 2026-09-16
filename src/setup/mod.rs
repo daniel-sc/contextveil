@@ -255,6 +255,11 @@ fn enrollment_phase(
                 notice.display, notice.reason
             ));
         }
+        if has_ini_suggestions(&items) {
+            terminal.line(
+                "  hint: To protect a key across current and future sections, use Manual sources → INI key → All sections.",
+            );
+        }
         render(terminal, &items);
         render_actions(terminal, visible_count(&items));
         let answer = match terminal.ask(">") {
@@ -331,7 +336,7 @@ fn enrollment_phase(
                 Ok(()) => {}
                 Err(Cancelled) => return cancelled(terminal),
             },
-            "e" | "k" | "w" | "j" | "p" | "r" => {
+            "e" | "k" | "w" | "j" | "p" | "r" | "i" => {
                 match add_manual(terminal, answer.trim(), scope, &mut items, &mut context) {
                     Ok(()) => {}
                     Err(Cancelled) => return cancelled(terminal),
@@ -361,7 +366,7 @@ fn manual_sources(
         let answer = terminal.ask("manual>")?;
         match answer.trim() {
             "b" | "" => return Ok(()),
-            "e" | "k" | "w" | "j" | "p" | "r" => {
+            "e" | "k" | "w" | "j" | "p" | "r" | "i" => {
                 add_manual(terminal, answer.trim(), scope, items, context)?;
                 return Ok(());
             }
@@ -387,8 +392,22 @@ struct AliasInventory {
 
 struct WildcardAliases {
     scope: Scope,
-    path: PathBuf,
+    id: SourceId,
     values: Vec<String>,
+}
+
+impl WildcardAliases {
+    fn new(scope: Scope, item: &Item) -> Self {
+        Self {
+            scope,
+            id: item.members[0].source.id(),
+            values: item.wildcard_values.clone(),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.id.path().expect("a wildcard always has a file")
+    }
 }
 
 /// Renders a count with a correctly pluralized noun.
@@ -429,7 +448,38 @@ fn describe(source: &SourceRef) -> String {
             sanitize::text(entered),
             sanitize::text(key)
         ),
+        SourceRef::Ini {
+            entered,
+            section,
+            key,
+            ..
+        } => {
+            let scope = section
+                .as_deref()
+                .map(|section| format!("section [{}]", sanitize::text(section)))
+                .unwrap_or_else(|| "no section".to_string());
+            format!(
+                "ini {} {} key {}",
+                sanitize::text(entered),
+                scope,
+                sanitize::text(key)
+            )
+        }
+        SourceRef::IniAllSections { entered, key, .. } => format!(
+            "ini {} key {} (all sections)",
+            sanitize::text(entered),
+            sanitize::text(key)
+        ),
     }
+}
+
+fn has_ini_suggestions(items: &[Item]) -> bool {
+    items.iter().any(|item| {
+        item.visible()
+            && item.members.iter().any(|member| {
+                matches!(member.source, SourceRef::Ini { .. }) && !member.rules.is_empty()
+            })
+    })
 }
 
 fn build_items(
@@ -610,17 +660,19 @@ fn item_for(
     match resolver.resolve(&source, environment) {
         Resolution::Resolved(secrets) => {
             item.resolved = true;
-            let value = if matches!(source, SourceRef::DotenvAll { .. }) {
+            let value = if source.is_wildcard() {
                 None
             } else {
                 secrets.first().map(|secret| secret.value.clone())
             };
             item.detail = match &value {
                 Some(value) => preview::describe(value),
+                None if matches!(source, SourceRef::IniAllSections { .. }) => {
+                    format!("{} current values", secrets.len())
+                }
                 None => format!("{} current keys", secrets.len()),
             };
-            if matches!(source, SourceRef::DotenvAll { .. }) {
-                item.detail = format!("{} current key(s)", secrets.len());
+            if source.is_wildcard() {
                 item.wildcard_values = secrets.into_iter().map(|secret| secret.value).collect();
             }
             item.value = value;
@@ -656,7 +708,10 @@ fn admission_rules(source: &SourceRef, value: Option<&str>) -> Vec<Rule> {
         | SourceRef::DotenvKey { key: name, .. }
         | SourceRef::Properties { key: name, .. } => Some(name.as_str()),
         SourceRef::Npmrc { key, .. } => Some(crate::secret::npmrc_label(key)),
-        SourceRef::DotenvAll { .. } | SourceRef::Json { .. } => None,
+        SourceRef::Ini { key, .. } => Some(key.as_str()),
+        SourceRef::DotenvAll { .. } | SourceRef::IniAllSections { .. } | SourceRef::Json { .. } => {
+            None
+        }
     };
     if name.and_then(vocabulary::gating_term).is_some() {
         rules.push(Rule::SecretLikeName);
@@ -703,15 +758,7 @@ fn alias_inventory<'a>(phases: impl IntoIterator<Item = (Scope, &'a [Item])>) ->
                 }
             }
             if item.is_selected_wildcard() {
-                aliases.wildcards.push(WildcardAliases {
-                    scope,
-                    path: item.members[0]
-                        .source
-                        .file()
-                        .expect("a wildcard always has a file")
-                        .to_path_buf(),
-                    values: item.wildcard_values.clone(),
-                });
+                aliases.wildcards.push(WildcardAliases::new(scope, item));
             }
         }
     }
@@ -721,30 +768,21 @@ fn alias_inventory<'a>(phases: impl IntoIterator<Item = (Scope, &'a [Item])>) ->
 impl AliasInventory {
     fn sync_wildcards(&mut self, scope: Scope, items: &[Item]) {
         self.wildcards.retain(|wildcard| wildcard.scope != scope);
-        self.wildcards
-            .extend(
-                items
-                    .iter()
-                    .filter(|item| item.is_selected_wildcard())
-                    .map(|item| WildcardAliases {
-                        scope,
-                        path: item.members[0]
-                            .source
-                            .file()
-                            .expect("a wildcard always has a file")
-                            .to_path_buf(),
-                        values: item.wildcard_values.clone(),
-                    }),
-            );
+        self.wildcards.extend(
+            items
+                .iter()
+                .filter(|item| item.is_selected_wildcard())
+                .map(|item| WildcardAliases::new(scope, item)),
+        );
     }
 
     fn source_files(&self, value: &str) -> Vec<PathBuf> {
         let mut files = self.sources.get(value).cloned().unwrap_or_default();
         for wildcard in &self.wildcards {
             if wildcard.values.iter().any(|known| known == value)
-                && !files.iter().any(|known| known == &wildcard.path)
+                && !files.iter().any(|known| known == wildcard.path())
             {
-                files.push(wildcard.path.clone());
+                files.push(wildcard.path().to_path_buf());
             }
         }
         files
@@ -881,22 +919,32 @@ fn visible_count(items: &[Item]) -> usize {
 }
 
 fn update_suppression(items: &mut [Item], aliases: &AliasInventory) {
-    let selected_wildcards: Vec<&Path> = aliases
-        .wildcards
-        .iter()
-        .map(|wildcard| wildcard.path.as_path())
-        .collect();
     for item in items {
         if item.is_wildcard() {
             continue;
         }
         for member in &mut item.members {
-            member.suppressed = !member.enrolled
-                && matches!(
-                    &member.source,
-                    SourceRef::DotenvKey { path, .. }
-                        if selected_wildcards.iter().any(|wildcard| *wildcard == path)
-                );
+            let covered =
+                aliases
+                    .wildcards
+                    .iter()
+                    .any(|wildcard| match (&member.source, &wildcard.id) {
+                        (
+                            SourceRef::DotenvKey { path, .. },
+                            SourceId::DotenvAll {
+                                path: wildcard_path,
+                            },
+                        ) => path == wildcard_path,
+                        (
+                            SourceRef::Ini { path, key, .. },
+                            SourceId::IniAllSections {
+                                path: wildcard_path,
+                                key: wildcard_key,
+                            },
+                        ) => path == wildcard_path && key == wildcard_key,
+                        _ => false,
+                    });
+            member.suppressed = !member.enrolled && covered;
         }
     }
 }
@@ -1044,6 +1092,61 @@ fn add_manual(
                 return Ok(());
             }
             SourceRef::Npmrc { entered, path, key }
+        }
+        "i" => {
+            let entered = terminal.ask("INI file path:")?;
+            if entered.is_empty() {
+                terminal.line("  No path entered.");
+                return Ok(());
+            }
+            let path = match paths::expand(&entered, base, context.home) {
+                Ok(path) => path,
+                Err(problem) => {
+                    terminal.line(&format!("  That path {}.", problem.reason()));
+                    return Ok(());
+                }
+            };
+            let key = terminal.ask("Exact INI key:")?;
+            if key.is_empty() {
+                terminal.line("  No key entered.");
+                return Ok(());
+            }
+            let scope_choice =
+                terminal.ask("INI section scope [n] named, [u] no section, [a] all sections:")?;
+            match scope_choice.trim().to_ascii_lowercase().as_str() {
+                "n" => {
+                    let section = terminal.ask("INI section name (empty for []):")?;
+                    SourceRef::Ini {
+                        entered,
+                        path,
+                        section: Some(section),
+                        key,
+                    }
+                }
+                "u" => SourceRef::Ini {
+                    entered,
+                    path,
+                    section: None,
+                    key,
+                },
+                "a" => {
+                    terminal.line(
+                        "  All-sections enrollment protects this key in every current and future section, including sectionless entries.",
+                    );
+                    terminal.line(
+                        "  Short, common, and future values are enrolled without individual review, and a common value can replace unrelated text.",
+                    );
+                    if !terminal.confirm("  Enroll this key in all sections?", false)? {
+                        terminal.line("  Not added.");
+                        return Ok(());
+                    }
+                    SourceRef::IniAllSections { entered, path, key }
+                }
+                _ => {
+                    terminal.line("  Choose n, u, or a for the INI section scope.");
+                    return Ok(());
+                }
+            }
         }
         _ => return Ok(()),
     };

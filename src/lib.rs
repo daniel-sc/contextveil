@@ -10,6 +10,7 @@ pub mod cli;
 pub mod config;
 pub mod diagnose;
 pub mod dotenv;
+pub mod ini;
 pub mod integration;
 pub mod json;
 pub mod matcher;

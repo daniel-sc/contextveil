@@ -223,7 +223,8 @@ fn credential_url_admission_uses_trimmed_environment_and_dotenv_values() {
     assert_eq!(exit, Exit::Ok, "{transcript}");
     assert_eq!(transcript.matches("credential-bearing URL").count(), 2);
     let global = std::fs::read_to_string(fixture.global_config()).expect("global config");
-    let project = std::fs::read_to_string(fixture.project_config()).expect("project config");
+    let project = std::fs::read_to_string(fixture.project_config())
+        .unwrap_or_else(|error| panic!("project config: {error}; transcript: {transcript}"));
     assert!(global.contains("SERVICE_ENDPOINT"));
     assert!(project.contains("SERVICE_ENDPOINT"));
     assert_canary_absent(
@@ -560,6 +561,113 @@ fn project_dotenv_keys_are_discovered_and_gated() {
     );
     assert_canary_absent("project config", project.as_bytes(), &canary);
     assert_canary_absent("setup transcript", transcript.as_bytes(), &canary);
+}
+
+#[test]
+fn project_ini_entries_are_discovered_case_insensitively_and_keep_sections_exact() {
+    let canary = Canary::generate("INI_PROJECT_TOKEN");
+    let fixture = Fixture::new();
+    fixture.write(
+        "config.InI",
+        &format!(
+            "[Production]\nAPI_TOKEN={}\n[production]\nAPI_TOKEN={}\nordinary=value\n",
+            canary.value(),
+            canary.value()
+        ),
+    );
+    fixture.write(".contextveil.toml", "version = 1\n");
+
+    let (exit, transcript) = fixture.run(ACCEPT_ALL, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let project = std::fs::read_to_string(fixture.project_config())
+        .unwrap_or_else(|error| panic!("project config: {error}; transcript: {transcript}"));
+    assert!(project.contains("source = \"ini\""));
+    assert!(project.contains("section = \"Production\""));
+    assert!(project.contains("section = \"production\""));
+    assert!(transcript.contains("To protect a key across current and future sections"));
+    assert_canary_absent("INI setup transcript", transcript.as_bytes(), &canary);
+    assert_canary_absent("INI setup config", project.as_bytes(), &canary);
+}
+
+#[test]
+fn manual_ini_all_sections_persists_a_standalone_policy_and_is_idempotent() {
+    let canary = Canary::generate("INI_WILDCARD_TOKEN");
+    let fixture = Fixture::new();
+    fixture.write(
+        "profiles.ini",
+        &format!(
+            "TOKEN={}\n[dev]\nTOKEN={}\n",
+            canary.value(),
+            canary.value()
+        ),
+    );
+    fixture.write(".contextveil.toml", "version = 1\n");
+    let script = "m\ni\n~/project/profiles.ini\nTOKEN\na\ny\n\n\n\n";
+    let environment = fixture.environment(&[]);
+
+    let (exit, transcript) = fixture.run(script, &environment);
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let first = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(first.contains("source = \"ini\""));
+    assert!(first.contains("all_sections = true"));
+    assert!(!first.contains("section ="));
+
+    fixture.write(
+        "profiles.ini",
+        &format!(
+            "TOKEN={}\n[dev]\nTOKEN={}\n[future]\nTOKEN={}\n",
+            canary.value(),
+            canary.value(),
+            canary.value()
+        ),
+    );
+    let (exit, second_transcript) = fixture.run("\n\n\n", &environment);
+    assert_eq!(exit, Exit::Ok, "{second_transcript}");
+    let second = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert_eq!(first, second);
+    assert_canary_absent(
+        "INI wildcard setup transcript",
+        transcript.as_bytes(),
+        &canary,
+    );
+    assert_canary_absent("INI wildcard setup config", second.as_bytes(), &canary);
+}
+
+#[test]
+fn manual_ini_preserves_the_entered_path_and_exact_key() {
+    let fixture = Fixture::new();
+    fixture.write(" spaced.ini ", "[section]\nTOKEN=value\n");
+    fixture.write(".contextveil.toml", "version = 1\n");
+    let script = "m\ni\n~/project/ spaced.ini \n TOKEN \nn\nsection\ny\n\n\n\n";
+
+    let (exit, transcript) = fixture.run(script, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    let config = std::fs::read_to_string(fixture.global_config()).expect("global config");
+    assert!(config.contains("file = \"~/project/ spaced.ini \""));
+    assert!(config.contains("key = \" TOKEN \""));
+}
+
+#[test]
+fn an_ini_wildcard_suppresses_only_its_selected_key() {
+    let token = Canary::generate("INI_SELECTED_KEY");
+    let other = Canary::generate("INI_OTHER_KEY");
+    let fixture = Fixture::new();
+    fixture.write(
+        "keys.ini",
+        &format!(
+            "[dev]\nTOKEN={}\nOTHER_TOKEN={}\n",
+            token.value(),
+            other.value()
+        ),
+    );
+    fixture.write(".contextveil.toml", "version = 1\n");
+    let script = "\nm\ni\nkeys.ini\nTOKEN\na\ny\n\n\n";
+    let (exit, transcript) = fixture.run(script, &fixture.environment(&[]));
+    assert_eq!(exit, Exit::Ok, "{transcript}");
+    assert_eq!(transcript.matches("key TOKEN (all sections)").count(), 1);
+    assert!(transcript.contains("key OTHER_TOKEN"), "{transcript}");
+    assert_canary_absent("INI suppression transcript", transcript.as_bytes(), &token);
+    assert_canary_absent("INI suppression transcript", transcript.as_bytes(), &other);
 }
 
 #[test]

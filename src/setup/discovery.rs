@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::dotenv::{self, Dotenv, ParseErrorKind};
+use crate::ini::{self, Ini};
 use crate::npmrc::{self, Npmrc};
 use crate::properties::{self, Properties};
 use crate::sanitize;
@@ -71,8 +72,44 @@ pub struct ProjectFiles {
     pub dotenv: Vec<Discovered>,
     pub properties: Vec<DiscoveredProperties>,
     pub npmrc: Vec<DiscoveredNpmrc>,
+    pub ini: Vec<DiscoveredIni>,
     pub claude_settings: Vec<PathBuf>,
     pub claude_mcp: Vec<PathBuf>,
+}
+
+/// A discovered INI file. The parser is retained so candidate discovery can
+/// use the same last-assignment semantics as runtime resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredIni {
+    pub path: PathBuf,
+    pub display: String,
+    pub entered: Option<String>,
+    pub state: IniState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IniState {
+    Available(Ini),
+    Unavailable(IniUnavailable),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IniUnavailable {
+    NonUtf8Path,
+    Unreadable,
+    NotUtf8,
+    Malformed,
+}
+
+impl IniUnavailable {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NonUtf8Path => "its path is not valid UTF-8",
+            Self::Unreadable => "it could not be read",
+            Self::NotUtf8 => "it is not valid UTF-8",
+            Self::Malformed => "it is malformed INI",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +243,7 @@ pub fn project_files(project_root: &Path) -> ProjectFiles {
     found
         .npmrc
         .sort_by(|left, right| left.path.cmp(&right.path));
+    found.ini.sort_by(|left, right| left.path.cmp(&right.path));
     found.claude_settings.sort();
     found.claude_mcp.sort();
     found
@@ -239,18 +277,31 @@ fn walk(root: &Path, directory: &Path, found: &mut ProjectFiles) {
             // FIFOs, devices, sockets, and other special files are never read.
             continue;
         }
-        if entry.file_name() == ".npmrc" {
+        let is_npmrc = entry.file_name() == ".npmrc";
+        let is_dotenv = is_dotenv_file_name(&entry.file_name());
+        let is_ini = is_ini_file_name(&entry.file_name());
+        if is_npmrc {
             found
                 .npmrc
                 .push(inspect_npmrc(&path, relative_entry(root, &path)));
-        } else if is_dotenv_file_name(&entry.file_name()) {
+        }
+        if is_dotenv {
             found
                 .dotenv
                 .push(inspect(&path, relative_entry(root, &path)));
-        } else if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.ends_with(".properties"))
+        }
+        if is_ini {
+            found
+                .ini
+                .push(inspect_ini(&path, relative_entry(root, &path)));
+        }
+        if !is_npmrc
+            && !is_dotenv
+            && !is_ini
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.ends_with(".properties"))
             && eligible_properties_path(root, &path)
         {
             found
@@ -263,6 +314,37 @@ fn walk(root: &Path, directory: &Path, found: &mut ProjectFiles) {
         } else if entry.file_name() == ".mcp.json" {
             found.claude_mcp.push(path);
         }
+    }
+}
+
+fn is_ini_file_name(name: &std::ffi::OsStr) -> bool {
+    let bytes = name.as_encoded_bytes();
+    bytes
+        .get(bytes.len().saturating_sub(4)..)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(b".ini"))
+}
+
+pub fn inspect_ini(path: &Path, entered: Option<String>) -> DiscoveredIni {
+    let display = sanitize::path(path);
+    let state = if entered.is_none() {
+        IniState::Unavailable(IniUnavailable::NonUtf8Path)
+    } else {
+        match std::fs::read(path) {
+            Err(_) => IniState::Unavailable(IniUnavailable::Unreadable),
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Err(_) => IniState::Unavailable(IniUnavailable::NotUtf8),
+                Ok(text) => match ini::parse(&text) {
+                    Ok(parsed) => IniState::Available(parsed),
+                    Err(_) => IniState::Unavailable(IniUnavailable::Malformed),
+                },
+            },
+        }
+    };
+    DiscoveredIni {
+        path: path.to_path_buf(),
+        display,
+        entered,
+        state,
     }
 }
 
@@ -557,6 +639,16 @@ mod tests {
     }
 
     #[test]
+    fn an_ini_suffix_is_collected_even_when_the_name_is_also_dotenv_like() {
+        let tree = Tree::new();
+        tree.file(".env.ini", "TOKEN=value\n");
+        let found = project_files(&tree.root);
+        assert_eq!(found.dotenv.len(), 1);
+        assert_eq!(found.ini.len(), 1);
+        assert_eq!(found.ini[0].entered.as_deref(), Some(".env.ini"));
+    }
+
+    #[test]
     fn the_shared_project_walk_collects_every_exact_npmrc_name() {
         let tree = Tree::new();
         tree.file(".npmrc", "token=one\n");
@@ -659,6 +751,18 @@ mod tests {
         assert!(inspected.display.contains("\\xff"));
         assert!(!inspected.display.contains('\u{fffd}'));
 
+        let ini_name = OsString::from_vec(vec![
+            b'c', b'o', b'n', b'f', b'i', b'g', b'-', 0xff, b'.', b'I', b'N', b'I',
+        ]);
+        let ini_path = tree.root.join(&ini_name);
+        let inspected_ini = inspect_ini(&ini_path, None);
+        assert_eq!(
+            inspected_ini.state,
+            IniState::Unavailable(IniUnavailable::NonUtf8Path)
+        );
+        assert!(inspected_ini.display.contains("\\xff"));
+        assert!(!inspected_ini.display.contains('\u{fffd}'));
+
         let properties_path = tree
             .root
             .join(OsString::from_vec(vec![0xff]))
@@ -683,11 +787,18 @@ mod tests {
         assert!(npmrc.display.contains("\\xfe"));
         assert!(!npmrc.display.contains('\u{fffd}'));
 
-        // `LIM-022`: APFS rejects file names that are not valid UTF-8, so the
-        // discovery half only runs on a filesystem that accepts one.
+        // `LIM-022`: APFS rejects file names that are not valid UTF-8. Probe
+        // the filesystem before creating the invalid-path fixtures that the
+        // project walk must enumerate. The display-only assertions above
+        // remain useful on filesystems that cannot create such names.
         if std::fs::write(&path, "A=1\n").is_err() {
             return;
         }
+        std::fs::write(&ini_path, b"[section]\nTOKEN=value\n").expect("non-UTF-8 INI name");
+        let found_ini = project_files(&tree.root).ini;
+        assert_eq!(found_ini.len(), 1);
+        assert_eq!(found_ini[0].path, ini_path);
+        assert_eq!(found_ini[0].entered, None);
 
         let found = project_files(&tree.root).dotenv;
         assert_eq!(found.len(), 1);

@@ -26,6 +26,14 @@ pub enum SourceId {
     Properties { path: PathBuf, key: String },
     /// One exact key in an npmrc file.
     Npmrc { path: PathBuf, key: String },
+    /// One exact section/key in an INI file.
+    Ini {
+        path: PathBuf,
+        section: Option<String>,
+        key: String,
+    },
+    /// One exact key across all sections of an INI file.
+    IniAllSections { path: PathBuf, key: String },
 }
 
 impl SourceId {
@@ -65,6 +73,21 @@ impl SourceId {
         }
     }
 
+    pub fn ini(path: PathBuf, section: Option<String>, key: impl Into<String>) -> Self {
+        SourceId::Ini {
+            path,
+            section,
+            key: key.into(),
+        }
+    }
+
+    pub fn ini_all_sections(path: PathBuf, key: impl Into<String>) -> Self {
+        SourceId::IniAllSections {
+            path,
+            key: key.into(),
+        }
+    }
+
     /// Emit-safe label for this source, when it has a key (`REG-003`).
     pub fn label(&self) -> Option<String> {
         match self {
@@ -76,6 +99,9 @@ impl SourceId {
                 .map(|token| safe_label(&token)),
             SourceId::Properties { key, .. } => Some(safe_label(key)),
             SourceId::Npmrc { key, .. } => Some(safe_label(npmrc_label(key))),
+            SourceId::Ini { key, .. } | SourceId::IniAllSections { key, .. } => {
+                Some(safe_label(key))
+            }
         }
     }
 
@@ -88,6 +114,7 @@ impl SourceId {
             | SourceId::Json { path, .. }
             | SourceId::Properties { path, .. }
             | SourceId::Npmrc { path, .. } => Some(path),
+            SourceId::Ini { path, .. } | SourceId::IniAllSections { path, .. } => Some(path),
         }
     }
 
@@ -99,6 +126,8 @@ impl SourceId {
             SourceId::Json { .. } => 3,
             SourceId::Properties { .. } => 4,
             SourceId::Npmrc { .. } => 5,
+            SourceId::Ini { .. } => 6,
+            SourceId::IniAllSections { .. } => 7,
         }
     }
 }
@@ -148,6 +177,31 @@ impl Ord for SourceId {
                     key: left_key,
                 },
                 SourceId::Npmrc {
+                    path: right_path,
+                    key: right_key,
+                },
+            ) => left_path.cmp(right_path).then(left_key.cmp(right_key)),
+            (
+                SourceId::Ini {
+                    path: left_path,
+                    section: left_section,
+                    key: left_key,
+                },
+                SourceId::Ini {
+                    path: right_path,
+                    section: right_section,
+                    key: right_key,
+                },
+            ) => left_path
+                .cmp(right_path)
+                .then(left_section.cmp(right_section))
+                .then(left_key.cmp(right_key)),
+            (
+                SourceId::IniAllSections {
+                    path: left_path,
+                    key: left_key,
+                },
+                SourceId::IniAllSections {
                     path: right_path,
                     key: right_key,
                 },
@@ -268,6 +322,22 @@ mod tests {
                 .as_deref(),
             Some("token")
         );
+        assert_eq!(
+            SourceId::ini(
+                PathBuf::from("/secret/auth.ini"),
+                Some("prod".into()),
+                "api.token"
+            )
+            .label()
+            .as_deref(),
+            Some("api.token")
+        );
+        assert_eq!(
+            SourceId::ini_all_sections(PathBuf::from("/secret/auth.ini"), "api.token")
+                .label()
+                .as_deref(),
+            Some("api.token")
+        );
     }
 
     #[test]
@@ -292,6 +362,9 @@ mod tests {
     fn identities_use_the_contractual_total_order() {
         let path = PathBuf::from("/project/source");
         let mut identities = vec![
+            SourceId::ini_all_sections(path.clone(), "z"),
+            SourceId::ini_all_sections(path.clone(), "a"),
+            SourceId::ini(path.clone(), Some("z".into()), "z"),
             SourceId::npmrc(path.clone(), "//z/:_authToken"),
             SourceId::npmrc(path.clone(), "//a/:_authToken"),
             SourceId::properties(path.clone(), "z"),
@@ -319,6 +392,9 @@ mod tests {
                 SourceId::properties(PathBuf::from("/project/source"), "z"),
                 SourceId::npmrc(PathBuf::from("/project/source"), "//a/:_authToken"),
                 SourceId::npmrc(PathBuf::from("/project/source"), "//z/:_authToken"),
+                SourceId::ini(PathBuf::from("/project/source"), Some("z".into()), "z",),
+                SourceId::ini_all_sections(PathBuf::from("/project/source"), "a"),
+                SourceId::ini_all_sections(PathBuf::from("/project/source"), "z"),
             ]
         );
     }

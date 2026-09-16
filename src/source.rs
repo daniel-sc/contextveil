@@ -1,6 +1,6 @@
 //! Source references and their resolution.
 //!
-//! V1 has environment, dotenv, exact-pointer JSON, properties, and npmrc resolver families
+//! V1 has environment, dotenv, exact-pointer JSON, properties, npmrc, and INI resolver families
 //! (`docs/architecture.md`). A resolver returns resolved, unresolved, or malfunction;
 //! it never decides whether a value looks secret.
 //!
@@ -15,6 +15,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use crate::dotenv::{self, Dotenv, ParseErrorKind};
+use crate::ini::{self, Ini};
 use crate::json;
 use crate::npmrc::{self, IssueKind, Npmrc};
 use crate::properties::{self, Properties};
@@ -54,6 +55,17 @@ pub enum SourceRef {
         path: PathBuf,
         key: String,
     },
+    Ini {
+        entered: String,
+        path: PathBuf,
+        section: Option<String>,
+        key: String,
+    },
+    IniAllSections {
+        entered: String,
+        path: PathBuf,
+        key: String,
+    },
 }
 
 impl SourceRef {
@@ -65,6 +77,12 @@ impl SourceRef {
             SourceRef::Json { path, pointer, .. } => SourceId::json(path.clone(), pointer),
             SourceRef::Properties { path, key, .. } => SourceId::properties(path.clone(), key),
             SourceRef::Npmrc { path, key, .. } => SourceId::npmrc(path.clone(), key),
+            SourceRef::Ini {
+                path, section, key, ..
+            } => SourceId::ini(path.clone(), section.clone(), key),
+            SourceRef::IniAllSections { path, key, .. } => {
+                SourceId::ini_all_sections(path.clone(), key)
+            }
         }
     }
 
@@ -76,7 +94,16 @@ impl SourceRef {
             SourceRef::Json { path, .. }
             | SourceRef::Properties { path, .. }
             | SourceRef::Npmrc { path, .. } => Some(path),
+            SourceRef::Ini { path, .. } | SourceRef::IniAllSections { path, .. } => Some(path),
         }
+    }
+
+    /// Whether this reference enrolls values beyond one exact source identity.
+    pub fn is_wildcard(&self) -> bool {
+        matches!(
+            self,
+            SourceRef::DotenvAll { .. } | SourceRef::IniAllSections { .. }
+        )
     }
 }
 
@@ -134,6 +161,10 @@ pub enum SourceMalfunction {
         line: usize,
         kind: IssueKind,
     },
+    MalformedIni {
+        line: usize,
+        column: usize,
+    },
 }
 
 impl SourceMalfunction {
@@ -152,6 +183,9 @@ impl SourceMalfunction {
             SourceMalfunction::MalformedProperties => "is malformed properties".to_string(),
             SourceMalfunction::MalformedNpmrc { line, kind } => {
                 format!("has an invalid npmrc entry: line {line} {}", kind.reason())
+            }
+            SourceMalfunction::MalformedIni { line, column } => {
+                format!("has malformed INI syntax at line {line}, column {column}")
             }
         }
     }
@@ -261,6 +295,13 @@ enum NpmrcFileState {
     Malfunction(SourceMalfunction),
 }
 
+#[derive(Debug, Clone)]
+enum IniFileState {
+    Missing,
+    Parsed(Ini),
+    Malfunction(SourceMalfunction),
+}
+
 /// Resolves source references, reading each dotenv or JSON file once per event.
 #[derive(Debug, Clone, Default)]
 pub struct Resolver {
@@ -268,6 +309,7 @@ pub struct Resolver {
     json_files: HashMap<PathBuf, JsonFileState>,
     properties_files: HashMap<PathBuf, PropertiesFileState>,
     npmrc_files: HashMap<PathBuf, NpmrcFileState>,
+    ini_files: HashMap<PathBuf, IniFileState>,
 }
 
 impl Resolver {
@@ -410,21 +452,105 @@ impl Resolver {
                     }
                 }
             }
+            SourceRef::Ini { path, key, .. } | SourceRef::IniAllSections { path, key, .. } => {
+                let id = reference.id();
+                match self.ini_file(path) {
+                    IniFileState::Missing => Resolution::Unresolved {
+                        source: id,
+                        why: Unresolved::Absent,
+                    },
+                    IniFileState::Malfunction(why) => Resolution::Malfunction {
+                        source: id,
+                        path: path.clone(),
+                        why: *why,
+                    },
+                    IniFileState::Parsed(ini) => {
+                        if let SourceRef::Ini { section, .. } = reference {
+                            return match ini.get(section.as_deref(), key) {
+                                None => Resolution::Unresolved {
+                                    source: id,
+                                    why: Unresolved::KeyAbsent,
+                                },
+                                Some(value) => resolve_text(id, value),
+                            };
+                        }
+                        let mut values: Vec<_> = ini
+                            .entries()
+                            .filter_map(|(section, entry_key, value)| {
+                                (entry_key == key).then_some((section, value))
+                            })
+                            .collect();
+                        let matched = !values.is_empty();
+                        // A wildcard's exact identities have stable ordering
+                        // independent of the parser's internal map ordering.
+                        values.sort_by_key(|(section, _)| *section);
+                        let secrets: Vec<_> = values
+                            .into_iter()
+                            .filter_map(|(section, value)| {
+                                let value = value.trim();
+                                (!value.is_empty()).then(|| {
+                                    ResolvedSecret::new(
+                                        SourceId::ini(
+                                            path.clone(),
+                                            section.map(str::to_owned),
+                                            key,
+                                        ),
+                                        value.to_string(),
+                                    )
+                                })
+                            })
+                            .collect();
+                        if !matched {
+                            Resolution::Unresolved {
+                                source: id,
+                                why: Unresolved::KeyAbsent,
+                            }
+                        } else if secrets.is_empty() {
+                            Resolution::Unresolved {
+                                source: id,
+                                why: Unresolved::Empty,
+                            }
+                        } else {
+                            Resolution::Resolved(secrets)
+                        }
+                    }
+                }
+            }
         }
     }
 
-    pub fn duplicate_keys_for(&self, reference: &SourceRef) -> &[String] {
+    fn duplicate_keys_for(&self, reference: &SourceRef) -> Vec<String> {
         match reference {
-            SourceRef::DotenvKey { path, .. } | SourceRef::DotenvAll { path, .. } => {
-                match self.files.get(path) {
-                    Some(FileState::Parsed(dotenv)) => dotenv.duplicates(),
-                    _ => &[],
-                }
-            }
-            SourceRef::Properties { path, .. } => match self.properties_files.get(path) {
-                Some(PropertiesFileState::Parsed(properties)) => properties.duplicates(),
-                _ => &[],
+            SourceRef::DotenvKey { path, key, .. } => self
+                .files
+                .get(path)
+                .and_then(|state| match state {
+                    FileState::Parsed(dotenv) => dotenv
+                        .duplicates()
+                        .iter()
+                        .find(|duplicate| *duplicate == key),
+                    _ => None,
+                })
+                .cloned()
+                .into_iter()
+                .collect(),
+            SourceRef::DotenvAll { path, .. } => match self.files.get(path) {
+                Some(FileState::Parsed(dotenv)) => dotenv.duplicates().to_vec(),
+                _ => Vec::new(),
             },
+            SourceRef::Properties { path, key, .. } => self
+                .properties_files
+                .get(path)
+                .and_then(|state| match state {
+                    PropertiesFileState::Parsed(properties) => properties
+                        .duplicates()
+                        .iter()
+                        .find(|duplicate| *duplicate == key),
+                    _ => None,
+                })
+                .cloned()
+                .into_iter()
+                .collect(),
             SourceRef::Npmrc { path, key, .. } => self
                 .npmrc_files
                 .get(path)
@@ -435,9 +561,24 @@ impl Resolver {
                         .find(|duplicate| *duplicate == key),
                     _ => None,
                 })
-                .map(std::slice::from_ref)
-                .unwrap_or(&[]),
-            SourceRef::Env { .. } | SourceRef::Json { .. } => &[],
+                .cloned()
+                .into_iter()
+                .collect(),
+            SourceRef::Ini {
+                path, section, key, ..
+            } => match self.ini_files.get(path) {
+                Some(IniFileState::Parsed(ini)) if ini.is_duplicate(section.as_deref(), key) => {
+                    vec![key.clone()]
+                }
+                _ => Vec::new(),
+            },
+            SourceRef::IniAllSections { path, key, .. } => match self.ini_files.get(path) {
+                Some(IniFileState::Parsed(ini)) if ini.is_duplicate_in_any_section(key) => {
+                    vec![key.clone()]
+                }
+                _ => Vec::new(),
+            },
+            SourceRef::Env { .. } | SourceRef::Json { .. } => Vec::new(),
         }
     }
 
@@ -478,6 +619,38 @@ impl Resolver {
             .get(path)
             .expect("the npmrc file was just inserted")
     }
+
+    fn ini_file(&mut self, path: &Path) -> &IniFileState {
+        if !self.ini_files.contains_key(path) {
+            self.ini_files.insert(path.to_path_buf(), read_ini(path));
+        }
+        self.ini_files
+            .get(path)
+            .expect("the INI file was just inserted")
+    }
+}
+
+/// Duplicate keys covered by the enrolled references, grouped by source file.
+pub fn enrolled_duplicate_keys<'a>(
+    resolver: &Resolver,
+    references: impl IntoIterator<Item = &'a SourceRef>,
+) -> Vec<(PathBuf, Vec<String>)> {
+    let mut found: Vec<(PathBuf, Vec<String>)> = Vec::new();
+    for reference in references {
+        let Some(path) = reference.file() else {
+            continue;
+        };
+        for key in resolver.duplicate_keys_for(reference) {
+            if let Some((_, keys)) = found.iter_mut().find(|(known, _)| known == path) {
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            } else {
+                found.push((path.to_path_buf(), vec![key]));
+            }
+        }
+    }
+    found
 }
 
 fn read_dotenv(path: &Path) -> FileState {
@@ -550,6 +723,27 @@ fn read_npmrc(path: &Path) -> NpmrcFileState {
         Err(_) => return NpmrcFileState::Malfunction(SourceMalfunction::NotUtf8),
     };
     NpmrcFileState::Parsed(npmrc::parse(&text))
+}
+
+fn read_ini(path: &Path) -> IniFileState {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return IniFileState::Missing;
+        }
+        Err(_) => return IniFileState::Malfunction(SourceMalfunction::Unreadable),
+    };
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => return IniFileState::Malfunction(SourceMalfunction::NotUtf8),
+    };
+    match ini::parse(&text) {
+        Ok(parsed) => IniFileState::Parsed(parsed),
+        Err(error) => IniFileState::Malfunction(SourceMalfunction::MalformedIni {
+            line: error.line,
+            column: error.column,
+        }),
+    }
 }
 
 fn resolve_text(id: SourceId, value: &str) -> Resolution {
@@ -657,6 +851,23 @@ mod tests {
 
     fn npmrc_ref(path: &Path, key: &str) -> SourceRef {
         SourceRef::Npmrc {
+            entered: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
+            key: key.to_string(),
+        }
+    }
+
+    fn ini_ref(path: &Path, section: Option<&str>, key: &str) -> SourceRef {
+        SourceRef::Ini {
+            entered: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
+            section: section.map(str::to_owned),
+            key: key.to_string(),
+        }
+    }
+
+    fn ini_all_ref(path: &Path, key: &str) -> SourceRef {
+        SourceRef::IniAllSections {
             entered: path.to_string_lossy().into_owned(),
             path: path.to_path_buf(),
             key: key.to_string(),
@@ -855,6 +1066,15 @@ mod tests {
                     ..
                 }
             ));
+            for source in [ini_ref(&path, None, "token"), ini_all_ref(&path, "token")] {
+                assert!(matches!(
+                    Resolver::new().resolve(&source, &Environment::default()),
+                    Resolution::Malfunction {
+                        why: SourceMalfunction::Unreadable,
+                        ..
+                    }
+                ));
+            }
         }
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
@@ -881,6 +1101,40 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_reporting_is_limited_to_enrolled_keys() {
+        let fixture = Fixture::new();
+        let dotenv_path = fixture.write(
+            ".env",
+            "ENROLLED_A=first\nENROLLED_A=last\nENROLLED_B=first\nENROLLED_B=last\nUNRELATED=first\nUNRELATED=last\n",
+        );
+        let ini_path = fixture.write(
+            "credentials.ini",
+            "[enrolled]\ntoken=one\n[other]\ntoken=first\ntoken=last\n",
+        );
+        let enrolled = [
+            key_ref(&dotenv_path, "ENROLLED_A"),
+            key_ref(&dotenv_path, "ENROLLED_B"),
+            ini_ref(&ini_path, Some("enrolled"), "token"),
+        ];
+        let mut resolver = Resolver::new();
+        for reference in &enrolled {
+            let _ = resolver.resolve(reference, &Environment::default());
+        }
+
+        assert_eq!(
+            enrolled_duplicate_keys(&resolver, &enrolled),
+            [(
+                dotenv_path,
+                vec!["ENROLLED_A".to_string(), "ENROLLED_B".to_string()]
+            )]
+        );
+        assert_eq!(
+            resolver.duplicate_keys_for(&ini_all_ref(&ini_path, "token")),
+            ["token"]
+        );
+    }
+
+    #[test]
     fn dotenv_labels_derive_from_the_key_never_the_path() {
         let fixture = Fixture::new();
         let path = fixture.write("secret-directory-name.env", "API_KEY=value\n");
@@ -892,6 +1146,131 @@ mod tests {
             }
             other => panic!("expected a resolved secret, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ini_exact_and_wildcard_references_resolve_with_stable_identities() {
+        let fixture = Fixture::new();
+        let first = Canary::generate("INI_FIRST");
+        let second = Canary::generate("INI_SECOND");
+        let path = fixture.write(
+            "credentials.ini",
+            &format!(
+                "token= {} \n[production]\ntoken={}\n[DEFAULT]\ntoken=ignored\n[production]\ntoken={}\n",
+                first.value(),
+                second.value(),
+                second.value()
+            ),
+        );
+        let mut resolver = Resolver::new();
+        match resolver.resolve(
+            &ini_ref(&path, Some("production"), "token"),
+            &Environment::default(),
+        ) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets[0].value, second.value());
+                assert_eq!(
+                    secrets[0].source,
+                    SourceId::ini(path.clone(), Some("production".into()), "token")
+                );
+                assert_eq!(secrets[0].label, "token");
+            }
+            other => panic!("expected exact INI value, got {other:?}"),
+        }
+        match resolver.resolve(&ini_all_ref(&path, "token"), &Environment::default()) {
+            Resolution::Resolved(secrets) => {
+                assert_eq!(secrets.len(), 3);
+                assert_eq!(
+                    secrets[0].source,
+                    SourceId::ini(path.clone(), None, "token")
+                );
+                assert_eq!(
+                    secrets[1].source,
+                    SourceId::ini(path.clone(), Some("DEFAULT".into()), "token")
+                );
+                assert_eq!(
+                    secrets[2].source,
+                    SourceId::ini(path.clone(), Some("production".into()), "token")
+                );
+            }
+            other => panic!("expected wildcard INI values, got {other:?}"),
+        }
+        assert_eq!(
+            resolver.duplicate_keys_for(&ini_all_ref(&path, "token")),
+            ["token"]
+        );
+    }
+
+    #[test]
+    fn ini_missing_empty_and_malformed_inputs_are_classified() {
+        let fixture = Fixture::new();
+        let empty = fixture.write("empty.ini", "[auth]\ntoken=  \n");
+        let malformed = fixture.write("broken.ini", "[auth\ntoken=value\n");
+        let environment = Environment::default();
+        assert!(matches!(
+            Resolver::new().resolve(
+                &ini_ref(&fixture.path("missing.ini"), Some("auth"), "token"),
+                &environment
+            ),
+            Resolution::Unresolved {
+                why: Unresolved::Absent,
+                ..
+            }
+        ));
+        assert!(matches!(
+            Resolver::new().resolve(&ini_ref(&empty, Some("auth"), "token"), &environment),
+            Resolution::Unresolved {
+                why: Unresolved::Empty,
+                ..
+            }
+        ));
+        assert!(matches!(
+            Resolver::new().resolve(&ini_ref(&malformed, Some("auth"), "token"), &environment),
+            Resolution::Malfunction {
+                why: SourceMalfunction::MalformedIni { .. },
+                ..
+            }
+        ));
+        for (key, why) in [
+            ("missing", Unresolved::KeyAbsent),
+            ("token", Unresolved::Empty),
+        ] {
+            assert!(matches!(
+                Resolver::new().resolve(&ini_all_ref(&empty, key), &environment),
+                Resolution::Unresolved { why: actual, .. } if actual == why
+            ));
+        }
+    }
+
+    #[test]
+    fn ini_exact_and_wildcard_share_one_parse_per_event_and_follow_rotation() {
+        let fixture = Fixture::new();
+        let path = fixture.write("rotation.ini", "[before]\ntoken=first\n");
+        let environment = Environment::default();
+        let mut resolver = Resolver::new();
+        assert!(matches!(
+            resolver.resolve(&ini_ref(&path, Some("before"), "token"), &environment),
+            Resolution::Resolved(values) if values[0].value == "first"
+        ));
+        std::fs::write(&path, "[after]\ntoken=second\n").expect("rotate source");
+        assert!(matches!(
+            resolver.resolve(&ini_all_ref(&path, "token"), &environment),
+            Resolution::Resolved(values) if values.len() == 1 && values[0].value == "first"
+        ));
+        let mut next_event = Resolver::new();
+        assert!(matches!(
+            next_event.resolve(&ini_all_ref(&path, "token"), &environment),
+            Resolution::Resolved(values) if values.len() == 1
+                && values[0].value == "second"
+                && values[0].source == SourceId::ini(path.clone(), Some("after".into()), "token")
+        ));
+        assert!(matches!(
+            next_event.resolve(&ini_ref(&path, Some("before"), "token"), &environment),
+            Resolution::Unresolved {
+                why: Unresolved::KeyAbsent,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -75,7 +75,7 @@ pub(super) fn enrollment_actions(row_count: usize) -> String {
 }
 
 pub(super) fn manual_actions() -> &'static str {
-    "Manual sources:\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [j]     add JSON field\n  [p]     add properties key\n  [r]     add npmrc key\n  [b]     back"
+    "Manual sources:\n  [e]     add env\n  [k]     add dotenv key\n  [w]     add wildcard file\n  [j]     add JSON field\n  [p]     add properties key\n  [r]     add npmrc key\n  [i]     add INI key\n  [b]     back"
 }
 
 #[cfg(test)]
