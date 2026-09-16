@@ -393,8 +393,21 @@ struct AliasInventory {
 struct WildcardAliases {
     scope: Scope,
     id: SourceId,
-    path: PathBuf,
     values: Vec<String>,
+}
+
+impl WildcardAliases {
+    fn new(scope: Scope, item: &Item) -> Self {
+        Self {
+            scope,
+            id: item.members[0].source.id(),
+            values: item.wildcard_values.clone(),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.id.path().expect("a wildcard always has a file")
+    }
 }
 
 /// Renders a count with a correctly pluralized noun.
@@ -745,16 +758,7 @@ fn alias_inventory<'a>(phases: impl IntoIterator<Item = (Scope, &'a [Item])>) ->
                 }
             }
             if item.is_selected_wildcard() {
-                aliases.wildcards.push(WildcardAliases {
-                    scope,
-                    id: item.members[0].source.id(),
-                    path: item.members[0]
-                        .source
-                        .file()
-                        .expect("a wildcard always has a file")
-                        .to_path_buf(),
-                    values: item.wildcard_values.clone(),
-                });
+                aliases.wildcards.push(WildcardAliases::new(scope, item));
             }
         }
     }
@@ -764,31 +768,21 @@ fn alias_inventory<'a>(phases: impl IntoIterator<Item = (Scope, &'a [Item])>) ->
 impl AliasInventory {
     fn sync_wildcards(&mut self, scope: Scope, items: &[Item]) {
         self.wildcards.retain(|wildcard| wildcard.scope != scope);
-        self.wildcards
-            .extend(
-                items
-                    .iter()
-                    .filter(|item| item.is_selected_wildcard())
-                    .map(|item| WildcardAliases {
-                        scope,
-                        id: item.members[0].source.id(),
-                        path: item.members[0]
-                            .source
-                            .file()
-                            .expect("a wildcard always has a file")
-                            .to_path_buf(),
-                        values: item.wildcard_values.clone(),
-                    }),
-            );
+        self.wildcards.extend(
+            items
+                .iter()
+                .filter(|item| item.is_selected_wildcard())
+                .map(|item| WildcardAliases::new(scope, item)),
+        );
     }
 
     fn source_files(&self, value: &str) -> Vec<PathBuf> {
         let mut files = self.sources.get(value).cloned().unwrap_or_default();
         for wildcard in &self.wildcards {
             if wildcard.values.iter().any(|known| known == value)
-                && !files.iter().any(|known| known == &wildcard.path)
+                && !files.iter().any(|known| known == wildcard.path())
             {
-                files.push(wildcard.path.clone());
+                files.push(wildcard.path().to_path_buf());
             }
         }
         files
