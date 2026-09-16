@@ -138,9 +138,11 @@ Automatic suggestions currently cover:
   the same key-name and URL checks. Section names do not affect eligibility.
 - **More to come:** additional formats such as YAML and TOML.
 
-Across these rules, setup skips automatic suggestions whose
-value are common literals, such as `true`, `yes`, `on`, `0`,
-`enabled`, `null`, `nil`, `none`, `undefined`, etc.
+Across these rules, setup skips automatic suggestions whose values are common
+literals, such as `true`, `yes`, `on`, `0`, `enabled`, `null`, `nil`, `none`, or
+`undefined`, and complete simple variable references in the forms `{{ NAME }}`,
+`${NAME}`, and `%(NAME)s`. This setup-only exclusion applies to all source
+types, including environment variables; complex expressions remain suggestions.
 
 See the full [`Known Source Rule inventory`](docs/known-sources.md) for exact locations, fields, and exclusions.
 
@@ -230,16 +232,18 @@ boundary:
   OpenCode can stop a covered operation only after its plugin has loaded.
 - ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
-- Short or common enrolled values can also match and replace ordinary text.
-  Setup omits a small fixed vocabulary from wholly new automatic suggestions,
-  but manual, existing, and wildcard enrollment can still activate those values.
+- Short, common, or reference-shaped enrolled values can also match and replace
+  ordinary text. Setup omits a small fixed vocabulary and complete simple
+  variable references from wholly new automatic suggestions, but manual,
+  existing, and wildcard enrollment can still activate those values.
 - Known source rules are version-sensitive setup advice, not a coverage
   guarantee. They may suggest stale or non-secret values and automatically select
   eligible new suggestions unless collisions are found; review masked candidates
   before saving. Unsupported raw sidecars, keychains, helpers, unknown fields,
   and new locations remain outside current coverage as detailed in `LIM-023`.
-- ContextVeil treats npmrc `${NAME}` expressions literally; enroll the underlying
-  environment variable when npm substitutes the concrete credential.
+- ContextVeil does not evaluate variable references; enroll the underlying
+  concrete source. If a skipped source later contains a concrete credential,
+  rerun setup to discover it.
 
 See [limitations.md](docs/limitations.md) for the complete security boundary and
 coding-agent-specific gaps.

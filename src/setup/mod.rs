@@ -624,7 +624,7 @@ fn merge_automatic_item(items: &mut Vec<Item>, known: &mut HashSet<SourceId>, it
     } else if !item
         .value
         .as_deref()
-        .is_some_and(vocabulary::is_common_literal)
+        .is_some_and(vocabulary::excluded_automatic_value)
     {
         known.insert(id);
         merge_item(items, item);
