@@ -469,13 +469,6 @@ fn has_ini_suggestions(items: &[Item]) -> bool {
     })
 }
 
-fn is_wildcard_source(source: &SourceRef) -> bool {
-    matches!(
-        source,
-        SourceRef::DotenvAll { .. } | SourceRef::IniAllSections { .. }
-    )
-}
-
 fn build_items(
     scope: Scope,
     existing: &Config,
@@ -654,7 +647,7 @@ fn item_for(
     match resolver.resolve(&source, environment) {
         Resolution::Resolved(secrets) => {
             item.resolved = true;
-            let value = if is_wildcard_source(&source) {
+            let value = if source.is_wildcard() {
                 None
             } else {
                 secrets.first().map(|secret| secret.value.clone())
@@ -666,7 +659,7 @@ fn item_for(
                 }
                 None => format!("{} current keys", secrets.len()),
             };
-            if is_wildcard_source(&source) {
+            if source.is_wildcard() {
                 item.wildcard_values = secrets.into_iter().map(|secret| secret.value).collect();
             }
             item.value = value;

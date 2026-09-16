@@ -97,6 +97,14 @@ impl SourceRef {
             SourceRef::Ini { path, .. } | SourceRef::IniAllSections { path, .. } => Some(path),
         }
     }
+
+    /// Whether this reference enrolls values beyond one exact source identity.
+    pub fn is_wildcard(&self) -> bool {
+        matches!(
+            self,
+            SourceRef::DotenvAll { .. } | SourceRef::IniAllSections { .. }
+        )
+    }
 }
 
 /// Why a source has no usable value right now.

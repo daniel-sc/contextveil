@@ -31,10 +31,7 @@ pub(super) struct Item {
 
 impl Item {
     pub(super) fn is_wildcard(&self) -> bool {
-        matches!(
-            self.members[0].source,
-            SourceRef::DotenvAll { .. } | SourceRef::IniAllSections { .. }
-        )
+        self.members[0].source.is_wildcard()
     }
 
     pub(super) fn is_selected_wildcard(&self) -> bool {
