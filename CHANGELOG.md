@@ -5,6 +5,8 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-16
+
 ### Added
 
 - Add project INI discovery, exact section/key enrollment, and opt-in protection

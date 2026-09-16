@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "contextveil"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "aho-corasick",
  "encoding_rs",

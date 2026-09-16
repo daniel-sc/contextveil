@@ -33,6 +33,11 @@ and confirmed it as the `REL-008` qualification for v1.0.0. The confirmation
 covers the documented host version and tested scope; it does not expand the
 coverage claims recorded below.
 
+**Release sign-off (2026-09-16):** The release manager completed the manual
+release checks successfully and confirmed this qualification for v1.1.0. The
+confirmation covers the documented host version and tested scope; it does not
+expand the coverage claims recorded below.
+
 ### Isolation
 
 The run used a throwaway `HOME` so that neither the operator's real
