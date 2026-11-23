@@ -16,9 +16,9 @@ No unreleased changes.
   production qualification remains blocked by an upstream compaction defect.
 - Add optional Luna qualification and a focused upstream compaction regression
   and patch.
-- Qualify the managed plugin against released OpenCode V2.3.2 for ordinary HTTP
-  session requests; compaction shrink and overflow recovery remain subject to
-  the documented upstream limitation.
+- Verified ordinary HTTP session requests on OpenCode 2.3.2 and 2.4.0.
+  If OpenCode shrinks a compaction request, it can send previously redacted
+  checkpoint text to the provider ([upstream issue](https://github.com/anomalyco/opencode/issues/54916)).
 
 ## [1.1.0] - 2026-09-16
 

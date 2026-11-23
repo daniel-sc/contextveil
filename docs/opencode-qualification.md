@@ -6,12 +6,29 @@ redacted value. This record is evidence about the tested host, not a version gat
 or a production certificate. See `OCO-005`, `LIM-016`, and
 [ADR-0005](adr/0005-opencode-v2-coverage-boundary.md).
 
-## Latest Released Host Check — 2026-11-23
+## OpenCode v2.4.0 — passed ordinary HTTP checks, 2026-11-23
 
-The latest published OpenCode V2 release available at qualification time was
-`v2.3.2`, published 2026-11-18. The `v2.4.0` source tag was created on
-2026-11-23 but had no published GitHub release or release binary, so it was
-inspected separately rather than treated as an installed host.
+[OpenCode v2.4.0](https://github.com/anomalyco/opencode/releases/tag/v2.4.0)
+was published at 09:22 UTC on November 23. The qualification script ran on
+Linux x86_64 with that CLI, the release build of ContextVeil 1.2.0 from
+`ffd31bc`, and a fresh temporary OpenCode database. The operator's active
+v2.3.2 database lacks migrations required by v2.4.0, so it was not used.
+
+The first run stopped during generation with an authentication error (HTTP 503).
+The repeat used the active OpenAI credential from the running installation,
+transferred by pipe to a private temporary profile. The profile was removed
+after the run. `scripts/opencode-qualify.ts` passed with `openai/gpt-6-luna`:
+the HTTP observer saw five requests across title, primary (including a second
+turn on the same session), generate, and ordinary compaction. All four kinds
+showed the placeholder; no observed request contained the raw canary.
+Invalid enrollment failed the primary operation with zero observed dispatches.
+
+This run did not exercise WebSocket transport or shrink/overflow recovery. The
+[v2.4.0 compaction source](https://github.com/anomalyco/opencode/blob/v2.4.0/packages/core/src/session/compaction.ts#L710-L724)
+still rebuilds checkpoint text from storage after the hook. None of the live
+runs here measure how often the shrink path occurs in practice.
+
+## OpenCode v2.3.2 — passed ordinary HTTP checks, 2026-11-23
 
 | Field | Evidence |
 | --- | --- |
@@ -113,8 +130,11 @@ unrelated workflow changes that the available push token cannot publish. Both
 earlier proposals remain on their separate branches: `preserve-hook-edits` protected recent text and could sacrifice
 newer exchanges; `split-checkpoint-context` changed the checkpoint representation
 in every compaction request, reducing prefix-cache reuse. Neither is the current
-proposal. No issue or pull request has been opened; the compact
-[issue draft](upstream/opencode-compaction-issue.md) points to the third branch.
+proposal. The [issue draft](upstream/opencode-compaction-issue.md) predates
+[upstream issue #54916](https://github.com/anomalyco/opencode/issues/54916).
+As of 2026-11-23, that issue is open, [PR #55208](https://github.com/anomalyco/opencode/pull/55208)
+closed unmerged, and [replacement PR #63961](https://github.com/anomalyco/opencode/pull/63961)
+remains open.
 
 Validation on 2026-10-13: the two compaction suites and adjacent model-request
 suite pass with **33 tests and 326 assertions**. Six regressions fail on

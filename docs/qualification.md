@@ -8,6 +8,23 @@ release evidence for that run.
 Rerun this procedure for each release. A passing run is evidence about the host
 version it ran against, never a permanent certificate (`DIA-007`, `SUP-004`).
 
+## ContextVeil 1.2.0 candidate — 2026-11-23
+
+**Live check passed** on Linux x86_64, Claude Code 2.1.330, using
+`target/release/contextveil` built with `mise run build` from `ffd31bc`.
+The operator requested the run; the agent executed it. This records the
+observations, not release-manager sign-off.
+
+- In a temporary home and project, interactive setup enrolled one generated
+  canary and installed the release binary's Claude hook.
+- The first Claude process made one matching `Bash` call. Its successful
+  stored tool result and Claude's reply both contained the expected placeholder.
+- A second Claude process resumed the same session ID with tools disabled.
+  Its reply contained the placeholder without rerunning the command.
+- Both processes exited successfully. The raw canary was absent from their
+  stdout/stderr and from every regular file scanned in the temporary tree;
+  the credential symlink was excluded. The temporary tree was removed.
+
 ## Run of 2026-08-17
 
 | Field | Value |
