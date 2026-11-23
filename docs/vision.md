@@ -143,7 +143,7 @@ change.
 | Claude Code | Production | Successful `PostToolUse` string values |
 | OpenAI Codex CLI | Experimental, opt-in | Supported `PostToolUse` results via sanitized textual replacement |
 | GitHub Copilot CLI | Experimental, opt-in | Transformed user prompts and successful textual tool results |
-| OpenCode | Experimental, opt-in | Documented V1 `chat.message` and `tool.execute.after` text paths |
+| OpenCode | Experimental, opt-in | V1 message/tool text; V2 session requests, pending compaction qualification |
 
 Experimental means functional and tested against protocol fixtures, but not part
 of the production support promise. Experimental installation always requires an

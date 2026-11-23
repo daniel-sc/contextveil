@@ -5,12 +5,8 @@
 //! that invokes the absolute Rust binary with one JSON request on stdin and reads
 //! one JSON response from stdout.
 //!
-//! Verified against the installed OpenCode 1.18.18: plugin files are discovered
-//! one level deep in `plugin/` or `plugins/` under each config scope, `*.ts` and
-//! `*.js` are loaded, any exported function of the plugin type is used, plugins
-//! run inside OpenCode's own Bun process so `Bun.spawn` is available, and a plugin
-//! that fails to load is skipped with a surfaced error rather than crashing the
-//! host (`LIM-016`).
+//! The dual entrypoint retains V1 hooks and adds V2 session request hooks.
+//! Host-level qualification and the compaction limitation are in `LIM-016`.
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +20,7 @@ use crate::sanitize;
 
 /// The plugin source ContextVeil installs, with the binary path substituted.
 const TEMPLATE: &str = include_str!("../../assets/opencode/plugin.ts");
+const LEGACY_TEMPLATE: &str = include_str!("../../assets/opencode/plugin-v1.ts");
 
 /// Placeholder replaced by the absolute binary path (`INT-003`).
 const BINARY_PLACEHOLDER: &str = "__CONTEXTVEIL_BINARY__";
@@ -50,10 +47,14 @@ pub fn plugin_file(home: &Path) -> PathBuf {
 /// break out of the literal (`INT-003`: no shell interpolation, and here no
 /// source-code injection either).
 pub fn render(executable: &Path) -> String {
+    render_template(TEMPLATE, executable)
+}
+
+fn render_template(template: &str, executable: &Path) -> String {
     let literal = serde_json::to_string(&executable.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "\"\"".to_string());
     let quoted = format!("\"{BINARY_PLACEHOLDER}\"");
-    TEMPLATE.replace(&quoted, &literal)
+    template.replace(&quoted, &literal)
 }
 
 /// Inspects detection, installation, and conflicts without changing anything.
@@ -96,9 +97,8 @@ fn detect(environment: &crate::source::Environment, home: &Path) -> integration:
 
 /// Classifies the managed plugin file (`INT-004`).
 ///
-/// `Outdated` means only the embedded binary path differs, which ContextVeil may
-/// rewrite. Any other difference means the file was edited by hand, and an edited
-/// file is preserved rather than reverted or deleted.
+/// Only exact current or historical templates establish ownership; the embedded
+/// path may differ. Edited files are preserved rather than reverted or deleted.
 fn classify(path: &Path, executable: Option<&Path>) -> Installed {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -115,12 +115,16 @@ fn classify(path: &Path, executable: Option<&Path>) -> Installed {
     if executable.is_some_and(|executable| text == render(executable)) {
         return Installed::Current;
     }
-    // Rebuild the file from the path it records. Only if that reproduces it
-    // exactly is the sole difference the binary path.
+    // A known earlier template can be upgraded without treating its marker as
+    // sufficient proof that arbitrary user edits are ours.
     match recorded_executable_in(&text) {
-        Some(recorded) if text == render(&recorded) => Installed::Outdated {
-            command: sanitize::path(path),
-        },
+        Some(recorded)
+            if text == render(&recorded) || text == render_template(LEGACY_TEMPLATE, &recorded) =>
+        {
+            Installed::Outdated {
+                command: sanitize::path(path),
+            }
+        }
         _ => modified(),
     }
 }
@@ -164,7 +168,8 @@ fn conflicts(home: &Path, approved: &[String]) -> Vec<Conflict> {
             let file = entry.path();
             let is_plugin = file
                 .extension()
-                .is_some_and(|extension| extension == "ts" || extension == "js");
+                .is_some_and(|extension| extension == "ts" || extension == "js")
+                || file.is_dir();
             let is_ours = file.file_name().is_some_and(|name| name == FILENAME);
             if is_plugin && !is_ours {
                 names.push(file.to_string_lossy().into_owned());
@@ -233,33 +238,47 @@ pub fn verify_offline(executable: &Path) -> Verification {
         return Verification::Failed("a temporary configuration could not be created");
     };
     let canary = integration::synthetic_canary("OPENCODE-VALUE");
-    let request = serde_json::json!({
-        "version": 1,
-        "event": "tool.execute.after",
-        "project_root": "/nonexistent-synthetic-project",
-        "texts": [canary.clone()],
-    })
-    .to_string();
+    for event in [
+        "chat.message",
+        "tool.execute.after",
+        "context",
+        "compaction",
+        "generate",
+        "title",
+    ] {
+        let request = serde_json::json!({
+            "version": 1,
+            "event": event,
+            "project_root": "/nonexistent-synthetic-project",
+            "texts": [canary.clone()],
+        })
+        .to_string();
 
-    let Some(output) = claude::run_hook(
-        executable,
-        "hook opencode",
-        config.root(),
-        &canary,
-        &request,
-    ) else {
-        return Verification::Failed("the configured executable did not answer in time");
-    };
-    let Ok(response) = serde_json::from_slice::<serde_json::Value>(&output) else {
-        return Verification::Failed("the transport did not return valid protocol output");
-    };
-    if response["status"].as_str() != Some("ok") {
-        return Verification::Failed("the transport did not report a usable registry");
+        let Some(output) = claude::run_hook(
+            executable,
+            "hook opencode",
+            config.root(),
+            &canary,
+            &request,
+        ) else {
+            return Verification::Failed("the configured executable did not answer in time");
+        };
+        let Ok(response) = serde_json::from_slice::<serde_json::Value>(&output) else {
+            return Verification::Failed("the transport did not return valid protocol output");
+        };
+        if response["status"].as_str() != Some("ok") {
+            return Verification::Failed("the transport did not report a usable registry");
+        }
+        match response["texts"][0].as_str() {
+            Some(SYNTHETIC_PLACEHOLDER) => {}
+            _ => {
+                return Verification::Failed(
+                    "the transport did not return the expected replacement",
+                );
+            }
+        }
     }
-    match response["texts"][0].as_str() {
-        Some(SYNTHETIC_PLACEHOLDER) => Verification::Passed,
-        _ => Verification::Failed("the transport did not return the expected replacement"),
-    }
+    Verification::Passed
 }
 
 #[cfg(test)]
@@ -333,8 +352,7 @@ mod tests {
                 "the plugin must not contain `{forbidden}`"
             );
         }
-        // It also must not reach for a V2 API.
-        assert!(!source.contains("/v2/"));
+        assert!(source.contains("async setup(ctx"));
     }
 
     #[test]
@@ -397,6 +415,28 @@ mod tests {
     }
 
     #[test]
+    fn legacy_templates_upgrade_but_edited_legacy_templates_are_preserved() {
+        let home = Home::new();
+        let mut state = State::default();
+        let legacy = render_template(LEGACY_TEMPLATE, &home.executable());
+        std::fs::write(plugin_file(&home.root), &legacy).expect("legacy plugin");
+        assert!(matches!(
+            home.inspect(&state).installed,
+            Installed::Outdated { .. }
+        ));
+        install(&home.root, &home.executable(), &mut state).expect("upgrade");
+        assert_eq!(home.inspect(&state).installed, Installed::Current);
+        let edited = format!("{legacy}\n// user edit\n");
+        std::fs::write(plugin_file(&home.root), &edited).expect("edited legacy plugin");
+        assert!(install(&home.root, &home.executable(), &mut state).is_err());
+        assert!(!remove(&home.root, &mut state).expect("preserve"));
+        assert_eq!(
+            std::fs::read_to_string(plugin_file(&home.root)).expect("read"),
+            edited
+        );
+    }
+
+    #[test]
     fn a_hand_written_file_with_that_name_is_preserved() {
         let home = Home::new();
         let contents = "export const Mine = async () => ({})\n";
@@ -448,9 +488,17 @@ mod tests {
         )
         .expect("write legacy plugin");
 
+        let directory = plugins_directory(&home.root).join("directory-plugin");
+        std::fs::create_dir(&directory).expect("V2 plugin directory");
+        std::fs::write(
+            directory.join("index.ts"),
+            "export default { id: 'other', setup() {} }\n",
+        )
+        .expect("V2 plugin entrypoint");
+
         let mut state = State::default();
         let conflicts = home.inspect(&state).conflicts;
-        assert_eq!(conflicts.len(), 2);
+        assert_eq!(conflicts.len(), 3);
         assert!(conflicts.iter().all(|conflict| !conflict.approved));
 
         let name = conflicts[0].command.clone();

@@ -335,11 +335,22 @@ mutation of unrelated files where the host supports file-based aggregation.
 
 ### OpenCode
 
-OpenCode is experimental. A small managed TypeScript file uses the documented V1
-plugin API and `Bun.spawn` with explicit argv, piped stdin/stdout, and a timeout.
-It supports `chat.message` and `tool.execute.after` only. Security semantics stay
-in Rust. No V2 plugin API, provider wrapper, or experimental full-context hook is
-part of V1.
+OpenCode remains experimental pending V2 host qualification. One managed,
+dependency-free TypeScript file provides the V1 server hooks and V2 default
+`id`/`setup` entrypoint. `Bun.spawn` uses explicit argv, piped stdin/stdout, and a
+five-second timeout. V1 covers `chat.message` and `tool.execute.after`; V2 covers
+`context`, `compaction`, `generate`, and `title` session requests. Field selection
+and copy-on-write belong in the plugin; all matching and source resolution stay
+in Rust. The internal transport retains version 1 and adds four event names so
+previously installed V1 plugins continue working without setup.
+
+V2 selects the current session's stable location directory and collects selected
+string fields into one ordered request. It commits outgoing copies only after a
+complete valid response, preserving stored history and opaque media objects.
+It does not add provider wrappers, transport hooks, caches, standalone generation
+interception, or prompt/tool-result persistence changes. Unchanged historical
+plugin templates remain available solely to establish installation ownership.
+See [ADR-0005](adr/0005-opencode-v2-coverage-boundary.md) and `LIM-016`.
 
 ## Failure Boundaries
 

@@ -213,7 +213,7 @@ V1 supports Linux (including WSL on Windows) and macOS on x86_64 and arm64.
 | Claude Code | **Production** | String values in successful tool results that Claude allows hooks to replace | Claude continues with the original content: fail open |
 | OpenAI Codex CLI | **EXPERIMENTAL** | Supported successful tool results; replacement becomes plain text and may lose structure | Codex continues with the original content: fail open |
 | GitHub Copilot CLI | **EXPERIMENTAL** | Transformed user prompts and successful text tool results | Copilot continues with the original content: fail open |
-| OpenCode | **EXPERIMENTAL** | New user text and successful standard tool output on the V1 plugin API | A detected problem stops that covered operation while the plugin is running |
+| OpenCode | **EXPERIMENTAL** | V1: new user text and successful tool text. V2: four session request hooks; compaction qualification blocked (see below) | A detected problem stops that covered operation while the plugin is running |
 
 Experimental integrations are functional and fixture-tested, but they are not
 part of the production support promise. 
@@ -230,6 +230,9 @@ boundary:
 - Claude, Codex, and Copilot fail open. If their hook crashes, times out, is
   disabled, or is bypassed, the coding agent may continue with the original text.
   OpenCode can stop a covered operation only after its plugin has loaded.
+  V2 remains experimental because OpenCode 2.3.2 can restore original checkpoint
+  text after the compaction hook. V2 does not rewrite stored history. See the
+  [V2 qualification record](docs/opencode-qualification.md).
 - ContextVeil does not stop local processes from reading or using credentials,
   and other coding-agent hooks may see the original content before redaction.
 - Short, common, or reference-shaped enrolled values can also match and replace

@@ -352,3 +352,194 @@ test("an incomplete global setup is surfaced as a warning toast", async () => {
   expect(client.toasts[0].body.variant).toBe("warning");
   expect(client.toasts[0].body.message).toContain("setup is incomplete");
 });
+
+const V2_EVENTS = ["context", "compaction", "generate", "title"];
+
+async function loadV2(binary = BINARY, root = workspace) {
+  const hooks: Record<string, (event: any) => Promise<void>> = {};
+  const plugin = (await import(instances.get(binary)!)).default;
+  expect(plugin.id).toBe("contextveil");
+  expect(plugin.server).toBeTypeOf("function");
+  await plugin.setup({
+    location: { directory: "/wrong-plugin-location" },
+    session: {
+      get: async () => ({ location: { directory: root } }),
+      hook: async (name: string, callback: any) => { hooks[name] = callback; },
+    },
+  });
+  expect(Object.keys(hooks)).toEqual(V2_EVENTS);
+  return hooks;
+}
+
+function v2Request(canary: string, tools = true) {
+  return {
+    sessionID: "session-id",
+    model: { providerID: "fixture", id: "model-id" },
+    system: [{ type: "text", text: `instructions ${canary}` }],
+    messages: [{
+      id: "message-id", role: "assistant",
+      content: [
+        { type: "text", text: `history ${canary}` },
+        { type: "reasoning", text: canary, encrypted: "opaque" },
+        { type: "tool-call", id: "call-id", name: "shell", input: { argument: canary } },
+        { type: "tool-result", id: "call-id", name: "shell", result: { type: "json", value: { nested: [canary, 17, null] } } },
+        { type: "tool-result", id: "failed", name: "shell", result: { type: "error", value: { message: canary } } },
+        { type: "tool-result", id: "mcp", name: "mcp", result: { type: "content", value: [
+          { type: "text", text: canary }, { type: "file", mime: "image/png", uri: "data:image/png;base64,AAAA", name: canary },
+        ] } },
+        { type: "compaction", provider: "fixture", text: canary },
+        { type: "media", filename: canary, media: { opaque: true } },
+        { type: "effort", effort: "high" },
+      ],
+    }],
+    ...(tools ? { tools: { shell: {
+      description: canary,
+      input: { type: "object", required: ["argument"], properties: {
+        argument: { type: "string", description: canary, default: canary, enum: [canary] },
+      }, $defs: { item: { title: canary } }, allOf: [{ description: canary }],
+        dependencies: { argument: { description: canary }, other: ["argument"] }, additionalProperties: false },
+    } } } : {}),
+    options: { temperature: 0.1 },
+  };
+}
+
+for (const event of V2_EVENTS) {
+  test(`V2 ${event} redacts selected fields, preserving history and protocol structure`, async () => {
+    const canary = `SSCANARY-V2-${crypto.randomUUID()}`;
+    enroll("PLUGIN_TOKEN", canary);
+    const hooks = await loadV2();
+    const request = v2Request(canary, event !== "title");
+    const stored = request.messages;
+    const original = JSON.stringify(request);
+    expect(original).toContain(canary);
+    await hooks[event](request);
+    expect(JSON.stringify(request)).not.toContain(canary);
+    expect(JSON.stringify(request)).toContain("<SECRET:PLUGIN_TOKEN>");
+    expect(JSON.stringify(stored)).toContain(canary);
+    expect(request.sessionID).toBe("session-id");
+    expect(request.messages[0].id).toBe("message-id");
+    expect(request.messages[0].content[2]).toMatchObject({ id: "call-id", name: "shell" });
+    expect(request.options).toEqual({ temperature: 0.1 });
+    if (event !== "title") {
+      expect(request.tools!.shell.input.required).toEqual(["argument"]);
+      expect(request.tools!.shell.input.properties.argument.type).toBe("string");
+      expect(request.tools!.shell.input.dependencies.other).toEqual(["argument"]);
+    }
+  });
+
+  test(`V2 ${event} aborts without partial mutation on registry malfunction`, async () => {
+    enrollInvalid();
+    const request = v2Request(CANARY, event !== "title");
+    const before = JSON.stringify(request);
+    const hooks = await loadV2();
+    await expect(hooks[event](request)).rejects.toThrow(/doctor/);
+    expect(JSON.stringify(request)).toBe(before);
+  });
+}
+
+test("V2 clean and unresolved requests retain their objects", async () => {
+  const root = enroll("PLUGIN_TOKEN", CANARY);
+  const hooks = await loadV2();
+  for (const unresolved of [false, true]) {
+    if (unresolved) delete process.env.PLUGIN_TOKEN;
+    const request = v2Request("clean text");
+    const messages = request.messages;
+    await hooks.context(request);
+    expect(request.messages).toBe(messages);
+  }
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("V2 preserves opaque fields and media instances even on intervention", async () => {
+  enroll("PLUGIN_TOKEN", CANARY);
+  class Media { bytes() { return 3; } }
+  const media = new Media();
+  const request: any = {
+    sessionID: "s", system: [], messages: [{ role: "assistant", native: { opaque: CANARY }, content: [
+      { type: "text", text: CANARY, providerMetadata: { opaque: CANARY } },
+      { type: "media", media, filename: "clean.png" },
+      { type: "reasoning", text: "clean", encrypted: CANARY },
+      { type: "compaction", provider: "fixture", encrypted: CANARY },
+    ] }], options: { untouched: CANARY },
+  };
+  await (await loadV2()).context(request);
+  expect(request.messages[0].content[0].text).toBe("<SECRET:PLUGIN_TOKEN>");
+  expect(request.messages[0].content[1].media).toBe(media);
+  expect(media.bytes()).toBe(3);
+  expect(request.messages[0].native.opaque).toBe(CANARY);
+  expect(request.messages[0].content[0].providerMetadata.opaque).toBe(CANARY);
+  expect(request.messages[0].content[2].encrypted).toBe(CANARY);
+  expect(request.messages[0].content[3].encrypted).toBe(CANARY);
+  expect(request.options.untouched).toBe(CANARY);
+});
+
+test("V2 resolves the event session location rather than the plugin instance location", async () => {
+  const root = enroll("OTHER_TOKEN", "unrelated-canary-value");
+  const project = join(root, "session-project");
+  mkdirSync(project);
+  writeFileSync(join(project, ".contextveil.toml"), 'version = 1\n[[secret]]\nsource = "env"\nname = "SESSION_TOKEN"\n');
+  process.env.SESSION_TOKEN = CANARY;
+  const request = v2Request(CANARY);
+  await (await loadV2(BINARY, project)).context(request);
+  expect(JSON.stringify(request)).not.toContain(CANARY);
+  expect(JSON.stringify(request)).toContain("<SECRET:SESSION_TOKEN>");
+  await expect((await loadV2(BINARY, "relative" )).context(v2Request(CANARY))).rejects.toThrow(/prepare/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("V2 rejects malformed covered content and unknown variants without echoing it", async () => {
+  const hooks = await loadV2(MISSING_BINARY);
+  for (const bad of [null, { system: [], messages: null },
+    { system: [], messages: [{ content: [{ type: CANARY, text: CANARY }] }] },
+    { system: [{ type: "text", text: 7 }], messages: [] },
+  ]) {
+    let caught: unknown;
+    try { await hooks.context(bad); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(Error);
+    expect(String(caught)).not.toContain(CANARY);
+  }
+});
+
+test("V2 rejects invalid subprocess responses and leaves the whole request unchanged", async () => {
+  enroll("PLUGIN_TOKEN", CANARY);
+  const request = v2Request(CANARY);
+  const before = JSON.stringify(request);
+  for (const response of [null, { version: 1, status: "ok", changed: true, texts: [false] },
+    { version: 1, status: "malfunction", message: CANARY },
+  ]) {
+    writeFileSync(invalidProtocolStub, `#!/bin/sh\nprintf '%s' '${JSON.stringify(response)}'\n`, { mode: 0o755 });
+    const hooks = await loadV2(invalidProtocolStub);
+    let caught: unknown;
+    try { await hooks.context(request); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(Error);
+    expect(String(caught)).not.toContain(CANARY);
+    expect(JSON.stringify(request)).toBe(before);
+  }
+});
+
+test("V2 handles shared JSON/schema objects but rejects genuine cycles", async () => {
+  enroll("PLUGIN_TOKEN", CANARY);
+  const hooks = await loadV2();
+  const request: any = v2Request(CANARY);
+  const shared = { text: CANARY };
+  request.messages[0].content[2].input = { first: shared, second: shared };
+  const sharedSchema = { type: "string", description: CANARY };
+  request.tools.shell.input = { properties: { first: sharedSchema, second: sharedSchema } };
+  await hooks.context(request);
+  expect(JSON.stringify(request)).not.toContain(CANARY);
+  expect(shared.text).toBe(CANARY);
+  expect(sharedSchema.description).toBe(CANARY);
+  for (const schema of [false, true]) {
+    const cyclic: any = {};
+    cyclic[schema ? "items" : "self"] = cyclic;
+    if (schema) request.tools.shell.input = cyclic;
+    else request.messages[0].content[2].input = cyclic;
+    await expect(hooks.context(request)).rejects.toThrow(/prepare/);
+    request.messages[0].content[2].input = {};
+  }
+});
+
+test("V2 checks the registry even when no text is selected", async () => {
+  enrollInvalid();
+  await expect((await loadV2()).title({ sessionID: "s", system: [], messages: [] })).rejects.toThrow(/doctor/);
+});

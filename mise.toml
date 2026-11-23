@@ -44,6 +44,10 @@ run = [
   "bash scripts/with-test-tmp.sh bun test tests/opencode",
 ]
 
+[tasks.qualify-opencode]
+description = "Optional paid OpenCode V2 qualification with Luna (requires existing authentication)"
+run = ["cargo build --locked", "bun scripts/opencode-qualify.ts"]
+
 [tasks.check]
 description = "Routine local quality gate"
 depends = ["format-check", "lint", "test", "test-plugin", "fuzz-regressions"]

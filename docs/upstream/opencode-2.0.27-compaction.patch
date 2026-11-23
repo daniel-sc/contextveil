@@ -1,0 +1,462 @@
+diff --git a/packages/core/src/session/compaction.ts b/packages/core/src/session/compaction.ts
+index 7afb5a469d..e6b3642f7b 100644
+--- a/packages/core/src/session/compaction.ts
++++ b/packages/core/src/session/compaction.ts
+@@ -282,13 +282,15 @@ export const layer = Layer.effect(
+       const prompt = buildPrompt(previous !== undefined, previous?.summary.includes(LEGACY_HEADING) ?? false)
+       const headings = SUMMARY_TEMPLATE.split("\n").filter((line) => line.startsWith("##"))
+       const filled = (text: string) => text.split("\n").some((line) => headings.includes(line.trim()))
+-      const prepared = yield* prepare(context, split.older, budget)
++      const build = (target?: number) => prepare(context, split.older, budget, undefined, target)
+ 
+       // Hooks saw the request without the summary prompt, so it is appended here. A reply that ignores the
+       // template gets one reminder before it counts as a failure.
+-      const send = (request: LLMRequest) =>
++      const send = (prepared: Prepared) =>
+         Effect.gen(function* () {
+-          const prompted = LLMRequest.update(request, { messages: [...request.messages, Message.user(prompt)] })
++          const prompted = LLMRequest.update(prepared.request, {
++            messages: [...prepared.request.messages, Message.user(prompt)],
++          })
+           const reply = yield* stream(context, prompted, prepared.options)
+           if (filled(reply.text)) return { ...reply, recent: split.recent }
+ 
+@@ -306,7 +308,7 @@ export const layer = Layer.effect(
+         })
+ 
+       const overhead = Token.estimate(prompt) + Token.estimate(NUDGE)
+-      return yield* deliver(trigger, prepared, split.recent, budget - overhead, send)
++      return yield* deliver(trigger, build, split.recent, budget - overhead, send)
+     })
+ 
+     /**
+@@ -330,17 +332,11 @@ export const layer = Layer.effect(
+       if (!context.messages.some(messageToText)) return yield* Effect.fail(NOTHING_TO_COMPACT)
+       const unsupported = (message: string) =>
+         Effect.fail<Failure>({ error: { type: "provider.unsupported-operation", message } })
+-      const prepared = yield* prepare(context, context.messages, budget, "session")
++      const build = (target?: number) => prepare(context, context.messages, budget, "session", target)
+ 
+       // History is selected before request hooks, so a hook that reroutes the request cannot be honored here.
+       const provenance = SessionProviderContext.provenance(context.model)
+       if (!provenance) return yield* unsupported("Provider compaction requires a stable, configured endpoint")
+-      const routed = SessionProviderContext.provenance({ model: prepared.request.model, ref: context.model.ref })
+-      if (!SessionProviderContext.compatible(provenance, routed)) {
+-        return yield* unsupported(
+-          "Provider compaction requires the endpoint in provider/model settings, not a model.request rewrite",
+-        )
+-      }
+ 
+       const toResult = (window: ReadonlyArray<Message>, usage: Usage | undefined) =>
+         spend(context.session.id, usage && SessionUsage.record(usage, context.model.cost)).pipe(
+@@ -351,7 +347,15 @@ export const layer = Layer.effect(
+           }),
+         )
+ 
+-      const send = (request: LLMRequest) => {
++      const send = (prepared: Prepared) => {
++        const request = prepared.request
++        const routed = SessionProviderContext.provenance({ model: prepared.request.model, ref: context.model.ref })
++        if (!SessionProviderContext.compatible(provenance, routed)) {
++          return unsupported(
++            "Provider compaction requires the endpoint in provider/model settings, not a model.request rewrite",
++          )
++        }
++
+         if (LLMClient.canCompact(request, { mechanism: "trigger" })) {
+           return Effect.gen(function* () {
+             const history = yield* SessionHistory.load(db, context.session.id, "local").pipe(Effect.orDie)
+@@ -368,7 +372,7 @@ export const layer = Layer.effect(
+         return unsupported(`Native compaction is not supported for ${request.model.provider}/${request.model.route.id}`)
+       }
+ 
+-      return yield* deliver(trigger, prepared, "", budget, send)
++      return yield* deliver(trigger, build, "", budget, send)
+     })
+ 
+     /**
+@@ -383,34 +387,40 @@ export const layer = Layer.effect(
+      */
+     const deliver = Effect.fnUntraced(function* (
+       trigger: Trigger,
+-      prepared: Prepared,
++      build: (target?: number) => Effect.Effect<Prepared | undefined>,
+       recent: string,
+       target: number,
+-      send: (request: LLMRequest) => Effect.Effect<Result, AIError | Failure>,
++      send: (prepared: Prepared) => Effect.Effect<Result, AIError | Failure>,
+     ): Effect.fn.Return<Result, Failure> {
+       const context = trigger.context
+       // The runner opened the manual compaction's message when it delivered the `/compact` item.
+       if (trigger.reason !== "manual") {
+         yield* bus.publish(SessionEvent.Compaction.Started, { sessionID: context.session.id, reason: "auto", recent })
+       }
+-      if (prepared.event.result) return yield* fromHook(context, prepared.event.result, recent)
+ 
+       const policy = yield* SessionRunnerRetry.policy(context.session.id)
+       let rejections = 0
+       let rejected: number | undefined
+-      let asText = false
++      let reduced = false
++      let prepared = yield* build()
++      if (prepared?.event.result) return yield* fromHook(context, prepared.event.result, recent)
++      let rebuild = prepared !== undefined && estimateRequest(prepared.request) > target
+ 
+       while (true) {
+-        const fits = !asText && estimateRequest(prepared.request) <= target
+-        const request = fits
+-          ? prepared.request
+-          : (flattenAndDropOldest(prepared.request, context, target) ??
+-            (rejections > 0
+-              ? undefined
+-              : asText
+-                ? flattenAndDropOldest(prepared.request, context, Number.POSITIVE_INFINITY)
+-                : prepared.request))
+-        if (!request) {
++        if (rebuild) {
++          // Rebuild from history, then run hooks on the reduced draft. Earlier hook edits must not accumulate.
++          const next = yield* build(target)
++          if (next) {
++            prepared = next
++            reduced = true
++          } else if (rejections > 0) {
++            prepared = undefined
++          } else if (reduced) {
++            prepared = yield* build(Number.POSITIVE_INFINITY)
++          }
++          rebuild = false
++        }
++        if (!prepared) {
+           return yield* Effect.fail<Failure>({
+             error: {
+               type: "compaction.failed",
+@@ -419,16 +429,19 @@ export const layer = Layer.effect(
+             },
+           })
+         }
++        if (prepared.event.result) return yield* fromHook(context, prepared.event.result, recent)
++        const request = prepared.request
+ 
+-        const attempt = yield* Effect.result(send(request))
++        const attempt = yield* Effect.result(send(prepared))
+         if (Result.isSuccess(attempt)) return attempt.success
+         const cause = attempt.failure
+         if (!(cause instanceof AIError)) return yield* Effect.fail(cause)
+         const error = toSessionError(cause)
+         const tooLarge = cause.reason._tag === "InvalidRequest" && cause.reason.classification === "payload-too-large"
+ 
+-        if (tooLarge && request === prepared.request) {
+-          asText = true
++        if (tooLarge && !reduced) {
++          reduced = true
++          rebuild = true
+           continue
+         }
+ 
+@@ -438,6 +451,7 @@ export const layer = Layer.effect(
+           rejected ??= estimateRequest(request)
+           target = Math.floor(rejected * step)
+           rejections++
++          rebuild = true
+           continue
+         }
+ 
+@@ -462,7 +476,11 @@ export const layer = Layer.effect(
+      * outputs. Only if it still does not fit are whole exchanges dropped, oldest first. Undefined when even the
+      * newest exchange does not fit.
+      */
+-    const flattenAndDropOldest = (request: LLMRequest, context: SessionContext.Loaded, target: number) => {
++    const flattenAndDropOldest = (
++      request: Pick<LLMRequest, "system" | "tools" | "messages">,
++      context: SessionContext.Loaded,
++      target: number,
++    ) => {
+       const previous = previousCompaction(context.messages)
+       const end =
+         request.messages.findLastIndex(
+@@ -471,8 +489,7 @@ export const layer = Layer.effect(
+             message.content.some((part) => part.type === "compaction"),
+         ) + 1
+       const summary = previous !== undefined && !SessionProviderContext.isCheckpoint(previous) ? previous : undefined
+-      // TODO: Read the previous summary from the hooked request once it no longer merges summary and recent into one
+-      // message. Until then it is rebuilt from storage, which drops a compaction hook's edits to that message.
++      // This is a fresh draft from history; request hooks run after it has been reduced.
+       const lead = summary
+         ? toLLMMessages([{ ...summary, recent: "" }], context.model.ref)
+         : request.messages.slice(0, end)
+@@ -498,9 +515,7 @@ export const layer = Layer.effect(
+         Token.estimate(note(exchanges.length))
+       const kept = exchanges.slice(oldestToDrop(exchanges, (text) => Token.estimate(text) + 1, room))
+       if (kept.length === 0) return undefined
+-      return LLMRequest.update(request, {
+-        messages: [...lead, Message.user(note(exchanges.length - kept.length) + kept.join("\n\n"))],
+-      })
++      return [...lead, Message.user(note(exchanges.length - kept.length) + kept.join("\n\n"))]
+     }
+ 
+     const stream = (context: SessionContext.Loaded, request: LLMRequest, options: StreamOptions) => {
+@@ -565,11 +580,11 @@ export const layer = Layer.effect(
+     }
+ 
+     /**
+-     * The conversation as the runner would send it, after request hooks.
++     * The conversation as the runner would send it, optionally reduced, then passed through request hooks.
+      *
+      * The output limit leaves room for `budget`, the most `deliver` sends. The request prepared here can be larger
+-     * when the conversation overshot the threshold, and is only shrunk to fit after hooks have seen it, so sizing the
+-     * output to it would leave next to no room. A prompt the estimate undersells is rejected and shrunk like any
++     * when the conversation overshot the threshold. Reduced attempts are rebuilt from history before hooks run, so
++     * sizing the output to the full conversation would leave next to no room. An underestimated prompt is shrunk like any
+      * other.
+      */
+     const prepare = (
+@@ -577,8 +592,14 @@ export const layer = Layer.effect(
+       messages: ReadonlyArray<SessionMessage.Info>,
+       budget: number,
+       webSocket?: "session",
++      target?: number,
+     ) => {
+       const base = transcript(context, messages)
++      if (target !== undefined) {
++        const reduced = flattenAndDropOldest({ ...base, tools: context.tools.definitions }, context, target)
++        if (!reduced) return Effect.succeed(undefined)
++        base.messages = reduced
++      }
+       return requests.compaction({
+         session: context.session,
+         agent: context.agent.id,
+diff --git a/packages/core/test/session-compaction.test.ts b/packages/core/test/session-compaction.test.ts
+index 93ff3d5fed..adc133b90c 100644
+--- a/packages/core/test/session-compaction.test.ts
++++ b/packages/core/test/session-compaction.test.ts
+@@ -1,5 +1,14 @@
+ import { expect, test } from "bun:test"
+-import { GenerationOptions, LLMClient, LLMEvent, LanguageModel, ToolDefinition, type LLMRequest } from "@opencode/ai"
++import {
++  AIError,
++  InvalidRequestError,
++  GenerationOptions,
++  LLMClient,
++  LLMEvent,
++  LanguageModel,
++  ToolDefinition,
++  type LLMRequest,
++} from "@opencode/ai"
+ import { OpenAIChat } from "@opencode/ai/protocols"
+ import { Database } from "@opencode/core/database/database"
+ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+@@ -33,6 +42,8 @@ import { asc, eq } from "drizzle-orm"
+ import { testEffect } from "./lib/effect"
+ 
+ let requests: LLMRequest[] = []
++let rejection: "context-overflow" | "payload-too-large" | undefined
++let repeatRejection = false
+ const model = LanguageModel.make({
+   id: "summary-model",
+   provider: "test",
+@@ -51,6 +62,11 @@ const cost = [
+ const client = Layer.mock(LLMClient.Service)({
+   stream: (request: LLMRequest) => {
+     requests.push(request)
++    if (rejection) {
++      const classification = rejection
++      if (!repeatRejection) rejection = undefined
++      return Stream.fail(new AIError({ reason: new InvalidRequestError({ message: "Too large", classification }) }))
++    }
+     return Stream.make(
+       LLMEvent.textDelta({ id: "summary", text: "## Objective\n- manual summary" }),
+       LLMEvent.stepFinish({
+@@ -604,3 +620,146 @@ it.effect("forked session compaction reuses the fork root prompt cache key", ()
+     expect(requests[0]?.promptCacheKey).toBe(rootID)
+   }),
+ )
++
++for (const scenario of [
++  {
++    name: "with a hook result after reduction",
++    recent: 30_000,
++    window: 10_000,
++    retained: false,
++    supplied: true,
++  },
++  {
++    name: "with repeated rejection and hook growth",
++    recent: 1,
++    window: 200_000,
++    retained: true,
++    rejection: "payload-too-large",
++    repeated: true,
++  },
++  { name: "without shrinking", recent: 1, window: 200_000, retained: true },
++  {
++    name: "after payload rejection",
++    recent: 1,
++    window: 200_000,
++    retained: true,
++    rejection: "payload-too-large",
++  },
++  {
++    name: "dropping recent before newer exchanges",
++    recent: 30_000,
++    window: 10_000,
++    retained: false,
++  },
++  {
++    name: "after context overflow",
++    recent: 12_000,
++    window: 200_000,
++    retained: false,
++    rejection: "context-overflow",
++  },
++] as const) {
++  it.effect(`compaction preserves checkpoint hook edits ${scenario.name}`, () =>
++    Effect.gen(function* () {
++      requests = []
++      rejection = "rejection" in scenario ? scenario.rejection : undefined
++      repeatRejection = "repeated" in scenario
++      const canary = `COMPACTION-TEST-CANARY-${crypto.randomUUID()}`
++      const session = yield* insertSession(Session.ID.create())
++      const hooks = yield* PluginHooks.Service
++      const compaction = yield* SessionCompaction.Service
++      yield* compaction.transform((editor) => editor.configure({ keep: 0 }))
++      const checkpoint = Schema.decodeUnknownSync(SessionMessage.CompactionCompleted)({
++        id: SessionMessage.ID.create(),
++        type: "compaction",
++        status: "completed",
++        reason: "auto",
++        summary: `SUMMARY ${canary}`,
++        recent: `RECENT ${canary} ${"old ".repeat(scenario.recent)}`,
++        time: { created: 0, completed: 0 },
++      })
++      const messages = [
++        checkpoint,
++        ...["OLDER-EXCHANGE", "NEWER-EXCHANGE", "Tail retained outside the summary request"].map((text, index) =>
++          SessionMessage.User.make({
++            id: SessionMessage.ID.create(),
++            type: "user",
++            text,
++            time: { created: DateTime.makeUnsafe(index + 1) },
++          }),
++        ),
++      ]
++      let calls = 0
++      let modelCalls = 0
++      yield* hooks.register("session", "model.request", (event) =>
++        Effect.sync(() => {
++          expect(event.headers["x-hook-attempt"]).toBeUndefined()
++          event.headers["x-hook-attempt"] = String(++modelCalls)
++        }),
++      )
++      yield* hooks.register("session", "compaction", (event) =>
++        Effect.sync(() => {
++          expect(JSON.stringify(event.messages).includes(canary)).toBe(true)
++          event.messages = JSON.parse(JSON.stringify(event.messages).replaceAll(canary, "[redacted]"))
++          expect(event.system.some((part) => part.text === "hook annotation")).toBe(false)
++          event.system.push({ type: "text", text: "hook annotation" })
++          expect(event.result).toBeUndefined()
++          expect(event.options.temperature).toBeUndefined()
++          event.options.temperature = ++calls / 10
++          if (repeatRejection) event.system.push({ type: "text", text: "growth ".repeat(20_000) })
++          if ("supplied" in scenario && calls === 2) {
++            event.result = { summary: "## Objective\n- supplied by final hook" }
++          }
++        }),
++      )
++      const context = loaded(session, messages)
++      const outcome = yield* compaction.compact({
++        reason: "manual",
++        inputID: SessionMessage.ID.create(),
++        context: { ...context, model: { ...context.model, limit: { context: scenario.window, output: 2000 } } },
++      })
++      if ("repeated" in scenario) {
++        rejection = undefined
++        repeatRejection = false
++        expect(outcome.status).toBe("failed")
++        expect(requests).toHaveLength(5)
++        expect(calls).toBe(5)
++      } else {
++        expect(outcome.status).toBe("completed")
++      }
++      expect(modelCalls).toBe(calls)
++      expect(JSON.stringify(requests).includes(canary)).toBe(false)
++      for (const request of requests) {
++        expect(request.system.filter((part) => part.text === "hook annotation")).toHaveLength(1)
++        expect(request.generation?.temperature).toBe(Number(request.http?.headers?.["x-hook-attempt"]) / 10)
++      }
++      if ("supplied" in scenario) {
++        expect(calls).toBe(2)
++        expect(requests).toHaveLength(0)
++        const store = yield* SessionStore.Service
++        expect(JSON.stringify(yield* store.context(session.id))).toContain("supplied by final hook")
++        return
++      }
++      if ("repeated" in scenario) return
++      expect(calls).toBe(scenario.name === "without shrinking" ? 1 : 2)
++      expect(requests).toHaveLength("rejection" in scenario ? 2 : 1)
++      const sent = JSON.stringify(requests.at(-1)?.messages)
++      if (scenario.name === "without shrinking") {
++        const original = SessionModelRequest.baseTranscript({
++          ...context,
++          agent: context.agent.info,
++          messages: messages.slice(0, -1),
++        })
++        expect(requests[0].messages.slice(0, -1)).toEqual(
++          JSON.parse(JSON.stringify(original.messages).replaceAll(canary, "[redacted]")),
++        )
++      }
++      expect(sent.includes("SUMMARY [redacted]")).toBe(true)
++      expect(sent.includes("RECENT [redacted]")).toBe(scenario.retained)
++      expect(sent.includes("OLDER-EXCHANGE")).toBe(true)
++      expect(sent.includes("NEWER-EXCHANGE")).toBe(true)
++      expect(checkpoint.summary.includes(canary)).toBe(true)
++      expect(checkpoint.recent.includes(canary)).toBe(true)
++    }),
++  )
++}
+diff --git a/packages/core/test/session-native-compaction.test.ts b/packages/core/test/session-native-compaction.test.ts
+index 35e4b3fc4c..dfcdbdeb17 100644
+--- a/packages/core/test/session-native-compaction.test.ts
++++ b/packages/core/test/session-native-compaction.test.ts
+@@ -425,6 +425,27 @@ it.live("rejects request-hook route rewrites before provider compaction", () =>
+   }),
+ )
+ 
++it.live("rechecks native routing after preparing a reduced request", () =>
++  Effect.gen(function* () {
++    const fixture = yield* setup()
++    yield* fixture.prompt("Old exchange ".repeat(1000))
++    yield* fixture.prompt("Newest exchange")
++    fixture.state.overflow = true
++    let calls = 0
++    yield* fixture.hooks.register("session", "model.request", (event) =>
++      Effect.sync(() => {
++        if (++calls === 2) event.baseURL = "https://another.example/v1"
++      }),
++    )
++    expect(yield* fixture.compact).toMatchObject({
++      status: "failed",
++      error: { type: "provider.unsupported-operation" },
++    })
++    expect(calls).toBe(2)
++    expect(fixture.state.calls).toBe(1)
++  }),
++)
++
+ test("retained user budget counts attachments and drops whole oldest messages", () => {
+   const model = SessionRunnerModel.resolved(OpenAI.responses("gpt-5.4-mini"), {
+     capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+diff --git a/services/www/src/docs/content/build/plugins/index.mdx b/services/www/src/docs/content/build/plugins/index.mdx
+index 4d30eb234f..abf7d8e5a2 100644
+--- a/services/www/src/docs/content/build/plugins/index.mdx
++++ b/services/www/src/docs/content/build/plugins/index.mdx
+@@ -1346,7 +1346,9 @@ differently:
+ - `context` runs for the agent loop, including tool-driven continuations.
+ - `compaction` runs for checkpoint summaries. `messages` is the transcript being summarized; OpenCode appends its
+   summary prompt after hooks run. Set `result` to record the compaction yourself and skip the model call; it takes the
+-  same fields as a completed compaction message.
++  same fields as a completed compaction message. If the transcript must be reduced to fit, `compaction` and
++  `model.request` run again on a fresh reduced draft, without edits from earlier attempts. A supplied `result`
++  completes compaction immediately; it is not reduced or carried into another attempt.
+ - `generate` runs for transient `ctx.session.generate` calls.
+ - `title` runs for title generation. It has no `agent` or `tools`. Set `result` to supply the title yourself.
+ 

@@ -31,6 +31,18 @@ pub enum Event {
     /// Successful standard textual tool output.
     #[serde(rename = "tool.execute.after")]
     ToolExecuteAfter,
+    /// V2 agent-loop request.
+    #[serde(rename = "context")]
+    Context,
+    /// V2 compaction request.
+    #[serde(rename = "compaction")]
+    Compaction,
+    /// V2 transient session generation.
+    #[serde(rename = "generate")]
+    Generate,
+    /// V2 session title request.
+    #[serde(rename = "title")]
+    Title,
 }
 
 /// One request from the plugin.

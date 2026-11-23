@@ -20,8 +20,8 @@ network exfiltration, unknown secrets, transformed values, host bypass, or
 content paths outside the current support matrix.
 
 **SEC-003** Runtime resolution and redaction MUST make no network calls.
-Installation and an explicitly selected Claude live canary are the only V1
-network-capable ContextVeil workflows.
+Installation, an explicitly selected Claude live canary, and optional OpenCode
+V2 live qualification are the only V1 network-capable ContextVeil workflows.
 
 **SEC-004** ContextVeil MUST NOT persist resolved source values, include them in
 configuration, or expose them in diagnostics, logs, telemetry, test artifacts,
@@ -1004,20 +1004,52 @@ the local timeline.
 ## 15. OpenCode Adapter
 
 **OCO-001** Setup MUST manage one ContextVeil-owned TypeScript plugin file under
-`~/.config/opencode/plugins/`. The plugin MUST invoke the absolute Rust binary
-with one JSON request on stdin and one JSON response on stdout.
+`~/.config/opencode/plugins/`. The file MUST support the V1 server hooks and the
+V2 default `id`/`setup` definition without runtime package installation. The
+plugin MUST invoke the absolute Rust binary with one JSON request on stdin and
+one JSON response on stdout. Earlier unchanged managed templates MUST be
+recognized for upgrade; edited files MUST be preserved.
 
-**OCO-002** The plugin MUST use the documented V1 `chat.message` hook to redact
-new textual user-message parts and `tool.execute.after` to redact successful
-standard textual tool output.
+**OCO-002** On OpenCode V1 the plugin MUST retain `chat.message` redaction of
+new textual user-message parts and `tool.execute.after` redaction of successful
+standard textual tool output. On V2 it MUST register `context`, `compaction`,
+`generate`, and `title` session hooks. These hooks MUST redact outgoing copies,
+not persisted history, using the same Rust core and fresh registry per request.
+V2 project selection MUST use the event session's stable location directory.
+Failure to obtain that location MUST abort rather than select another project.
 
-**OCO-003** The plugin MUST show one safe named/count TUI notification when
-redaction occurs and the host notification API is available.
+V2 selected fields are system text; message text, reasoning text, plaintext
+compaction text, and media filenames; string values in historical tool inputs
+and JSON/text/error results; text and filenames in tool-result content; and tool
+descriptions plus schema `title`, `description`, `$comment`, `default`, `examples`,
+`const`, and `enum` string values. Schema traversal MUST follow standard nested
+schema keywords, preserving property names, required-property names, references,
+types, formats, and other structural fields. Object keys, IDs, tool names,
+provider metadata, opaque native content, encrypted content, binary media and
+attachment URLs/bytes MUST remain unchanged. Unknown message-part/result types
+or malformed covered fields MUST abort with a value-free protocol diagnostic.
+The plugin MUST apply no partial mutation if redaction fails.
 
-**OCO-004** V1 MUST NOT implement OpenCode V2 plugin APIs, provider/language-model
-wrappers, experimental full-history/system transforms, tool-definition
-rewriting, or claims for failed tools, generic MCP output gaps, attachments,
-existing history, or auxiliary model calls.
+**OCO-003** The plugin MUST show one safe named/count notification on intervention
+when the host offers an applicable notification API. V2 currently offers none on
+its server plugin context; it MUST NOT inject a notification into model messages
+or persist runtime logs as a substitute.
+
+**OCO-004** V2 MUST NOT add prompt-admission, tool-execution, provider/transport
+wrappers, or standalone `ctx.generate.text` interception. The four hooks cover
+session requests only, subject to documented host behavior. V1 retains its
+narrower coverage. V2 MUST remain experimental until the post-hook compaction
+restoration defect in `LIM-016` is resolved and host-level qualification proves
+the covered requests and abort-on-malfunction behavior. An upstream patch alone
+MUST NOT be represented as a fix in installed OpenCode releases.
+
+**OCO-005** Optional live V2 qualification MAY use Luna with generated canaries,
+covering the four request paths, resume, and malfunction behavior. Evidence MUST
+include outgoing request inspection, not only model replies. Offline adapter
+fixtures remain in routine CI. Focused upstream regression tests MAY qualify a
+host fix without introducing a general fake-provider framework. Host versions
+MUST be recorded as evidence only; an untested version alone MUST NOT cause a
+runtime warning or gate.
 
 ## 16. Status And Doctor
 
@@ -1052,8 +1084,10 @@ present. A reply containing neither MUST be reported as having proven nothing:
 visible and never a pass, but not a health failure, because it diagnoses no
 condition that prevents protection (`DIA-008`).
 
-**DIA-006** Codex, Copilot, and OpenCode MUST have offline synthetic verification
-only in V1. Passing verification MUST NOT remove their experimental label.
+**DIA-006** Codex, Copilot, and OpenCode status/doctor MUST use offline synthetic
+verification only. OpenCode verification MUST exercise all six internal hook
+events (two V1 and four V2). Passing verification MUST NOT remove an experimental
+label; optional V2 release qualification is separate (`OCO-005`).
 
 **DIA-007** A previous successful verification MUST NOT be represented as a
 permanent certificate.

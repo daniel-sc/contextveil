@@ -267,38 +267,55 @@ output as uncovered, and keep competing hooks in `~/.copilot/hooks/` so
 case, clean and malformed input, the progress summary, and the warning channel.
 Installation and removal tests assert that unrelated hook files are untouched.
 
-### LIM-016: OpenCode V1 API Only
+### LIM-016: OpenCode V2 Qualification And V1 Coverage
 
-**Reality:** The adapter uses documented V1 `chat.message` and
-`tool.execute.after` hooks. It does not use the V2 plugin API, experimental full
-context transforms, provider wrappers, generic MCP special cases, failed-tool
-paths, attachments, existing history, or auxiliary model requests. Throw/abort
-behavior applies only after the plugin has loaded and is executing; load failure,
-disablement, and host bypass cannot be made fail-closed by the plugin.
+**Reality:** OpenCode remains experimental. The managed plugin supports V1
+`chat.message` and successful textual `tool.execute.after` results, and V2
+`context`, `compaction`, `generate`, and `title` session request hooks. V2 edits
+outgoing copies; original prompts, tool results, and local history remain intact.
+Only current resolved values are matched on replay, so an old value whose source
+has rotated is no longer protected. V1 failed tools remain uncovered.
 
-Two further host-specific limits apply, verified against OpenCode 1.18.18:
+OpenCode 2.3.2 rebuilds part of a previous checkpoint from stored history after
+the compaction hook when shrinking a request. The current v2.4.0 source tag
+retains the same behavior. This can restore a redacted value. A deterministic
+upstream regression reproduces the leak; a focused patch passes it but has not
+been applied to released hosts. This blocks V2 production qualification. See
+[the evidence and patch](opencode-qualification.md).
 
-- `tool.execute.after` runs only after a tool returns successfully, so a tool that
-  throws is not covered at all;
-- OpenCode discovers plugins one level deep in `plugin/` and `plugins/`, and gives
-  no static way to tell which hooks another plugin registers. Setup therefore lists
-  every other plugin file for approval by name rather than by behavior, and cannot
-  tell whether one of them also rewrites the same content.
+V2 excludes standalone `ctx.generate.text`, opaque native/provider metadata,
+encrypted content, attachment URLs/bytes, and arbitrary plugin/network calls.
+Later plugins, raw request overlays, and host synthesis after the hooks may add
+content not seen by ContextVeil. Unknown content variants abort safely rather
+than silently adding coverage. V2's server context has no notification API, so
+interventions currently produce no TUI toast; they do not create logs or model
+messages instead.
 
-`Bun.spawn` inherits a snapshot of the environment taken when the host process
-started rather than the live environment, so the plugin forwards the current
-environment explicitly. Environment rotation still requires restarting the
-harness (`LIM-007`).
+Setup lists other plugin files and directories in global `plugin/` and
+`plugins/` for approval. It cannot determine their registered hooks, and plugins
+configured in `opencode.json(c)`, project plugins, and other configuration roots
+are outside this static conflict inspection. The plugin lives in the documented
+`~/.config/opencode/plugins/` location; customized host configuration roots must
+load it explicitly. Load failure, disablement, host bypass, and later mutations
+cannot be made fail-closed by an executing plugin.
 
-**Impact:** OpenCode coverage is broad enough to be useful but incomplete and
-version-sensitive. A malfunction detected by an executing plugin aborts the
-covered operation; a plugin that never loads cannot intervene.
+**Impact:** Four-hook interception does not yet justify an unrestricted
+production claim. V2 outgoing-only protection does not sanitize local storage,
+and ordinary compaction can reach the known host defect when shrinking/retrying.
 
-**Workaround:** Keep the integration explicitly experimental and rerun doctor
-after OpenCode upgrades.
+**Workaround:** Keep V2 experimental pending a qualified host fix; use the
+production Claude integration when that assurance is required. Review other
+plugins and avoid relying on stored-history protection. Run doctor after
+configuration changes; it checks our transport, not the host's complete dispatch.
 
-**Verification:** Tests target only the two documented hook paths and assert
-abort-on-malfunction behavior.
+**Verification:** Plugin fixtures cover both V1 paths and all four V2 paths,
+copy-on-write, malformed content, project selection, subprocess failures, and
+canary absence. Historical templates are recognized exactly for migration.
+Optional `mise run qualify-opencode` uses Luna and records outgoing HTTP request
+observations without bodies or headers. The upstream compaction regression and
+qualification scope are recorded separately. `Bun.spawn` explicitly forwards
+the current process environment; environment rotation still requires restart
+(`LIM-007`).
 
 ### LIM-017: Hook Composition Is Not A Security Boundary
 
@@ -319,7 +336,7 @@ delete or reorder unrelated hooks.
 ### LIM-018: No Harness Version Gate
 
 **Reality:** V1 performs no minimum or maximum host version checks despite hook
-APIs evolving independently.
+APIs evolving independently. An untested version alone produces no warning.
 
 **Impact:** A host upgrade can change behavior before ContextVeil's compatibility
 fixtures are updated.

@@ -5,6 +5,21 @@ Release notes are concise, user-facing changes. See
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [1.2.0] - 2026-11-23
+
+### Added
+
+- Add experimental OpenCode V2 session-request redaction while retaining V1
+  integration support. V2 covers outgoing text without changing stored history;
+  production qualification remains blocked by an upstream compaction defect.
+- Add optional Luna qualification and a focused upstream compaction regression
+  and patch.
+- Qualify the managed plugin against released OpenCode V2.3.2 for ordinary HTTP
+  session requests; compaction shrink and overflow recovery remain subject to
+  the documented upstream limitation.
+
 ## [1.1.0] - 2026-09-16
 
 ### Added
